@@ -8,25 +8,25 @@ import (
 )
 
 type ImageMeta struct {
-	ID        string    `json:"id"`
-	Path      string    `json:"path"`
-	Width     int       `json:"width"`
-	Height    int       `json:"height"`
-	Title     string    `json:"title"`
-	Artist    string    `json:"artist"`
-	ArtistID  string    `json:"artist_id"`
+	ID           string    `json:"id"`
+	Path         string    `json:"path"`
+	Width        int       `json:"width"`
+	Height       int       `json:"height"`
+	Title        string    `json:"title"`
+	Artist       string    `json:"artist"`
+	ArtistID     string    `json:"artist_id"`
 	DownloadedAt time.Time `json:"downloaded_at"`
 }
 
 type History struct {
-	Current  string   `json:"current"`
-	Images   []string `json:"images"`
+	Current   string    `json:"current"`
+	Images    []string  `json:"images"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Storage struct {
-	dataDir    string
-	downloadDir string
+	dataDir      string
+	downloadDir  string
 	downloadPath string
 }
 
@@ -38,6 +38,11 @@ func New(downloadPath string) (*Storage, error) {
 
 	dataDir := filepath.Join(homeDir, ".local", "share", "kpixiv")
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return nil, err
+	}
+
+	rankingDir := filepath.Join(dataDir, "Ranking")
+	if err := os.MkdirAll(rankingDir, 0755); err != nil {
 		return nil, err
 	}
 
@@ -62,6 +67,10 @@ func (s *Storage) DataDir() string {
 
 func (s *Storage) DownloadDir() string {
 	return s.downloadDir
+}
+
+func (s *Storage) RankingDir() string {
+	return filepath.Join(s.dataDir, "Ranking")
 }
 
 func (s *Storage) MetadataPath() string {
@@ -139,7 +148,7 @@ func (s *Storage) LoadHistory() (*History, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &History{
-				Images:   []string{},
+				Images:    []string{},
 				UpdatedAt: time.Now(),
 			}, nil
 		}

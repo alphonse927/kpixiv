@@ -13,7 +13,8 @@ bin
 *.out
 
 # Dependency directories
-vendor/
+references/
+docs/
 
 # Go workspace file
 go.work
@@ -34,6 +35,7 @@ dist/
 # Environment
 .env
 .env.local
+AGENTS.md
 
 # Config (user-specific, can contain sensitive data)
 config.local.toml
