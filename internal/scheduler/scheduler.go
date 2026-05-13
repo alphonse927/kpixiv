@@ -3,15 +3,16 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"sync"
 	"time"
 
-	"github.com/kpixiv/kpixiv/internal/cache"
-	"github.com/kpixiv/kpixiv/internal/config"
-	"github.com/kpixiv/kpixiv/internal/logger"
-	"github.com/kpixiv/kpixiv/internal/pixiv"
-	"github.com/kpixiv/kpixiv/internal/storage"
-	"github.com/kpixiv/kpixiv/internal/wallpaper"
+	"github.com/alphonse927/kpixiv/internal/cache"
+	"github.com/alphonse927/kpixiv/internal/config"
+	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/pixiv"
+	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 type Scheduler struct {
@@ -158,19 +159,25 @@ func (sch *Scheduler) Stop() {
 func (sch *Scheduler) SetNext(ctx context.Context) error {
 	log := logger.WithComponent("scheduler")
 
-	nextID, err := sch.storage.GetNextWallpaper()
+	images, err := sch.storage.LoadMetadata()
 	if err != nil {
-		return fmt.Errorf("failed to get next wallpaper: %w", err)
+		return fmt.Errorf("failed to load metadata: %w", err)
 	}
 
-	if nextID == "" {
-		return fmt.Errorf("no wallpaper in history")
+	valid := make([]string, 0, len(images))
+	for id, meta := range images {
+		if meta.Path != "" {
+			valid = append(valid, id)
+		}
 	}
 
-	path, ok := sch.storage.GetImagePath(nextID)
-	if !ok {
-		return fmt.Errorf("wallpaper id %s not found in storage metadata", nextID)
+	if len(valid) == 0 {
+		return fmt.Errorf("no wallpapers found")
 	}
+
+	r := rand.Intn(len(valid))
+	nextID := valid[r]
+	path := images[nextID].Path
 
 	if err := sch.setter.Set(path); err != nil {
 		return fmt.Errorf("failed to set wallpaper: %w", err)

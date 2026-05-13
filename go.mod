@@ -1,4 +1,4 @@
-module github.com/kpixiv/kpixiv
+module github.com/alphonse927/kpixiv
 
 go 1.26
 

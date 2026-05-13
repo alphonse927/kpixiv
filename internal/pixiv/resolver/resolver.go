@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kpixiv/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/logger"
 )
 
 const (

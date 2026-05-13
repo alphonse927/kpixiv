@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kpixiv/kpixiv/internal/logger"
-	"github.com/kpixiv/kpixiv/internal/pixiv/resolver"
+	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/pixiv/resolver"
 )
 
 type Image struct {

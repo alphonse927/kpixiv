@@ -11,13 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kpixiv/kpixiv/internal/cache"
-	"github.com/kpixiv/kpixiv/internal/config"
-	"github.com/kpixiv/kpixiv/internal/logger"
-	"github.com/kpixiv/kpixiv/internal/pixiv"
-	"github.com/kpixiv/kpixiv/internal/scheduler"
-	"github.com/kpixiv/kpixiv/internal/storage"
-	"github.com/kpixiv/kpixiv/internal/wallpaper"
+	"github.com/alphonse927/kpixiv/internal/cache"
+	"github.com/alphonse927/kpixiv/internal/config"
+	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/pixiv"
+	"github.com/alphonse927/kpixiv/internal/scheduler"
+	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/wallpaper"
 
 	"github.com/spf13/cobra"
 )
