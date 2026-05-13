@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kpixiv/kpixiv/internal/pixiv"
-	"github.com/kpixiv/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/pixiv"
+	"github.com/alphonse927/kpixiv/internal/storage"
 )
 
 type Cache struct {
