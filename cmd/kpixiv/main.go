@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 var (
 	cfgPath string
 	verbose bool
+	dryRun  bool
 	cfg     *config.Config
 	sched   *scheduler.Scheduler
 )
@@ -95,6 +98,12 @@ var fetchCmd = &cobra.Command{
 		}
 
 		log.Debug("Filtered images", "count", filtered, "minWidth", cfg.Pixiv.MinWidth, "minHeight", cfg.Pixiv.MinHeight, "landscapeOnly", cfg.Pixiv.LandscapeOnly)
+		if dryRun {
+			log.Info("Dry-run mode: skipping downloads", "candidates", len(filteredImages))
+			fmt.Println("Fetch dry-run complete!")
+			fmt.Printf("Total: %d, Filtered: %d, Downloaded: 0, Skipped: 0\n", len(images), filtered)
+			return nil
+		}
 
 		rankingDir := st.RankingDir()
 		metadata, err := st.LoadMetadata()
@@ -104,6 +113,8 @@ var fetchCmd = &cobra.Command{
 
 		downloaded := 0
 		skipped := 0
+
+		pending := make([]pixiv.Image, 0, len(filteredImages))
 		for _, img := range filteredImages {
 			if existing, ok := metadata[img.ID]; ok {
 				if _, err := os.Stat(existing.Path); err == nil {
@@ -146,32 +157,94 @@ var fetchCmd = &cobra.Command{
 				continue
 			}
 
-			if err := pixivClient.DownloadImage(ctx, img, destPath); err != nil {
-				log.Warn("Failed to download image", "id", img.ID, "error", err)
-				continue
-			}
+			pending = append(pending, img)
+		}
 
-			finalPath := destPath
-			if _, err := os.Stat(destPath); os.IsNotExist(err) {
-				if _, err := os.Stat(altPath); err == nil {
-					finalPath = altPath
+		type downloadResult struct {
+			img     pixiv.Image
+			path    string
+			err     error
+			skipped bool
+		}
+
+		workers := runtime.NumCPU()
+		if workers > 4 {
+			workers = 4
+		}
+		if workers < 1 {
+			workers = 1
+		}
+
+		jobs := make(chan pixiv.Image)
+		results := make(chan downloadResult, len(pending))
+		var wg sync.WaitGroup
+
+		for i := 0; i < workers; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for img := range jobs {
+					destPath := filepath.Join(rankingDir, img.ID+".jpg")
+					altPath := filepath.Join(rankingDir, img.ID+".png")
+
+					if _, err := os.Stat(destPath); err == nil {
+						results <- downloadResult{img: img, path: destPath, skipped: true}
+						continue
+					}
+					if _, err := os.Stat(altPath); err == nil {
+						results <- downloadResult{img: img, path: altPath, skipped: true}
+						continue
+					}
+
+					if err := pixivClient.DownloadImage(ctx, img, destPath); err != nil {
+						results <- downloadResult{img: img, err: err}
+						continue
+					}
+
+					finalPath := destPath
+					if _, err := os.Stat(destPath); os.IsNotExist(err) {
+						if _, err := os.Stat(altPath); err == nil {
+							finalPath = altPath
+						}
+					}
+
+					results <- downloadResult{img: img, path: finalPath}
 				}
-			} else if err != nil {
-				log.Warn("Failed to verify downloaded file", "id", img.ID, "error", err)
+			}()
+		}
+
+		go func() {
+			for _, img := range pending {
+				jobs <- img
+			}
+			close(jobs)
+			wg.Wait()
+			close(results)
+		}()
+
+		for result := range results {
+			if result.err != nil {
+				log.Warn("Failed to download image", "id", result.img.ID, "error", result.err)
 				continue
 			}
 
-			metadata[img.ID] = storage.ImageMeta{
-				ID:           img.ID,
-				Path:         finalPath,
-				Width:        img.Width,
-				Height:       img.Height,
-				Title:        img.Title,
-				Artist:       img.Artist,
-				ArtistID:     img.ArtistID,
+			if result.skipped {
+				skipped++
+			}
+
+			metadata[result.img.ID] = storage.ImageMeta{
+				ID:           result.img.ID,
+				Path:         result.path,
+				Width:        result.img.Width,
+				Height:       result.img.Height,
+				Title:        result.img.Title,
+				Artist:       result.img.Artist,
+				ArtistID:     result.img.ArtistID,
 				DownloadedAt: time.Now(),
 			}
-			downloaded++
+			if !result.skipped {
+				downloaded++
+			}
 		}
 
 		if err := st.SaveMetadata(metadata); err != nil {
@@ -200,7 +273,12 @@ var nextCmd = &cobra.Command{
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
 
-		setter := wallpaper.NewKDEBackgroundSetter()
+		var setter wallpaper.Setter
+		if dryRun {
+			setter = wallpaper.NewDryRunSetter()
+		} else {
+			setter = wallpaper.NewKDEBackgroundSetter()
+		}
 
 		pixivClient, err := pixiv.NewClient()
 		if err != nil {
@@ -235,7 +313,12 @@ var daemonCmd = &cobra.Command{
 			return fmt.Errorf("failed to initialize pixiv client: %w", err)
 		}
 		c := cache.NewCache(st)
-		setter := wallpaper.NewKDEBackgroundSetter()
+		var setter wallpaper.Setter
+		if dryRun {
+			setter = wallpaper.NewDryRunSetter()
+		} else {
+			setter = wallpaper.NewKDEBackgroundSetter()
+		}
 
 		sch := scheduler.New(cfg, st, c, pixivClient, setter)
 
@@ -317,8 +400,9 @@ var statusCmd = &cobra.Command{
 }
 
 func main() {
-	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "Path to config file (default: ~/.config/kpixiv/config.toml)")
+	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "Path to config file (default: ~/.config/kpixiv/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
+	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show actions without applying or downloading")
 
 	rootCmd.AddCommand(fetchCmd)
 	rootCmd.AddCommand(nextCmd)

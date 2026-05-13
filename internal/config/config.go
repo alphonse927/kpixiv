@@ -4,27 +4,27 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/pelletier/go-toml/v2"
+	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	IntervalMinutes int             `toml:"interval_minutes"`
-	DownloadPath    string          `toml:"download_path"`
-	Pixiv           PixivConfig     `toml:"pixiv"`
-	Wallpaper       WallpaperConfig `toml:"wallpaper"`
+	IntervalMinutes int             `yaml:"interval_minutes"`
+	DownloadPath    string          `yaml:"download_path"`
+	Pixiv           PixivConfig     `yaml:"pixiv"`
+	Wallpaper       WallpaperConfig `yaml:"wallpaper"`
 }
 
 type PixivConfig struct {
-	Ranking       string `toml:"ranking"`
-	R18           bool   `toml:"r18"`
-	MinWidth      int    `toml:"min_width"`
-	MinHeight     int    `toml:"min_height"`
-	LandscapeOnly bool   `toml:"landscape_only"`
+	Ranking       string `yaml:"ranking"`
+	R18           bool   `yaml:"r18"`
+	MinWidth      int    `yaml:"min_width"`
+	MinHeight     int    `yaml:"min_height"`
+	LandscapeOnly bool   `yaml:"landscape_only"`
 }
 
 type WallpaperConfig struct {
-	Mode        string `toml:"mode"`
-	KeepHistory int    `toml:"keep_history"`
+	Mode        string `yaml:"mode"`
+	KeepHistory int    `yaml:"keep_history"`
 }
 
 const (
@@ -60,7 +60,7 @@ func Load(path string) (*Config, error) {
 		if err != nil {
 			return nil, err
 		}
-		path = filepath.Join(homeDir, ".config", "kpixiv", "config.toml")
+		path = filepath.Join(homeDir, ".config", "kpixiv", "config.yaml")
 	}
 
 	data, err := os.ReadFile(path)
@@ -76,7 +76,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
 
@@ -89,7 +89,7 @@ func Save(path string, cfg *Config) error {
 		return err
 	}
 
-	data, err := toml.Marshal(cfg)
+	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return err
 	}
