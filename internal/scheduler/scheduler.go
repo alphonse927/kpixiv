@@ -100,22 +100,34 @@ func (sch *Scheduler) rotateWallpaper(ctx context.Context) {
 		return
 	}
 
-	nextPath, err := sch.storage.GetNextWallpaper()
+	nextID, err := sch.storage.GetNextWallpaper()
 	if err != nil {
 		log.Error("Failed to get next wallpaper from history", "error", err)
 		return
 	}
 
-	if nextPath == "" {
+	if nextID == "" {
 		log.Info("No wallpaper in history, setting first available")
-		nextPath = images[0].ID
+		nextID = images[0].ID
 	}
 
-	path, ok := sch.storage.GetImagePath(nextPath)
+	path, ok := sch.storage.GetImagePath(nextID)
 	if !ok {
-		log.Warn("Wallpaper not found in storage", "id", nextPath)
-		if len(images) > 0 {
-			path = images[0].ID
+		log.Warn("Wallpaper not found in storage metadata", "id", nextID)
+
+		for _, img := range images {
+			candidatePath, candidateOK := sch.storage.GetImagePath(img.ID)
+			if candidateOK {
+				nextID = img.ID
+				path = candidatePath
+				ok = true
+				break
+			}
+		}
+
+		if !ok {
+			log.Warn("No locally downloaded wallpapers available to apply")
+			return
 		}
 	}
 
@@ -124,7 +136,7 @@ func (sch *Scheduler) rotateWallpaper(ctx context.Context) {
 		return
 	}
 
-	if err := sch.storage.AddToHistory(nextPath); err != nil {
+	if err := sch.storage.AddToHistory(nextID); err != nil {
 		log.Error("Failed to update history", "error", err)
 	}
 
@@ -146,20 +158,29 @@ func (sch *Scheduler) Stop() {
 func (sch *Scheduler) SetNext(ctx context.Context) error {
 	log := logger.WithComponent("scheduler")
 
-	nextPath, err := sch.storage.GetNextWallpaper()
+	nextID, err := sch.storage.GetNextWallpaper()
 	if err != nil {
 		return fmt.Errorf("failed to get next wallpaper: %w", err)
 	}
 
-	if nextPath == "" {
+	if nextID == "" {
 		return fmt.Errorf("no wallpaper in history")
 	}
 
-	if err := sch.setter.Set(nextPath); err != nil {
+	path, ok := sch.storage.GetImagePath(nextID)
+	if !ok {
+		return fmt.Errorf("wallpaper id %s not found in storage metadata", nextID)
+	}
+
+	if err := sch.setter.Set(path); err != nil {
 		return fmt.Errorf("failed to set wallpaper: %w", err)
 	}
 
-	log.Info("Manually set next wallpaper", "path", nextPath)
+	if err := sch.storage.AddToHistory(nextID); err != nil {
+		return fmt.Errorf("failed to update history: %w", err)
+	}
+
+	log.Info("Manually set next wallpaper", "path", path)
 	return nil
 }
 

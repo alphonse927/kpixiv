@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/kpixiv/kpixiv/internal/logger"
 )
 
 type Setter interface {
@@ -98,6 +100,18 @@ func (g *GNOMESetter) Set(path string) error {
 }
 
 type BGSetter struct{}
+
+type DryRunSetter struct{}
+
+func NewDryRunSetter() *DryRunSetter {
+	return &DryRunSetter{}
+}
+
+func (d *DryRunSetter) Set(path string) error {
+	log := logger.WithComponent("wallpaper")
+	log.Info("Dry-run: skipping wallpaper apply", "path", path)
+	return nil
+}
 
 func (b *BGSetter) Set(path string) error {
 	if _, err := os.Stat(path); err != nil {
