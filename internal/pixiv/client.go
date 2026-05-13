@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -200,15 +201,9 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 			continue
 		}
 
-		originalURL, err := c.resolver.ResolveOriginalURL(ctx, rc.URL)
-		if err != nil {
-			log.DebugContext(ctx, "Failed to resolve original URL, using thumbnail", "thumbnail", rc.URL, "error", err)
-			originalURL = rc.URL
-		}
-
 		img := Image{
 			ID:        fmt.Sprintf("%d", rc.IllustID),
-			URL:       originalURL,
+			URL:       rc.URL,
 			Width:     rc.Width,
 			Height:    rc.Height,
 			Title:     rc.Title,
@@ -240,9 +235,18 @@ func parseNextPage(next any) int {
 
 func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string) error {
 	log := logger.WithComponent("pixiv")
-	log.Debug("Downloading image", "id", image.ID, "url", image.URL, "dest", destPath)
+	downloadURL := image.URL
+	if strings.Contains(downloadURL, "/img-master/") {
+		originalURL, err := c.resolver.ResolveOriginalURL(ctx, image.URL)
+		if err != nil {
+			return fmt.Errorf("failed to resolve original URL for %s: %w", image.ID, err)
+		}
+		downloadURL = originalURL
+	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, image.URL, nil)
+	log.Debug("Downloading image", "id", image.ID, "url", downloadURL, "dest", destPath)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -260,21 +264,36 @@ func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	if _, err := os.Stat(destPath); err == nil {
-		if err := os.Remove(destPath); err != nil {
-			log.Warn("Failed to remove existing file", "path", destPath, "error", err)
-		}
+	destDir := filepath.Dir(destPath)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
-	file, err := os.Create(destPath)
+	tmpFile, err := os.CreateTemp(destDir, ".kpixiv-*.tmp")
 	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
+		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
-	defer file.Close()
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+	}()
 
-	written, err := io.Copy(file, resp.Body)
+	written, err := io.Copy(tmpFile, resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to write image: %w", err)
+	}
+
+	if err := tmpFile.Sync(); err != nil {
+		return fmt.Errorf("failed to flush temporary file: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, destPath); err != nil {
+		return fmt.Errorf("failed to move temporary file into place: %w", err)
 	}
 
 	log.Debug("Image downloaded", "path", destPath, "bytes", written)
