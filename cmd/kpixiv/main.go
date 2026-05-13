@@ -277,7 +277,7 @@ var nextCmd = &cobra.Command{
 		if dryRun {
 			setter = wallpaper.NewDryRunSetter()
 		} else {
-			setter = wallpaper.NewKDEBackgroundSetter()
+			setter = wallpaper.NewKDESetter()
 		}
 
 		pixivClient, err := pixiv.NewClient()
@@ -317,7 +317,7 @@ var daemonCmd = &cobra.Command{
 		if dryRun {
 			setter = wallpaper.NewDryRunSetter()
 		} else {
-			setter = wallpaper.NewKDEBackgroundSetter()
+			setter = wallpaper.NewKDESetter()
 		}
 
 		sch := scheduler.New(cfg, st, c, pixivClient, setter)
