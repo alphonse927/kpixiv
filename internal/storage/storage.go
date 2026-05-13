@@ -24,6 +24,10 @@ type History struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type PaginationState struct {
+	Pages map[string]int `json:"pages"`
+}
+
 type Storage struct {
 	dataDir      string
 	downloadDir  string
@@ -79,6 +83,73 @@ func (s *Storage) MetadataPath() string {
 
 func (s *Storage) HistoryPath() string {
 	return filepath.Join(s.dataDir, "history.json")
+}
+
+func (s *Storage) PaginationPath() string {
+	return filepath.Join(s.dataDir, "pagination.json")
+}
+
+func (s *Storage) LoadPaginationState() (*PaginationState, error) {
+	path := s.PaginationPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &PaginationState{Pages: map[string]int{}}, nil
+		}
+		return nil, err
+	}
+
+	var state PaginationState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, err
+	}
+
+	if state.Pages == nil {
+		state.Pages = map[string]int{}
+	}
+
+	return &state, nil
+}
+
+func (s *Storage) SavePaginationState(state *PaginationState) error {
+	if state.Pages == nil {
+		state.Pages = map[string]int{}
+	}
+
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.PaginationPath(), data, 0644)
+}
+
+func (s *Storage) GetRankingPage(key string) (int, error) {
+	state, err := s.LoadPaginationState()
+	if err != nil {
+		return 1, err
+	}
+
+	page, ok := state.Pages[key]
+	if !ok || page < 1 {
+		return 1, nil
+	}
+
+	return page, nil
+}
+
+func (s *Storage) SetRankingPage(key string, page int) error {
+	if page < 1 {
+		page = 1
+	}
+
+	state, err := s.LoadPaginationState()
+	if err != nil {
+		return err
+	}
+
+	state.Pages[key] = page
+	return s.SavePaginationState(state)
 }
 
 func (s *Storage) LoadMetadata() (map[string]ImageMeta, error) {

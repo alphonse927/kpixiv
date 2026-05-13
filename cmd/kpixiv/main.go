@@ -66,10 +66,19 @@ var fetchCmd = &cobra.Command{
 
 		ctx := context.Background()
 		rankingType := pixiv.RankingType(cfg.Pixiv.Ranking)
+		pageKey := fmt.Sprintf("%s:%t", cfg.Pixiv.Ranking, cfg.Pixiv.R18)
+		page, err := st.GetRankingPage(pageKey)
+		if err != nil {
+			return fmt.Errorf("failed to load ranking page: %w", err)
+		}
 
-		images, err := pixivClient.FetchRanking(ctx, rankingType, 1, cfg.Pixiv.R18)
+		images, nextPage, err := pixivClient.FetchRanking(ctx, rankingType, page, cfg.Pixiv.R18)
 		if err != nil {
 			return fmt.Errorf("failed to fetch rankings: %w", err)
+		}
+
+		if err := st.SetRankingPage(pageKey, nextPage); err != nil {
+			return fmt.Errorf("failed to save next ranking page: %w", err)
 		}
 
 		filtered := 0
