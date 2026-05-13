@@ -97,21 +97,52 @@ var fetchCmd = &cobra.Command{
 		log.Debug("Filtered images", "count", filtered, "minWidth", cfg.Pixiv.MinWidth, "minHeight", cfg.Pixiv.MinHeight, "landscapeOnly", cfg.Pixiv.LandscapeOnly)
 
 		rankingDir := st.RankingDir()
+		metadata, err := st.LoadMetadata()
+		if err != nil {
+			return fmt.Errorf("failed to load metadata: %w", err)
+		}
+
 		downloaded := 0
 		skipped := 0
 		for _, img := range filteredImages {
-			ext := filepath.Ext(img.URL)
-			if ext == "" {
-				ext = ".jpg"
+			if existing, ok := metadata[img.ID]; ok {
+				if _, err := os.Stat(existing.Path); err == nil {
+					skipped++
+					log.Debug("Skipping existing image from metadata", "id", img.ID, "path", existing.Path)
+					continue
+				}
 			}
-			destPath := filepath.Join(rankingDir, img.ID+ext)
+
+			destPath := filepath.Join(rankingDir, img.ID+".jpg")
+			altPath := filepath.Join(rankingDir, img.ID+".png")
 
 			if _, err := os.Stat(destPath); err == nil {
 				skipped++
-				log.Debug("Skipping existing image", "id", img.ID, "path", destPath)
+				metadata[img.ID] = storage.ImageMeta{
+					ID:           img.ID,
+					Path:         destPath,
+					Width:        img.Width,
+					Height:       img.Height,
+					Title:        img.Title,
+					Artist:       img.Artist,
+					ArtistID:     img.ArtistID,
+					DownloadedAt: time.Now(),
+				}
 				continue
-			} else if !os.IsNotExist(err) {
-				log.Warn("Failed to check existing image", "id", img.ID, "path", destPath, "error", err)
+			}
+
+			if _, err := os.Stat(altPath); err == nil {
+				skipped++
+				metadata[img.ID] = storage.ImageMeta{
+					ID:           img.ID,
+					Path:         altPath,
+					Width:        img.Width,
+					Height:       img.Height,
+					Title:        img.Title,
+					Artist:       img.Artist,
+					ArtistID:     img.ArtistID,
+					DownloadedAt: time.Now(),
+				}
 				continue
 			}
 
@@ -119,7 +150,32 @@ var fetchCmd = &cobra.Command{
 				log.Warn("Failed to download image", "id", img.ID, "error", err)
 				continue
 			}
+
+			finalPath := destPath
+			if _, err := os.Stat(destPath); os.IsNotExist(err) {
+				if _, err := os.Stat(altPath); err == nil {
+					finalPath = altPath
+				}
+			} else if err != nil {
+				log.Warn("Failed to verify downloaded file", "id", img.ID, "error", err)
+				continue
+			}
+
+			metadata[img.ID] = storage.ImageMeta{
+				ID:           img.ID,
+				Path:         finalPath,
+				Width:        img.Width,
+				Height:       img.Height,
+				Title:        img.Title,
+				Artist:       img.Artist,
+				ArtistID:     img.ArtistID,
+				DownloadedAt: time.Now(),
+			}
 			downloaded++
+		}
+
+		if err := st.SaveMetadata(metadata); err != nil {
+			return fmt.Errorf("failed to save metadata: %w", err)
 		}
 
 		log.Info("Download summary", "downloaded", downloaded, "skipped", skipped)
@@ -230,13 +286,26 @@ var statusCmd = &cobra.Command{
 			return fmt.Errorf("failed to load metadata: %w", err)
 		}
 
+		rankingEntries, err := os.ReadDir(st.RankingDir())
+		if err != nil {
+			return fmt.Errorf("failed to read ranking directory: %w", err)
+		}
+
+		totalWallpapers := 0
+		for _, entry := range rankingEntries {
+			if entry.IsDir() {
+				continue
+			}
+			totalWallpapers++
+		}
+
 		fmt.Println("=== KPixiv Status ===")
 		fmt.Printf("Config file: %s\n", cfgPath)
 		fmt.Printf("Download directory: %s\n", st.DownloadDir())
 		fmt.Printf("Data directory: %s\n", st.DataDir())
 		fmt.Printf("Interval: %d minutes\n", cfg.IntervalMinutes)
 		fmt.Printf("\n=== Wallpaper History ===\n")
-		fmt.Printf("Total wallpapers: %d\n", len(history.Images))
+		fmt.Printf("Total wallpapers: %d\n", totalWallpapers)
 		fmt.Printf("Current: %s\n", history.Current)
 		fmt.Printf("Last updated: %s\n", history.UpdatedAt.Format(time.DateTime))
 		fmt.Printf("\n=== Storage ===\n")
