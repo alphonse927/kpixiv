@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/kpixiv/kpixiv/internal/cache"
 	"github.com/kpixiv/kpixiv/internal/config"
@@ -19,10 +21,10 @@ import (
 )
 
 var (
-	cfgPath   string
-	verbose   bool
-	cfg       *config.Config
-	sched     *scheduler.Scheduler
+	cfgPath string
+	verbose bool
+	cfg     *config.Config
+	sched   *scheduler.Scheduler
 )
 
 var rootCmd = &cobra.Command{
@@ -71,6 +73,7 @@ var fetchCmd = &cobra.Command{
 		}
 
 		filtered := 0
+		filteredImages := []pixiv.Image{}
 		for _, img := range images {
 			if img.Width < cfg.Pixiv.MinWidth || img.Height < cfg.Pixiv.MinHeight {
 				continue
@@ -79,14 +82,43 @@ var fetchCmd = &cobra.Command{
 				continue
 			}
 			filtered++
+			filteredImages = append(filteredImages, img)
 		}
 
-		log.Info("Filtered images", "count", filtered, "minWidth", cfg.Pixiv.MinWidth, "minHeight", cfg.Pixiv.MinHeight, "landscapeOnly", cfg.Pixiv.LandscapeOnly)
+		log.Debug("Filtered images", "count", filtered, "minWidth", cfg.Pixiv.MinWidth, "minHeight", cfg.Pixiv.MinHeight, "landscapeOnly", cfg.Pixiv.LandscapeOnly)
+
+		rankingDir := st.RankingDir()
+		downloaded := 0
+		skipped := 0
+		for _, img := range filteredImages {
+			ext := filepath.Ext(img.URL)
+			if ext == "" {
+				ext = ".jpg"
+			}
+			destPath := filepath.Join(rankingDir, img.ID+ext)
+
+			if _, err := os.Stat(destPath); err == nil {
+				skipped++
+				log.Debug("Skipping existing image", "id", img.ID, "path", destPath)
+				continue
+			} else if !os.IsNotExist(err) {
+				log.Warn("Failed to check existing image", "id", img.ID, "path", destPath, "error", err)
+				continue
+			}
+
+			if err := pixivClient.DownloadImage(ctx, img, destPath); err != nil {
+				log.Warn("Failed to download image", "id", img.ID, "error", err)
+				continue
+			}
+			downloaded++
+		}
+
+		log.Info("Download summary", "downloaded", downloaded, "skipped", skipped)
 
 		c.Add(images)
 
 		fmt.Println("Fetch complete!")
-		fmt.Printf("Total: %d, Filtered: %d\n", len(images), filtered)
+		fmt.Printf("Total: %d, Filtered: %d, Downloaded: %d, Skipped: %d\n", len(images), filtered, downloaded, skipped)
 
 		return nil
 	},
@@ -197,11 +229,11 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("\n=== Wallpaper History ===\n")
 		fmt.Printf("Total wallpapers: %d\n", len(history.Images))
 		fmt.Printf("Current: %s\n", history.Current)
-		fmt.Printf("Last updated: %s\n", history.UpdatedAt.Format("2006-01-02 15:04:05"))
+		fmt.Printf("Last updated: %s\n", history.UpdatedAt.Format(time.DateTime))
 		fmt.Printf("\n=== Storage ===\n")
 		fmt.Printf("Downloaded images: %d\n", len(metadata))
 
-		log.Info("Status displayed")
+		log.Debug("Status displayed")
 		return nil
 	},
 }

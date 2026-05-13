@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kpixiv/kpixiv/internal/logger"
+	"github.com/kpixiv/kpixiv/internal/pixiv/resolver"
 )
 
 type Image struct {
@@ -33,7 +34,7 @@ const (
 	RankingMonthly RankingType = "monthly"
 
 	pixivRankingURL = "https://www.pixiv.net/ranking.php"
-	pixivBaseURL   = "https://www.pixiv.net"
+	pixivBaseURL    = "https://www.pixiv.net"
 
 	desktopFirefoxUA = "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0"
 	pixivAppUA       = "PixivIOSApp/7.6.2 (iOS 14.6; iPhone13,2)"
@@ -47,6 +48,7 @@ type PixivImageClient interface {
 type Client struct {
 	rankingClient *http.Client
 	imageClient   *http.Client
+	resolver      *resolver.Resolver
 }
 
 func NewClient() (*Client, error) {
@@ -98,9 +100,15 @@ func NewClient() (*Client, error) {
 		},
 	}
 
+	r, err := resolver.NewResolver()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create resolver: %w", err)
+	}
+
 	return &Client{
 		rankingClient: rankingClient,
 		imageClient:   imageClient,
+		resolver:      r,
 	}, nil
 }
 
@@ -148,7 +156,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 	}
 	defer resp.Body.Close()
 
-	log.Info("Response status", "status", resp.StatusCode, "size", resp.ContentLength)
+	log.Debug("Response status", "status", resp.StatusCode, "size", resp.ContentLength)
 
 	contentType := resp.Header.Get("Content-Type")
 	log.Debug("Content-Type", "type", contentType)
@@ -190,9 +198,15 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 			continue
 		}
 
+		originalURL, err := c.resolver.ResolveOriginalURL(ctx, rc.URL)
+		if err != nil {
+			log.DebugContext(ctx, "Failed to resolve original URL, using thumbnail", "thumbnail", rc.URL, "error", err)
+			originalURL = rc.URL
+		}
+
 		img := Image{
 			ID:        fmt.Sprintf("%d", rc.IllustID),
-			URL:       rc.URL,
+			URL:       originalURL,
 			Width:     rc.Width,
 			Height:    rc.Height,
 			Title:     rc.Title,
@@ -203,13 +217,13 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 		images = append(images, img)
 	}
 
-	log.Info("Fetched images", "count", len(images))
+	log.Debug("Fetched images", "count", len(images))
 	return images, nil
 }
 
 func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string) error {
 	log := logger.WithComponent("pixiv")
-	log.Info("Downloading image", "id", image.ID, "url", image.URL, "dest", destPath)
+	log.Debug("Downloading image", "id", image.ID, "url", image.URL, "dest", destPath)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, image.URL, nil)
 	if err != nil {
@@ -246,6 +260,6 @@ func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string
 		return fmt.Errorf("failed to write image: %w", err)
 	}
 
-	log.Info("Image downloaded", "path", destPath, "bytes", written)
+	log.Debug("Image downloaded", "path", destPath, "bytes", written)
 	return nil
 }
