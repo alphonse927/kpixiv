@@ -20,6 +20,7 @@ type Scheduler struct {
 	cache    *cache.Cache
 	pixiv    pixiv.PixivImageClient
 	setter   wallpaper.Setter
+	page     int
 	interval time.Duration
 	stopCh   chan struct{}
 	wg       sync.WaitGroup
@@ -34,6 +35,7 @@ func New(cfg *config.Config, st *storage.Storage, c *cache.Cache, p pixiv.PixivI
 		cache:    c,
 		pixiv:    p,
 		setter:   s,
+		page:     1,
 		interval: time.Duration(cfg.IntervalMinutes) * time.Minute,
 		stopCh:   make(chan struct{}),
 	}
@@ -83,8 +85,12 @@ func (sch *Scheduler) rotateWallpaper(ctx context.Context) {
 
 	if sch.cache.NeedsFetch() {
 		log.Debug("Cache needs refresh, fetching new images")
-		if err := sch.cache.Fetch(ctx, sch.pixiv, pixiv.RankingType(sch.cfg.Pixiv.Ranking), 1, sch.cfg.Pixiv.R18); err != nil {
+		nextPage, err := sch.cache.Fetch(ctx, sch.pixiv, pixiv.RankingType(sch.cfg.Pixiv.Ranking), sch.page, sch.cfg.Pixiv.R18)
+		if err != nil {
 			log.Error("Failed to fetch images", "error", err)
+		} else {
+			sch.page = nextPage
+			log.Debug("Advanced ranking page", "nextPage", sch.page)
 		}
 	}
 

@@ -41,7 +41,7 @@ const (
 )
 
 type PixivImageClient interface {
-	FetchRanking(ctx context.Context, rankingType RankingType, page int, r18 bool) ([]Image, error)
+	FetchRanking(ctx context.Context, rankingType RankingType, page int, r18 bool) ([]Image, int, error)
 	DownloadImage(ctx context.Context, image Image, destPath string) error
 }
 
@@ -128,7 +128,7 @@ type RankingContent struct {
 	IsMasked bool   `json:"is_masked"`
 }
 
-func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page int, r18 bool) ([]Image, error) {
+func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page int, r18 bool) ([]Image, int, error) {
 	mode := string(rankingType)
 	if r18 {
 		mode = mode + "_r18"
@@ -142,7 +142,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, 1, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	req.Header.Set("User-Agent", desktopFirefoxUA)
@@ -152,7 +152,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 
 	resp, err := c.rankingClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch ranking: %w", err)
+		return nil, 1, fmt.Errorf("failed to fetch ranking: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -164,7 +164,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 	if !strings.Contains(contentType, "application/json") {
 		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		if readErr != nil {
-			return nil, fmt.Errorf("failed to read response body: %w", readErr)
+			return nil, 1, fmt.Errorf("failed to read response body: %w", readErr)
 		}
 
 		bodyStr := string(body)
@@ -173,24 +173,26 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 		}
 
 		if strings.Contains(bodyStr, "<!DOCTYPE html>") || strings.Contains(bodyStr, "<html") {
-			return nil, fmt.Errorf("received HTML instead of JSON (likely Cloudflare challenge). "+
+			return nil, 1, fmt.Errorf("received HTML instead of JSON (likely Cloudflare challenge). "+
 				"Content-Type: %s, Body preview: %s", contentType, bodyStr[:min(200, len(bodyStr))])
 		}
 
-		return nil, fmt.Errorf("unexpected Content-Type: %s, body: %s", contentType, bodyStr)
+		return nil, 1, fmt.Errorf("unexpected Content-Type: %s, body: %s", contentType, bodyStr)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
+		return nil, 1, fmt.Errorf("failed to read response body: %w", err)
 	}
 
 	log.Debug("Response size", "bytes", len(body))
 
 	var rankingResp RankingResponse
 	if err := json.Unmarshal(body, &rankingResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, 1, fmt.Errorf("failed to decode response: %w", err)
 	}
+
+	nextPage := parseNextPage(rankingResp.Next)
 
 	images := make([]Image, 0, len(rankingResp.Contents))
 	for _, rc := range rankingResp.Contents {
@@ -218,7 +220,22 @@ func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page
 	}
 
 	log.Debug("Fetched images", "count", len(images))
-	return images, nil
+	log.Debug("Ranking pagination", "currentPage", page, "nextPage", nextPage)
+	return images, nextPage, nil
+}
+
+func parseNextPage(next any) int {
+	switch v := next.(type) {
+	case float64:
+		if v > 0 {
+			return int(v)
+		}
+	case int:
+		if v > 0 {
+			return v
+		}
+	}
+	return 1
 }
 
 func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string) error {
