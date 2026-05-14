@@ -27,13 +27,7 @@ type Image struct {
 	Timestamp time.Time
 }
 
-type RankingType string
-
 const (
-	RankingDaily   RankingType = "daily"
-	RankingWeekly  RankingType = "weekly"
-	RankingMonthly RankingType = "monthly"
-
 	pixivRankingURL = "https://www.pixiv.net/ranking.php"
 	pixivBaseURL    = "https://www.pixiv.net"
 
@@ -42,7 +36,7 @@ const (
 )
 
 type PixivImageClient interface {
-	FetchRanking(ctx context.Context, rankingType RankingType, page int, r18 bool) ([]Image, int, error)
+	FetchRanking(ctx context.Context, rankingMode string, page int, r18 bool) ([]Image, int, error)
 	DownloadImage(ctx context.Context, image Image, destPath string) error
 }
 
@@ -129,8 +123,8 @@ type RankingContent struct {
 	IsMasked bool   `json:"is_masked"`
 }
 
-func (c *Client) FetchRanking(ctx context.Context, rankingType RankingType, page int, r18 bool) ([]Image, int, error) {
-	mode := string(rankingType)
+func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int, r18 bool) ([]Image, int, error) {
+	mode := rankingMode
 	if r18 {
 		mode = mode + "_r18"
 	}
