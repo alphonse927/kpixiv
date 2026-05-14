@@ -288,7 +288,7 @@ var nextCmd = &cobra.Command{
 
 		sch := scheduler.New(cfg, st, c, pixivClient, setter)
 
-		if err := sch.SetNext(context.Background()); err != nil {
+		if err := sch.SetNext(); err != nil {
 			return err
 		}
 
