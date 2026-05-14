@@ -27,11 +27,6 @@ func IsImageResponse(resp *http.Response) bool {
 	return true
 }
 
-func IsHTMLResponse(resp *http.Response) bool {
-	contentType := resp.Header.Get("Content-Type")
-	return strings.Contains(contentType, "text/html")
-}
-
 func HasContent(resp *http.Response) bool {
 	if resp.ContentLength <= 0 {
 		return false
@@ -41,12 +36,4 @@ func HasContent(resp *http.Response) bool {
 	buf := make([]byte, 1)
 	n, _ := lr.Read(buf)
 	return n > 0
-}
-
-func GetContentType(resp *http.Response) string {
-	return resp.Header.Get("Content-Type")
-}
-
-func GetStatusCode(resp *http.Response) int {
-	return resp.StatusCode
 }

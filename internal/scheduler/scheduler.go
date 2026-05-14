@@ -86,7 +86,7 @@ func (sch *Scheduler) rotateWallpaper(ctx context.Context) {
 
 	if sch.cache.NeedsFetch() {
 		log.Debug("Cache needs refresh, fetching new images")
-		nextPage, err := sch.cache.Fetch(ctx, sch.pixiv, pixiv.RankingType(sch.cfg.Pixiv.Ranking), sch.page, sch.cfg.Pixiv.R18)
+		nextPage, err := sch.cache.Fetch(ctx, sch.pixiv, sch.cfg.Pixiv.Ranking.String(), sch.page, sch.cfg.Pixiv.R18)
 		if err != nil {
 			log.Error("Failed to fetch images", "error", err)
 		} else {

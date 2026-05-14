@@ -15,25 +15,20 @@ type Config struct {
 }
 
 type PixivConfig struct {
-	Ranking       string `yaml:"ranking"`
-	R18           bool   `yaml:"r18"`
-	MinWidth      int    `yaml:"min_width"`
-	MinHeight     int    `yaml:"min_height"`
-	LandscapeOnly bool   `yaml:"landscape_only"`
-}
-
-type WallpaperConfig struct {
-	Mode        string `yaml:"mode"`
-	KeepHistory int    `yaml:"keep_history"`
+	MinWidth      int         `yaml:"min_width"`
+	MinHeight     int         `yaml:"min_height"`
+	Ranking       RankingMode `yaml:"ranking"`
+	R18           bool        `yaml:"r18"`
+	LandscapeOnly bool        `yaml:"landscape_only"`
 }
 
 const (
 	DefaultIntervalMinutes = 30
 	DefaultDownloadPath    = "~/Pictures/KPixiv"
-	DefaultPixivRanking    = "daily"
-	DefaultMinWidth        = 1920
-	DefaultMinHeight       = 1080
-	DefaultKeepHistory     = 20
+	DefaultPixivRanking    = 0
+	DefaultMinWidth        = 1280
+	DefaultMinHeight       = 720
+	DefaultKeepHistory     = 5
 )
 
 func Default() *Config {
@@ -48,7 +43,7 @@ func Default() *Config {
 			LandscapeOnly: true,
 		},
 		Wallpaper: WallpaperConfig{
-			Mode:        "fill",
+			Mode:        WallpaperFillMode,
 			KeepHistory: DefaultKeepHistory,
 		},
 	}
@@ -99,19 +94,19 @@ func Save(path string, cfg *Config) error {
 
 func (c *Config) Validate() error {
 	if c.IntervalMinutes < 5 {
-		c.IntervalMinutes = 5
+		c.IntervalMinutes = DefaultIntervalMinutes
 	}
 	if c.DownloadPath == "" {
 		c.DownloadPath = DefaultDownloadPath
 	}
-	if c.Pixiv.MinWidth < 800 {
-		c.Pixiv.MinWidth = 800
+	if c.Pixiv.MinWidth < 1280 {
+		c.Pixiv.MinWidth = DefaultMinWidth
 	}
-	if c.Pixiv.MinHeight < 600 {
-		c.Pixiv.MinHeight = 600
+	if c.Pixiv.MinHeight < 720 {
+		c.Pixiv.MinHeight = DefaultMinHeight
 	}
 	if c.Wallpaper.KeepHistory < 5 {
-		c.Wallpaper.KeepHistory = 5
+		c.Wallpaper.KeepHistory = DefaultKeepHistory
 	}
 	return nil
 }
