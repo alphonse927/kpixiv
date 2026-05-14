@@ -22,12 +22,13 @@ type PixivConfig struct {
 }
 
 const (
-	DefaultDownloadPath = "~/Pictures/KPixiv"
-	DefaultPixivRanking = 0
-	DefaultMinWidth     = 1280
-	DefaultMinHeight    = 720
-	DefaultKeepHistory  = 5
-	DefaultSetInterval  = 30
+	DefaultDownloadPath  = "~/Pictures/KPixiv"
+	DefaultPixivRanking  = 0
+	DefaultMinWidth      = 1280
+	DefaultMinHeight     = 720
+	DefaultKeepHistory   = 5
+	DefaultSetInterval   = 5
+	DefaultFetchInterval = 30
 )
 
 func Default() *Config {
@@ -41,9 +42,10 @@ func Default() *Config {
 			LandscapeOnly: true,
 		},
 		Wallpaper: WallpaperConfig{
-			Mode:        WallpaperFillMode,
-			KeepHistory: DefaultKeepHistory,
-			SetInterval: DefaultSetInterval,
+			Mode:          WallpaperFillMode,
+			KeepHistory:   DefaultKeepHistory,
+			SetInterval:   DefaultSetInterval,
+			FetchInterval: DefaultFetchInterval,
 		},
 	}
 }
@@ -106,6 +108,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Wallpaper.SetInterval < 5 {
 		c.Wallpaper.SetInterval = DefaultSetInterval
+	}
+	if c.Wallpaper.FetchInterval < 30 {
+		c.Wallpaper.FetchInterval = DefaultFetchInterval
 	}
 	return nil
 }

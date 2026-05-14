@@ -16,29 +16,31 @@ import (
 )
 
 type Scheduler struct {
-	cfg      *config.Config
-	storage  *storage.Storage
-	cache    *cache.Cache
-	pixiv    pixiv.PixivImageClient
-	setter   wallpaper.Setter
-	page     int
-	interval time.Duration
-	stopCh   chan struct{}
-	wg       sync.WaitGroup
-	mu       sync.Mutex
-	running  bool
+	cfg           *config.Config
+	storage       *storage.Storage
+	cache         *cache.Cache
+	pixiv         pixiv.PixivImageClient
+	setter        wallpaper.Setter
+	page          int
+	setInterval   time.Duration
+	fetchInterval time.Duration
+	stopCh        chan struct{}
+	wg            sync.WaitGroup
+	mu            sync.Mutex
+	running       bool
 }
 
 func New(cfg *config.Config, st *storage.Storage, c *cache.Cache, p pixiv.PixivImageClient, s wallpaper.Setter) *Scheduler {
 	return &Scheduler{
-		cfg:      cfg,
-		storage:  st,
-		cache:    c,
-		pixiv:    p,
-		setter:   s,
-		page:     1,
-		interval: time.Duration(cfg.Wallpaper.SetInterval) * time.Minute,
-		stopCh:   make(chan struct{}),
+		cfg:           cfg,
+		storage:       st,
+		cache:         c,
+		pixiv:         p,
+		setter:        s,
+		page:          1,
+		setInterval:   time.Duration(cfg.Wallpaper.SetInterval) * time.Minute,
+		fetchInterval: time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute,
+		stopCh:        make(chan struct{}),
 	}
 }
 
@@ -52,7 +54,7 @@ func (sch *Scheduler) Run(ctx context.Context) error {
 	sch.mu.Unlock()
 
 	log := logger.WithComponent("scheduler")
-	log.Info("Starting scheduler", "interval", sch.interval)
+	log.Info("Starting scheduler", "setInterval", sch.setInterval, "fetchInterval", sch.fetchInterval)
 
 	sch.wg.Add(1)
 	go sch.run(ctx)
@@ -63,37 +65,41 @@ func (sch *Scheduler) Run(ctx context.Context) error {
 func (sch *Scheduler) run(ctx context.Context) {
 	defer sch.wg.Done()
 
-	ticker := time.NewTicker(sch.interval)
-	defer ticker.Stop()
+	setTicker := time.NewTicker(sch.setInterval)
+	defer setTicker.Stop()
 
-	sch.rotateWallpaper(ctx)
+	fetchTicker := time.NewTicker(sch.fetchInterval)
+	defer fetchTicker.Stop()
 
 	for {
 		select {
 		case <-sch.stopCh:
 			logger.Info("Scheduler stopped")
 			return
-		case <-ticker.C:
-			sch.rotateWallpaper(ctx)
+		case <-setTicker.C:
+			sch.rotateWallpaper()
+		case <-fetchTicker.C:
+			sch.fetchImages(ctx)
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (sch *Scheduler) rotateWallpaper(ctx context.Context) {
+func (sch *Scheduler) fetchImages(ctx context.Context) {
 	log := logger.WithComponent("scheduler")
 
-	if sch.cache.NeedsFetch() {
-		log.Debug("Cache needs refresh, fetching new images")
-		nextPage, err := sch.cache.Fetch(ctx, sch.pixiv, sch.cfg.Pixiv.Ranking.String(), sch.page, sch.cfg.Pixiv.R18)
-		if err != nil {
-			log.Error("Failed to fetch images", "error", err)
-		} else {
-			sch.page = nextPage
-			log.Debug("Advanced ranking page", "nextPage", sch.page)
-		}
+	nextPage, err := sch.cache.Fetch(ctx, sch.pixiv, sch.cfg.Pixiv.Ranking.String(), sch.page, sch.cfg.Pixiv.R18)
+	if err != nil {
+		log.Error("Failed to fetch images", "error", err)
+	} else {
+		sch.page = nextPage
+		log.Debug("Advanced ranking page", "nextPage", sch.page)
 	}
+}
+
+func (sch *Scheduler) rotateWallpaper() {
+	log := logger.WithComponent("scheduler")
 
 	images := sch.cache.GetFiltered(sch.cfg.Pixiv.MinWidth, sch.cfg.Pixiv.MinHeight, sch.cfg.Pixiv.LandscapeOnly)
 	if len(images) == 0 {
@@ -156,7 +162,7 @@ func (sch *Scheduler) Stop() {
 	sch.mu.Unlock()
 }
 
-func (sch *Scheduler) SetNext(ctx context.Context) error {
+func (sch *Scheduler) SetNext() error {
 	log := logger.WithComponent("scheduler")
 
 	images, err := sch.storage.LoadMetadata()
