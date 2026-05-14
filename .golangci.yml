@@ -7,32 +7,44 @@ linters:
   default: none
 
   enable:
-    # Core reliability
+    # Core correctness
     - govet
     - staticcheck
     - errcheck
     - ineffassign
     - unused
 
-    # Networking / concurrency / safety
+    # Error handling
+    - errorlint
+    - nilerr
+    - nilnesserr
+    - nilnil
+
+    # Networking / concurrency / resources
     - bodyclose
     - contextcheck
-    - gosec
     - copyloopvar
+    - durationcheck
 
-    # Maintainability
+    # Code quality
     - revive
     - gocritic
     - misspell
+    - nolintlint
 
-    # Complexity
+    # Complexity management
     - cyclop
     - funlen
     - nestif
 
-    # Performance / cleanup
+    # Performance / modernization
+    - intrange
+    - makezero
     - prealloc
     - unconvert
+
+    # Security
+    - gosec
 
   settings:
     errcheck:
@@ -61,6 +73,11 @@ linters:
         - name: package-comments
           disabled: true
 
+    gosec:
+      excludes:
+        # Dynamic file paths are common in CLI/Linux apps
+        - G304
+
     gocritic:
       enabled-checks:
         - badLock
@@ -76,22 +93,14 @@ linters:
         - sloppyReassign
         - unnecessaryBlock
 
-    gosec:
-      excludes:
-        - G304
-
   exclusions:
     generated: lax
 
     rules:
+      # Tests intentionally ignore some errors
       - path: '(.+)_test\.go'
         linters:
           - errcheck
-
-      - path: '^cmd/'
-        linters:
-          - gosec
-        text: 'G104'
 
 formatters:
   enable:
