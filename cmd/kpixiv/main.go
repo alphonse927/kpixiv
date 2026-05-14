@@ -55,7 +55,7 @@ var fetchCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.WithComponent("fetch")
 
-		st, err := storage.New(cfg.DownloadPath)
+		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
@@ -267,7 +267,12 @@ var nextCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.WithComponent("next")
 
-		st, err := storage.New(cfg.DownloadPath)
+		homeDir, hErr := os.UserHomeDir()
+		if hErr != nil {
+			return fmt.Errorf("failed to get home directory: %w", hErr)
+		}
+
+		st, err := storage.New(homeDir, cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
@@ -302,7 +307,7 @@ var daemonCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.WithComponent("daemon")
 
-		st, err := storage.New(cfg.DownloadPath)
+		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
@@ -353,7 +358,7 @@ var statusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.WithComponent("status")
 
-		st, err := storage.New(cfg.DownloadPath)
+		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}

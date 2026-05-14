@@ -34,10 +34,9 @@ type Storage struct {
 	downloadPath string
 }
 
-func New(downloadPath string) (*Storage, error) {
-	homeDir, hdErr := os.UserHomeDir()
-	if hdErr != nil {
-		return nil, hdErr
+func New(homeDir, downloadPath string) (*Storage, error) {
+	if homeDir == "" {
+		homeDir, _ = os.UserHomeDir()
 	}
 
 	dataDir := filepath.Join(homeDir, ".local", "share", "kpixiv")
@@ -52,7 +51,7 @@ func New(downloadPath string) (*Storage, error) {
 
 	downloadDir := downloadPath
 	if downloadPath == "" {
-		downloadDir = filepath.Join(homeDir, "Pictures", "KPixiv")
+		downloadDir = filepath.Join(dataDir, "Pictures", "KPixiv")
 	}
 
 	if err := os.MkdirAll(downloadDir, 0750); err != nil {
@@ -101,7 +100,7 @@ func (s *Storage) LoadPaginationState() (*PaginationState, error) {
 	}
 
 	var state PaginationState
-	if err := json.Unmarshal(data, &state); err != nil {
+	if err = json.Unmarshal(data, &state); err != nil {
 		return nil, err
 	}
 
