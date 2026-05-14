@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -44,10 +45,14 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+type OriginalURLResolver interface {
+	ResolveOriginalURL(ctx context.Context, thumbnailURL string) (string, error)
+}
+
 type Client struct {
 	rankingClient HTTPClient
 	imageClient   HTTPClient
-	resolver      *resolver.Resolver
+	resolver      OriginalURLResolver
 }
 
 func NewClient() (*Client, error) {
@@ -236,12 +241,16 @@ func parseNextPage(next any) int {
 func (c *Client) DownloadImage(ctx context.Context, image *Image, destPath string) error {
 	log := logger.WithComponent("pixiv")
 	downloadURL := image.URL
-	if strings.Contains(downloadURL, "/img-master/") {
+	if strings.Contains(downloadURL, "/img-master/") && c.resolver != nil {
 		originalURL, err := c.resolver.ResolveOriginalURL(ctx, image.URL)
 		if err != nil {
 			return fmt.Errorf("failed to resolve original URL for %s: %w", image.ID, err)
 		}
 		downloadURL = originalURL
+		if ext := path.Ext(downloadURL); ext != "" {
+			basePath := destPath[:len(destPath)-len(path.Ext(destPath))]
+			destPath = basePath + ext
+		}
 	}
 
 	log.Debug("Downloading image", "id", image.ID, "url", downloadURL, "dest", destPath)
