@@ -37,7 +37,7 @@ func New(cfg *config.Config, st *storage.Storage, c *cache.Cache, p pixiv.PixivI
 		pixiv:    p,
 		setter:   s,
 		page:     1,
-		interval: time.Duration(cfg.IntervalMinutes) * time.Minute,
+		interval: time.Duration(cfg.Wallpaper.SetInterval) * time.Minute,
 		stopCh:   make(chan struct{}),
 	}
 }

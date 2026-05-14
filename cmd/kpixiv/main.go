@@ -386,7 +386,7 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Config file: %s\n", cfgPath)
 		fmt.Printf("Download directory: %s\n", st.DownloadDir())
 		fmt.Printf("Data directory: %s\n", st.DataDir())
-		fmt.Printf("Interval: %d minutes\n", cfg.IntervalMinutes)
+		fmt.Printf("Set interval: %d minutes\n", cfg.Wallpaper.SetInterval)
 		fmt.Printf("\n=== Wallpaper History ===\n")
 		fmt.Printf("Total wallpapers: %d\n", totalWallpapers)
 		fmt.Printf("Current: %s\n", history.Current)

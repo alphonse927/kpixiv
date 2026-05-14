@@ -8,10 +8,9 @@ import (
 )
 
 type Config struct {
-	IntervalMinutes int             `yaml:"interval_minutes"`
-	DownloadPath    string          `yaml:"download_path"`
-	Pixiv           PixivConfig     `yaml:"pixiv"`
-	Wallpaper       WallpaperConfig `yaml:"wallpaper"`
+	DownloadPath string          `yaml:"download_path"`
+	Pixiv        PixivConfig     `yaml:"pixiv"`
+	Wallpaper    WallpaperConfig `yaml:"wallpaper"`
 }
 
 type PixivConfig struct {
@@ -23,18 +22,17 @@ type PixivConfig struct {
 }
 
 const (
-	DefaultIntervalMinutes = 30
-	DefaultDownloadPath    = "~/Pictures/KPixiv"
-	DefaultPixivRanking    = 0
-	DefaultMinWidth        = 1280
-	DefaultMinHeight       = 720
-	DefaultKeepHistory     = 5
+	DefaultDownloadPath = "~/Pictures/KPixiv"
+	DefaultPixivRanking = 0
+	DefaultMinWidth     = 1280
+	DefaultMinHeight    = 720
+	DefaultKeepHistory  = 5
+	DefaultSetInterval  = 30
 )
 
 func Default() *Config {
 	return &Config{
-		IntervalMinutes: DefaultIntervalMinutes,
-		DownloadPath:    DefaultDownloadPath,
+		DownloadPath: DefaultDownloadPath,
 		Pixiv: PixivConfig{
 			Ranking:       DefaultPixivRanking,
 			R18:           false,
@@ -45,6 +43,7 @@ func Default() *Config {
 		Wallpaper: WallpaperConfig{
 			Mode:        WallpaperFillMode,
 			KeepHistory: DefaultKeepHistory,
+			SetInterval: DefaultSetInterval,
 		},
 	}
 }
@@ -93,9 +92,6 @@ func Save(path string, cfg *Config) error {
 }
 
 func (c *Config) Validate() error {
-	if c.IntervalMinutes < 5 {
-		c.IntervalMinutes = DefaultIntervalMinutes
-	}
 	if c.DownloadPath == "" {
 		c.DownloadPath = DefaultDownloadPath
 	}
@@ -107,6 +103,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Wallpaper.KeepHistory < 5 {
 		c.Wallpaper.KeepHistory = DefaultKeepHistory
+	}
+	if c.Wallpaper.SetInterval < 5 {
+		c.Wallpaper.SetInterval = DefaultSetInterval
 	}
 	return nil
 }
