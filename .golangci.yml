@@ -1,0 +1,106 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+
+  enable:
+    # Core reliability
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+
+    # Networking / concurrency / safety
+    - bodyclose
+    - contextcheck
+    - gosec
+    - copyloopvar
+
+    # Maintainability
+    - revive
+    - gocritic
+    - misspell
+
+    # Complexity
+    - cyclop
+    - funlen
+    - nestif
+
+    # Performance / cleanup
+    - prealloc
+    - unconvert
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    govet:
+      enable:
+        - shadow
+
+    cyclop:
+      max-complexity: 15
+
+    funlen:
+      lines: 120
+      statements: 60
+
+    nestif:
+      min-complexity: 5
+
+    revive:
+      rules:
+        - name: exported
+          disabled: true
+
+        - name: package-comments
+          disabled: true
+
+    gocritic:
+      enabled-checks:
+        - badLock
+        - boolExprSimplify
+        - builtinShadow
+        - dupImport
+        - emptyFallthrough
+        - hugeParam
+        - indexAlloc
+        - initClause
+        - nilValReturn
+        - rangeExprCopy
+        - sloppyReassign
+        - unnecessaryBlock
+
+    gosec:
+      excludes:
+        - G304
+
+  exclusions:
+    generated: lax
+
+    rules:
+      - path: '(.+)_test\.go'
+        linters:
+          - errcheck
+
+      - path: '^cmd/'
+        linters:
+          - gosec
+        text: 'G104'
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+severity:
+  default: warning
