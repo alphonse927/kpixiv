@@ -2,8 +2,9 @@ package scheduler
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"sync"
 	"time"
 
@@ -177,19 +178,24 @@ func (sch *Scheduler) SetNext() error {
 		}
 	}
 
-	if len(valid) == 0 {
+	n := len(valid)
+	if n == 0 {
 		return fmt.Errorf("no wallpapers found")
 	}
 
-	r := rand.Intn(len(valid))
-	nextID := valid[r]
+	r, rErr := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	if rErr != nil {
+		return fmt.Errorf("failed to generate random index: %w", rErr)
+	}
+
+	nextID := valid[int(r.Int64())]
 	path := images[nextID].Path
 
-	if err := sch.setter.Set(path); err != nil {
+	if err = sch.setter.Set(path); err != nil {
 		return fmt.Errorf("failed to set wallpaper: %w", err)
 	}
 
-	if err := sch.storage.AddToHistory(nextID); err != nil {
+	if err = sch.storage.AddToHistory(nextID); err != nil {
 		return fmt.Errorf("failed to update history: %w", err)
 	}
 

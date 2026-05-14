@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"strconv"
 )
 
 type KDESetter struct {
@@ -30,19 +30,35 @@ func (k *KDESetter) Set(path string) error {
 		return fmt.Errorf("qdbus binary not found (tried: qdbus, qdbus6, qdbus-qt5)")
 	}
 
-	cmd := exec.Command(k.qdbus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", `
-		var allDesktops = desktops();
-		for (i=0;i<allDesktops.length;i++) {
-			d = allDesktops[i];
-			d.wallpaperPlugin = "org.kde.image";
-			d.currentConfigGroup = Array("Wallpaper", "org.kde.image", "General");
-			d.writeConfig("Image", "file://`+absPath+`");
-		}
-	`)
+	// Escape for JavaScript string literal context.
+	imageURI := strconv.Quote("file://" + absPath)
+
+	script := `var allDesktops = desktops();
+
+for (var i = 0; i < allDesktops.length; i++) {
+	var d = allDesktops[i];
+
+	d.wallpaperPlugin = "org.kde.image";
+	d.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];
+	d.writeConfig("Image", ` + imageURI + `);
+}`
+
+	// #nosec G204 -- script is constructed safely using strconv.Quote; qdbus is a trusted KDE Plasma interface
+	cmd := exec.Command(
+		k.qdbus,
+		"org.kde.plasmashell",
+		"/PlasmaShell",
+		"org.kde.PlasmaShell.evaluateScript",
+		script,
+	)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to set wallpaper via qdbus: %w (output: %s)", err, string(output))
+		return fmt.Errorf(
+			"failed to set wallpaper via qdbus: %w (output: %s)",
+			err,
+			string(output),
+		)
 	}
 
 	return nil
@@ -56,16 +72,4 @@ func detectQDBusBinary() string {
 		}
 	}
 	return ""
-}
-
-func isKDEAvailable() bool {
-	qdbus := detectQDBusBinary()
-	if qdbus == "" {
-		return false
-	}
-	out, err := exec.Command(qdbus, "org.kde.plasmashell", "/PlasmaShell", "org.kde.PlasmaShell.evaluateScript", "desktops().length").Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) != ""
 }

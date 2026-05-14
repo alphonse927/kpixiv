@@ -121,13 +121,15 @@ func (r *Resolver) validateURL(ctx context.Context, imageURL string) (bool, erro
 
 	resp, err := r.client.Do(headReq)
 	if err == nil {
-		defer resp.Body.Close()
+		//nolint:errcheck
+		defer func() { _ = resp.Body.Close() }()
 		if IsImageResponse(resp) && resp.ContentLength != 0 {
 			return true, nil
 		}
-		if resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusNotImplemented {
-			// fallback to lightweight GET below
-		} else {
+		if resp.StatusCode != http.StatusMethodNotAllowed &&
+			resp.StatusCode != http.StatusNotImplemented {
+			//nolint:errcheck
+			_ = resp.Body.Close()
 			return false, nil
 		}
 	}
@@ -143,7 +145,8 @@ func (r *Resolver) validateURL(ctx context.Context, imageURL string) (bool, erro
 	if err != nil {
 		return false, fmt.Errorf("request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	//nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 
 	if !IsImageResponse(resp) {
 		return false, nil
@@ -152,12 +155,12 @@ func (r *Resolver) validateURL(ctx context.Context, imageURL string) (bool, erro
 	return HasContent(resp), nil
 }
 
-func TruncateString(s string, max int) string {
-	if max <= 0 {
+func TruncateString(s string, limit int) string {
+	if limit <= 0 {
 		return ""
 	}
-	if len(s) <= max {
+	if len(s) <= limit {
 		return s
 	}
-	return s[:max] + "..."
+	return s[:limit] + "..."
 }

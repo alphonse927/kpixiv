@@ -35,18 +35,18 @@ type Storage struct {
 }
 
 func New(downloadPath string) (*Storage, error) {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return nil, err
+	homeDir, hdErr := os.UserHomeDir()
+	if hdErr != nil {
+		return nil, hdErr
 	}
 
 	dataDir := filepath.Join(homeDir, ".local", "share", "kpixiv")
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		return nil, err
 	}
 
 	rankingDir := filepath.Join(dataDir, "Ranking")
-	if err := os.MkdirAll(rankingDir, 0755); err != nil {
+	if err := os.MkdirAll(rankingDir, 0750); err != nil {
 		return nil, err
 	}
 
@@ -54,7 +54,8 @@ func New(downloadPath string) (*Storage, error) {
 	if downloadPath == "" {
 		downloadDir = filepath.Join(homeDir, "Pictures", "KPixiv")
 	}
-	if err := os.MkdirAll(downloadDir, 0755); err != nil {
+
+	if err := os.MkdirAll(downloadDir, 0750); err != nil {
 		return nil, err
 	}
 
@@ -121,7 +122,7 @@ func (s *Storage) SavePaginationState(state *PaginationState) error {
 		return err
 	}
 
-	return os.WriteFile(s.PaginationPath(), data, 0644)
+	return os.WriteFile(s.PaginationPath(), data, 0600)
 }
 
 func (s *Storage) GetRankingPage(key string) (int, error) {
@@ -152,17 +153,17 @@ func (s *Storage) SetRankingPage(key string, page int) error {
 	return s.SavePaginationState(state)
 }
 
-func (s *Storage) LoadMetadata() (map[string]ImageMeta, error) {
+func (s *Storage) LoadMetadata() (map[string]*ImageMeta, error) {
 	path := s.MetadataPath()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]ImageMeta), nil
+	data, rfErr := os.ReadFile(path)
+	if rfErr != nil {
+		if os.IsNotExist(rfErr) {
+			return make(map[string]*ImageMeta), nil
 		}
-		return nil, err
+		return nil, rfErr
 	}
 
-	var images map[string]ImageMeta
+	var images map[string]*ImageMeta
 	if err := json.Unmarshal(data, &images); err != nil {
 		return nil, err
 	}
@@ -170,16 +171,16 @@ func (s *Storage) LoadMetadata() (map[string]ImageMeta, error) {
 	return images, nil
 }
 
-func (s *Storage) SaveMetadata(images map[string]ImageMeta) error {
+func (s *Storage) SaveMetadata(images map[string]*ImageMeta) error {
 	data, err := json.MarshalIndent(images, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(s.MetadataPath(), data, 0644)
+	return os.WriteFile(s.MetadataPath(), data, 0600)
 }
 
-func (s *Storage) AddImage(meta ImageMeta) error {
+func (s *Storage) AddImage(meta *ImageMeta) error {
 	images, err := s.LoadMetadata()
 	if err != nil {
 		return err
@@ -241,7 +242,7 @@ func (s *Storage) SaveHistory(history *History) error {
 		return err
 	}
 
-	return os.WriteFile(s.HistoryPath(), data, 0644)
+	return os.WriteFile(s.HistoryPath(), data, 0600)
 }
 
 func (s *Storage) AddToHistory(imageID string) error {

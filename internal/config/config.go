@@ -81,7 +81,7 @@ func Load(path string) (*Config, error) {
 
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0750); err != nil {
 		return err
 	}
 
@@ -90,7 +90,7 @@ func Save(path string, cfg *Config) error {
 		return err
 	}
 
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 func (c *Config) Validate() error {
