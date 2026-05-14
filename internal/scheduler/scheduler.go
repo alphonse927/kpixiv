@@ -20,7 +20,7 @@ type Scheduler struct {
 	cfg           *config.Config
 	storage       *storage.Storage
 	cache         *cache.Cache
-	pixiv         pixiv.PixivImageClient
+	pixiv         pixiv.ImageClient
 	setter        wallpaper.Setter
 	page          int
 	setInterval   time.Duration
@@ -31,7 +31,7 @@ type Scheduler struct {
 	running       bool
 }
 
-func New(cfg *config.Config, st *storage.Storage, c *cache.Cache, p pixiv.PixivImageClient, s wallpaper.Setter) *Scheduler {
+func New(cfg *config.Config, st *storage.Storage, c *cache.Cache, p pixiv.ImageClient, s wallpaper.Setter) *Scheduler {
 	return &Scheduler{
 		cfg:           cfg,
 		storage:       st,
@@ -152,15 +152,19 @@ func (sch *Scheduler) rotateWallpaper() {
 }
 
 func (sch *Scheduler) Stop() {
+	sch.mu.Lock()
+	if !sch.running {
+		sch.mu.Unlock()
+		return
+	}
+	sch.running = false
+	sch.mu.Unlock()
+
 	log := logger.WithComponent("scheduler")
 	log.Info("Stopping scheduler")
 
 	close(sch.stopCh)
 	sch.wg.Wait()
-
-	sch.mu.Lock()
-	sch.running = false
-	sch.mu.Unlock()
 }
 
 func (sch *Scheduler) SetNext() error {

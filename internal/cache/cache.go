@@ -87,7 +87,7 @@ func (c *Cache) Clear() {
 	c.fetchedIDs = make(map[string]bool)
 }
 
-func (c *Cache) Fetch(ctx context.Context, client pixiv.PixivImageClient, rankingMode string, page int, r18 bool) (int, error) {
+func (c *Cache) Fetch(ctx context.Context, client pixiv.ImageClient, rankingMode string, page int, r18 bool) (int, error) {
 	images, nextPage, err := client.FetchRanking(ctx, rankingMode, page, r18)
 	if err != nil {
 		return 1, err

@@ -35,14 +35,18 @@ const (
 	pixivAppUA       = "PixivIOSApp/7.6.2 (iOS 14.6; iPhone13,2)"
 )
 
-type PixivImageClient interface {
+type ImageClient interface {
 	FetchRanking(ctx context.Context, rankingMode string, page int, r18 bool) ([]Image, int, error)
 	DownloadImage(ctx context.Context, image *Image, destPath string) error
 }
 
+type HTTPClient interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 type Client struct {
-	rankingClient *http.Client
-	imageClient   *http.Client
+	rankingClient HTTPClient
+	imageClient   HTTPClient
 	resolver      *resolver.Resolver
 }
 
