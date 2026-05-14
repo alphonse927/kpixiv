@@ -27,7 +27,6 @@ var (
 	verbose bool
 	dryRun  bool
 	cfg     *config.Config
-	sched   *scheduler.Scheduler
 )
 
 var rootCmd = &cobra.Command{
@@ -41,7 +40,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
-		if err := cfg.Validate(); err != nil {
+		if err = cfg.Validate(); err != nil {
 			return fmt.Errorf("invalid config: %w", err)
 		}
 
@@ -80,7 +79,7 @@ var fetchCmd = &cobra.Command{
 			return fmt.Errorf("failed to fetch rankings: %w", err)
 		}
 
-		if err := st.SetRankingPage(pageKey, nextPage); err != nil {
+		if err = st.SetRankingPage(pageKey, nextPage); err != nil {
 			return fmt.Errorf("failed to save next ranking page: %w", err)
 		}
 
@@ -129,7 +128,7 @@ var fetchCmd = &cobra.Command{
 
 			if _, err := os.Stat(destPath); err == nil {
 				skipped++
-				metadata[img.ID] = storage.ImageMeta{
+				metadata[img.ID] = &storage.ImageMeta{
 					ID:           img.ID,
 					Path:         destPath,
 					Width:        img.Width,
@@ -144,7 +143,7 @@ var fetchCmd = &cobra.Command{
 
 			if _, err := os.Stat(altPath); err == nil {
 				skipped++
-				metadata[img.ID] = storage.ImageMeta{
+				metadata[img.ID] = &storage.ImageMeta{
 					ID:           img.ID,
 					Path:         altPath,
 					Width:        img.Width,
@@ -179,7 +178,7 @@ var fetchCmd = &cobra.Command{
 		results := make(chan downloadResult, len(pending))
 		var wg sync.WaitGroup
 
-		for i := 0; i < workers; i++ {
+		for range workers {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -196,7 +195,7 @@ var fetchCmd = &cobra.Command{
 						continue
 					}
 
-					if err := pixivClient.DownloadImage(ctx, img, destPath); err != nil {
+					if err := pixivClient.DownloadImage(ctx, &img, destPath); err != nil {
 						results <- downloadResult{img: img, err: err}
 						continue
 					}
@@ -232,7 +231,7 @@ var fetchCmd = &cobra.Command{
 				skipped++
 			}
 
-			metadata[result.img.ID] = storage.ImageMeta{
+			metadata[result.img.ID] = &storage.ImageMeta{
 				ID:           result.img.ID,
 				Path:         result.path,
 				Width:        result.img.Width,

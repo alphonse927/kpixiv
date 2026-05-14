@@ -37,7 +37,7 @@ const (
 
 type PixivImageClient interface {
 	FetchRanking(ctx context.Context, rankingMode string, page int, r18 bool) ([]Image, int, error)
-	DownloadImage(ctx context.Context, image Image, destPath string) error
+	DownloadImage(ctx context.Context, image *Image, destPath string) error
 }
 
 type Client struct {
@@ -126,7 +126,7 @@ type RankingContent struct {
 func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int, r18 bool) ([]Image, int, error) {
 	mode := rankingMode
 	if r18 {
-		mode = mode + "_r18"
+		mode += "_r18"
 	}
 
 	log := logger.WithComponent("pixiv")
@@ -149,7 +149,9 @@ func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int,
 	if err != nil {
 		return nil, 1, fmt.Errorf("failed to fetch ranking: %w", err)
 	}
-	defer resp.Body.Close()
+
+	//nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 
 	log.Debug("Response status", "status", resp.StatusCode, "size", resp.ContentLength)
 
@@ -164,7 +166,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int,
 
 		bodyStr := string(body)
 		if len(body) == 1024 {
-			bodyStr = bodyStr + "... [truncated]"
+			bodyStr += "... [truncated]"
 		}
 
 		if strings.Contains(bodyStr, "<!DOCTYPE html>") || strings.Contains(bodyStr, "<html") {
@@ -183,7 +185,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int,
 	log.Debug("Response size", "bytes", len(body))
 
 	var rankingResp RankingResponse
-	if err := json.Unmarshal(body, &rankingResp); err != nil {
+	if err = json.Unmarshal(body, &rankingResp); err != nil {
 		return nil, 1, fmt.Errorf("failed to decode response: %w", err)
 	}
 
@@ -227,7 +229,7 @@ func parseNextPage(next any) int {
 	return 1
 }
 
-func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string) error {
+func (c *Client) DownloadImage(ctx context.Context, image *Image, destPath string) error {
 	log := logger.WithComponent("pixiv")
 	downloadURL := image.URL
 	if strings.Contains(downloadURL, "/img-master/") {
@@ -252,14 +254,16 @@ func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string
 	if err != nil {
 		return fmt.Errorf("failed to download image: %w", err)
 	}
-	defer resp.Body.Close()
+
+	//nolint:errcheck
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	destDir := filepath.Dir(destPath)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
+	if err = os.MkdirAll(destDir, 0750); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
@@ -269,7 +273,9 @@ func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string
 	}
 	tmpPath := tmpFile.Name()
 	defer func() {
+		//nolint:errcheck
 		_ = tmpFile.Close()
+		//nolint:errcheck
 		_ = os.Remove(tmpPath)
 	}()
 
@@ -278,15 +284,15 @@ func (c *Client) DownloadImage(ctx context.Context, image Image, destPath string
 		return fmt.Errorf("failed to write image: %w", err)
 	}
 
-	if err := tmpFile.Sync(); err != nil {
+	if err = tmpFile.Sync(); err != nil {
 		return fmt.Errorf("failed to flush temporary file: %w", err)
 	}
 
-	if err := tmpFile.Close(); err != nil {
+	if err = tmpFile.Close(); err != nil {
 		return fmt.Errorf("failed to close temporary file: %w", err)
 	}
 
-	if err := os.Rename(tmpPath, destPath); err != nil {
+	if err = os.Rename(tmpPath, destPath); err != nil {
 		return fmt.Errorf("failed to move temporary file into place: %w", err)
 	}
 
