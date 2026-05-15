@@ -1,0 +1,13 @@
+[Unit]
+Description=KPixiv wallpaper daemon for KDE Plasma
+After=graphical-session.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/kpixiv daemon
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

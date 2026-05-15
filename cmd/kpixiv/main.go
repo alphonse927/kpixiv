@@ -342,7 +342,11 @@ var daemonCmd = &cobra.Command{
 		}
 
 		log.Info("KPixiv daemon started")
-		fmt.Println("KPixiv daemon running... Press Ctrl+C to stop")
+		fmt.Println("KPixiv daemon running...")
+
+		if err := sch.ApplyCurrentOrNext(); err != nil {
+			log.Warn("Could not apply wallpaper on startup", "error", err)
+		}
 
 		<-ctx.Done()
 		sch.Stop()
