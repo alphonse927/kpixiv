@@ -326,29 +326,21 @@ var daemonCmd = &cobra.Command{
 
 		sch := scheduler.New(cfg, st, c, pixivClient, setter)
 
-		ctx, cancel := context.WithCancel(context.Background())
-
-		sigCh := make(chan os.Signal, 1)
-		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-		go func() {
-			<-sigCh
-			log.Info("Received shutdown signal")
-			cancel()
-		}()
+		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		defer stop()
 
 		if err := sch.Run(ctx); err != nil {
 			return err
 		}
 
 		log.Info("KPixiv daemon started")
-		fmt.Println("KPixiv daemon running...")
 
 		if err := sch.ApplyCurrentOrNext(); err != nil {
 			log.Warn("Could not apply wallpaper on startup", "error", err)
 		}
 
 		<-ctx.Done()
+		log.Info("Shutting down daemon")
 		sch.Stop()
 
 		log.Info("KPixiv daemon stopped")
