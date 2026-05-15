@@ -8,6 +8,7 @@ Type=simple
 ExecStart=%h/.local/bin/kpixiv daemon
 Restart=on-failure
 RestartSec=10
+KillSignal=SIGTERM
 
 [Install]
 WantedBy=default.target
