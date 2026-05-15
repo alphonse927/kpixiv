@@ -212,3 +212,54 @@ func (sch *Scheduler) IsRunning() bool {
 	defer sch.mu.Unlock()
 	return sch.running
 }
+
+func (sch *Scheduler) ApplyCurrentOrNext() error {
+	log := logger.WithComponent("scheduler")
+
+	images, err := sch.storage.LoadMetadata()
+	if err != nil {
+		return fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	currentID, _ := sch.storage.GetCurrentWallpaper()
+	nextID, _ := sch.storage.GetNextWallpaper()
+
+	targetID := ""
+	if currentID != "" {
+		if _, ok := images[currentID]; ok {
+			targetID = currentID
+		}
+	}
+	if targetID == "" && nextID != "" {
+		if _, ok := images[nextID]; ok {
+			targetID = nextID
+		}
+	}
+	if targetID == "" {
+		for id, meta := range images {
+			if meta.Path != "" {
+				targetID = id
+				break
+			}
+		}
+	}
+
+	if targetID == "" {
+		return fmt.Errorf("no wallpapers available")
+	}
+
+	path := images[targetID].Path
+
+	log.Info("Setting wallpaper", "path", path, "setter_type", fmt.Sprintf("%T", sch.setter))
+	if err := sch.setter.Set(path); err != nil {
+		return fmt.Errorf("failed to set wallpaper: %w", err)
+	}
+	log.Info("Wallpaper set successfully")
+
+	if err := sch.storage.AddToHistory(targetID); err != nil {
+		log.Warn("Failed to update history", "error", err)
+	}
+
+	log.Info("Applied wallpaper on startup", "path", path)
+	return nil
+}

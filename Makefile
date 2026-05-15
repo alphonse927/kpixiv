@@ -1,9 +1,11 @@
 .PHONY: install
 
-BINARY_NAME=kpixiv
-INSTALL_PATH="$(HOME)/go/bin"
+BIN = $(HOME)/.local/bin/kpixiv
+SYSTEMD_DIR = $(HOME)/.config/systemd/user
 
 install:
-	go build -o bin/$(BINARY_NAME) ./cmd/kpixiv
-	cp bin/$(BINARY_NAME) $(INSTALL_PATH)/$(BINARY_NAME)
-	chmod +x $(INSTALL_PATH)/$(BINARY_NAME)
+	go build -o bin/kpixiv ./cmd/kpixiv
+	ln -sf $(PWD)/bin/kpixiv $(BIN)
+	mkdir -p $(SYSTEMD_DIR)
+	cp configs/kpixiv.service $(SYSTEMD_DIR)/kpixiv.service
+	systemctl --user daemon-reload
