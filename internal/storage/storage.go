@@ -32,6 +32,8 @@ type Storage struct {
 	dataDir      string
 	downloadDir  string
 	downloadPath string
+	homeDir      string
+	stateDir     string
 }
 
 func New(homeDir, downloadPath string) (*Storage, error) {
@@ -44,6 +46,11 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 		return nil, err
 	}
 
+	stateDir := filepath.Join(homeDir, ".local", "state", "kpixiv")
+	if err := os.MkdirAll(stateDir, 0750); err != nil {
+		return nil, err
+	}
+
 	rankingDir := filepath.Join(dataDir, "Ranking")
 	if err := os.MkdirAll(rankingDir, 0750); err != nil {
 		return nil, err
@@ -51,7 +58,7 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 
 	downloadDir := downloadPath
 	if downloadPath == "" {
-		downloadDir = filepath.Join(dataDir, "Pictures", "KPixiv")
+		downloadDir = filepath.Join(homeDir, "Pictures", "KPixiv")
 	}
 
 	if err := os.MkdirAll(downloadDir, 0750); err != nil {
@@ -62,6 +69,8 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 		dataDir:      dataDir,
 		downloadDir:  downloadDir,
 		downloadPath: downloadDir,
+		homeDir:      homeDir,
+		stateDir:     stateDir,
 	}, nil
 }
 
@@ -78,15 +87,15 @@ func (s *Storage) RankingDir() string {
 }
 
 func (s *Storage) MetadataPath() string {
-	return filepath.Join(s.dataDir, "metadata.json")
+	return filepath.Join(s.stateDir, "metadata.json")
 }
 
 func (s *Storage) HistoryPath() string {
-	return filepath.Join(s.dataDir, "history.json")
+	return filepath.Join(s.stateDir, "history.json")
 }
 
 func (s *Storage) PaginationPath() string {
-	return filepath.Join(s.dataDir, "pagination.json")
+	return filepath.Join(s.stateDir, "pagination.json")
 }
 
 func (s *Storage) LoadPaginationState() (*PaginationState, error) {
