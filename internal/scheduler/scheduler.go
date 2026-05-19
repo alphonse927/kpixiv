@@ -2,9 +2,7 @@ package scheduler
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
-	"math/big"
 	"sync"
 	"time"
 
@@ -167,39 +165,61 @@ func (sch *Scheduler) Stop() {
 	sch.wg.Wait()
 }
 
-func (sch *Scheduler) SetNext() error {
+func (sch *Scheduler) SetNext(q *storage.Queue) error {
 	log := logger.WithComponent("scheduler")
 
-	images, err := sch.storage.LoadMetadata()
-	if err != nil {
-		return fmt.Errorf("failed to load metadata: %w", err)
+	if q.IsEmpty() {
+		log.Debug("Queue empty, loading available images")
+		images, err := sch.storage.LoadMetadata()
+		if err != nil {
+			return fmt.Errorf("failed to load metadata: %w", err)
+		}
+
+		valid := make([]string, 0, len(images))
+		for id, meta := range images {
+			if meta.Path != "" {
+				valid = append(valid, id)
+			}
+		}
+
+		if err = q.AppendRandom(valid); err != nil {
+			return fmt.Errorf("failed to append images to queue: %w", err)
+		}
+
+		log.Debug("Loaded images into queue", "count", len(valid))
 	}
 
-	valid := make([]string, 0, len(images))
-	for id, meta := range images {
-		if meta.Path != "" {
-			valid = append(valid, id)
+	nextID, ok := q.Pop()
+	if !ok {
+		return fmt.Errorf("no wallpapers found in queue")
+	}
+
+	path, ok := sch.storage.GetImagePath(nextID)
+	if !ok {
+		log.Warn("Wallpaper not found in storage", "id", nextID)
+		images, err := sch.storage.LoadMetadata()
+		if err != nil {
+			return fmt.Errorf("failed to load metadata: %w", err)
+		}
+
+		for id, meta := range images {
+			if meta.Path != "" {
+				nextID = id
+				path = meta.Path
+				break
+			}
+		}
+
+		if path == "" {
+			return fmt.Errorf("no wallpapers available")
 		}
 	}
 
-	n := len(valid)
-	if n == 0 {
-		return fmt.Errorf("no wallpapers found")
-	}
-
-	r, rErr := rand.Int(rand.Reader, big.NewInt(int64(n)))
-	if rErr != nil {
-		return fmt.Errorf("failed to generate random index: %w", rErr)
-	}
-
-	nextID := valid[int(r.Int64())]
-	path := images[nextID].Path
-
-	if err = sch.setter.Set(path); err != nil {
+	if err := sch.setter.Set(path); err != nil {
 		return fmt.Errorf("failed to set wallpaper: %w", err)
 	}
 
-	if err = sch.storage.AddToHistory(nextID); err != nil {
+	if err := sch.storage.AddToHistory(nextID); err != nil {
 		return fmt.Errorf("failed to update history: %w", err)
 	}
 
@@ -221,8 +241,15 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 		return fmt.Errorf("failed to load metadata: %w", err)
 	}
 
-	currentID, _ := sch.storage.GetCurrentWallpaper()
-	nextID, _ := sch.storage.GetNextWallpaper()
+	currentID, cwErr := sch.storage.GetCurrentWallpaper()
+	if cwErr != nil {
+		return fmt.Errorf("failed to get current wallpaper: %w", cwErr)
+	}
+
+	nextID, nwErr := sch.storage.GetNextWallpaper()
+	if nwErr != nil {
+		return fmt.Errorf("failed to get next wallpaper: %w", nwErr)
+	}
 
 	targetID := ""
 	if currentID != "" {
@@ -251,12 +278,12 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 	path := images[targetID].Path
 
 	log.Info("Setting wallpaper", "path", path, "setter_type", fmt.Sprintf("%T", sch.setter))
-	if err := sch.setter.Set(path); err != nil {
+	if err = sch.setter.Set(path); err != nil {
 		return fmt.Errorf("failed to set wallpaper: %w", err)
 	}
 	log.Info("Wallpaper set successfully")
 
-	if err := sch.storage.AddToHistory(targetID); err != nil {
+	if err = sch.storage.AddToHistory(targetID); err != nil {
 		log.Warn("Failed to update history", "error", err)
 	}
 

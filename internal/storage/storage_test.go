@@ -77,7 +77,7 @@ func TestSaveAndLoadPaginationState(t *testing.T) {
 		},
 	}
 
-	if err := s.SavePaginationState(original); err != nil {
+	if err = s.SavePaginationState(original); err != nil {
 		t.Fatalf("SavePaginationState() returned error: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestGetRankingPage(t *testing.T) {
 		t.Errorf("GetRankingPage() for unknown key: got %d, want 1", page)
 	}
 
-	if err := s.SetRankingPage(config.RankingDailyMode.String(), 4); err != nil {
+	if err = s.SetRankingPage(config.RankingDailyMode.String(), 4); err != nil {
 		t.Fatalf("SetRankingPage() returned error: %v", err)
 	}
 
@@ -132,7 +132,7 @@ func TestSetRankingPageClamping(t *testing.T) {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
-	if err := s.SetRankingPage(config.RankingDailyMode.String(), 0); err != nil {
+	if err = s.SetRankingPage(config.RankingDailyMode.String(), 0); err != nil {
 		t.Fatalf("SetRankingPage(0) returned error: %v", err)
 	}
 
@@ -196,7 +196,7 @@ func TestSaveAndLoadMetadata(t *testing.T) {
 		},
 	}
 
-	if err := s.SaveMetadata(original); err != nil {
+	if err = s.SaveMetadata(original); err != nil {
 		t.Fatalf("SaveMetadata() returned error: %v", err)
 	}
 
@@ -231,7 +231,7 @@ func TestAddImage(t *testing.T) {
 		Width: 1920,
 	}
 
-	if err := s.AddImage(meta); err != nil {
+	if err = s.AddImage(meta); err != nil {
 		t.Fatalf("AddImage() returned error: %v", err)
 	}
 
@@ -298,7 +298,7 @@ func TestSaveAndLoadHistory(t *testing.T) {
 		UpdatedAt: time.Now(),
 	}
 
-	if err := s.SaveHistory(original); err != nil {
+	if err = s.SaveHistory(original); err != nil {
 		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
@@ -323,7 +323,7 @@ func TestAddToHistory(t *testing.T) {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
-	if err := s.AddToHistory("AAAAA"); err != nil {
+	if err = s.AddToHistory("AAAAA"); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestAddToHistory(t *testing.T) {
 		t.Errorf("AddToHistory() Current: got %q, want %q", history.Current, "AAAAA")
 	}
 
-	if err := s.AddToHistory("BBBBB"); err != nil {
+	if err = s.AddToHistory("BBBBB"); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 
@@ -343,6 +343,7 @@ func TestAddToHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadHistory() returned error: %v", err)
 	}
+
 	if history.Current != "BBBBB" {
 		t.Errorf("AddToHistory() second call Current: got %q, want %q", history.Current, "BBBBB")
 	}
@@ -364,14 +365,16 @@ func TestAddToHistoryTruncatesHistory(t *testing.T) {
 		Images:    make([]string, 50),
 		UpdatedAt: time.Now(),
 	}
-	for i := 0; i < 50; i++ {
+
+	for i := range 50 {
 		history.Images[i] = fmt.Sprintf("id%02d", i)
 	}
-	if err := s.SaveHistory(history); err != nil {
+
+	if err = s.SaveHistory(history); err != nil {
 		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
-	if err := s.AddToHistory("idNew"); err != nil {
+	if err = s.AddToHistory("idNew"); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 
@@ -407,13 +410,15 @@ func TestGetCurrentWallpaper(t *testing.T) {
 		t.Errorf("GetCurrentWallpaper() with no history: got %q, want empty", current)
 	}
 
-	if err := s.AddToHistory("XXXXX"); err != nil {
+	if err = s.AddToHistory("XXXXX"); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
+
 	current, err = s.GetCurrentWallpaper()
 	if err != nil {
 		t.Fatalf("GetCurrentWallpaper() returned error: %v", err)
 	}
+
 	if current != "XXXXX" {
 		t.Errorf("GetCurrentWallpaper() after AddToHistory: got %q, want %q", current, "XXXXX")
 	}
@@ -439,7 +444,8 @@ func TestGetNextWallpaper(t *testing.T) {
 		Images:    []string{"AAAAA", "BBBBB", "CCCCC", "DDDDD"},
 		UpdatedAt: time.Now(),
 	}
-	if err := s.SaveHistory(history); err != nil {
+
+	if err = s.SaveHistory(history); err != nil {
 		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
@@ -451,7 +457,7 @@ func TestGetNextWallpaper(t *testing.T) {
 		t.Errorf("GetNextWallpaper() at position 1: got %q, want %q", next, "CCCCC")
 	}
 
-	if err := s.AddToHistory("CCCCC"); err != nil {
+	if err = s.AddToHistory("CCCCC"); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 	next, err = s.GetNextWallpaper()
@@ -475,7 +481,8 @@ func TestGetNextWallpaperAtCurrent(t *testing.T) {
 		Images:    []string{"AAAAA", "BBBBB", "CCCCC"},
 		UpdatedAt: time.Now(),
 	}
-	if err := s.SaveHistory(history); err != nil {
+
+	if err = s.SaveHistory(history); err != nil {
 		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
@@ -500,7 +507,8 @@ func TestGetNextWallpaperEmptyHistory(t *testing.T) {
 		Images:    []string{},
 		UpdatedAt: time.Now(),
 	}
-	if err := s.SaveHistory(history); err != nil {
+
+	if err = s.SaveHistory(history); err != nil {
 		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
