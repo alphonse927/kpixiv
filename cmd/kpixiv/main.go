@@ -254,9 +254,24 @@ var fetchCmd = &cobra.Command{
 
 		c.Add(images)
 
+		imageIDs := make([]string, 0, len(filteredImages))
+		for _, img := range filteredImages {
+			imageIDs = append(imageIDs, img.ID)
+		}
+
+		q := storage.NewQueue(st.StateDir())
+		if err := q.Load(); err != nil {
+			log.Warn("Failed to load queue", "error", err)
+		}
+
+		if err := q.AppendRandom(imageIDs); err != nil {
+			return fmt.Errorf("failed to append images to queue: %w", err)
+		}
+
+		log.Debug("Appended to queue", "count", len(imageIDs))
+
 		fmt.Println("Fetch complete!")
 		fmt.Printf("Total: %d, Filtered: %d, Downloaded: %d, Skipped: %d\n", len(images), filtered, downloaded, skipped)
-
 		return nil
 	},
 }
@@ -288,11 +303,21 @@ var nextCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to initialize pixiv client: %w", err)
 		}
-		c := cache.NewCache(st)
 
+		c := cache.NewCache(st)
 		sch := scheduler.New(cfg, st, c, pixivClient, setter)
 
-		if err := sch.SetNext(); err != nil {
+		// Initializing and loading images queue
+		q := storage.NewQueue(st.StateDir())
+		if err := q.Load(); err != nil {
+			log.Warn("Failed to load queue", "error", err)
+		}
+
+		if err := q.Load(); err != nil {
+			return fmt.Errorf("failed to load queue: %w", err)
+		}
+
+		if err := sch.SetNext(q); err != nil {
 			return err
 		}
 

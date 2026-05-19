@@ -147,9 +147,10 @@ func TestSetNextNoWallpapers(t *testing.T) {
 	c := cache.NewCache(nil)
 	m := &mockPixivClient{}
 	setter := &mockSetter{}
+	q := storage.NewQueue(s.StateDir())
 
 	sch := New(cfg, s, c, m, setter)
-	if err := sch.SetNext(); err == nil {
+	if err := sch.SetNext(q); err == nil {
 		t.Error("SetNext() with no wallpapers: got nil, want err")
 	}
 
