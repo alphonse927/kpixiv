@@ -176,29 +176,17 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 
 	if q.IsEmpty() {
 		log.Debug("Queue empty, loading available images from Ranking folder")
-
-		rankingDir := sch.storage.RankingDir()
-		entries, err := os.ReadDir(rankingDir)
-		if err != nil {
-			return fmt.Errorf("failed to read ranking directory: %w", err)
-		}
-
-		valid := make([]string, 0, len(entries))
-		for _, entry := range entries {
-			if !isValidWallpaperFile(entry, rankingDir) {
-				continue
-			}
-
-			name := entry.Name()
-			id := strings.TrimSuffix(name, filepath.Ext(name))
-			valid = append(valid, id)
+		valid, iErr := sch.loadDownloadedImages()
+		if iErr != nil {
+			return fmt.Errorf("failed to load downloaded images: %w", iErr)
 		}
 
 		if len(valid) == 0 {
-			return fmt.Errorf("no wallpapers found in ranking folder")
+			log.Info("No available images found. Skipping wallpaper rotation.")
+			return nil
 		}
 
-		if err = q.AppendRandom(valid); err != nil {
+		if err := q.AppendRandom(valid); err != nil {
 			return fmt.Errorf("failed to append images to queue: %w", err)
 		}
 
@@ -305,6 +293,27 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 
 	log.Info("Applied wallpaper on startup", "path", path)
 	return nil
+}
+
+func (sch *Scheduler) loadDownloadedImages() ([]string, error) {
+	rankingDir := sch.storage.RankingDir()
+	entries, err := os.ReadDir(rankingDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read ranking directory: %w", err)
+	}
+
+	valid := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !isValidWallpaperFile(entry, rankingDir) {
+			continue
+		}
+
+		name := entry.Name()
+		id := strings.TrimSuffix(name, filepath.Ext(name))
+		valid = append(valid, id)
+	}
+
+	return valid, nil
 }
 
 func isValidWallpaperFile(entry os.DirEntry, rankingDir string) bool {

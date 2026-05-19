@@ -64,7 +64,6 @@ var fetchCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to initialize pixiv client: %w", err)
 		}
-		c := cache.NewCache(st)
 
 		ctx := context.Background()
 		rMode := cfg.Pixiv.Ranking.String()
@@ -252,8 +251,6 @@ var fetchCmd = &cobra.Command{
 
 		log.Info("Download summary", "downloaded", downloaded, "skipped", skipped)
 
-		c.Add(images)
-
 		imageIDs := make([]string, 0, len(filteredImages))
 		for _, img := range filteredImages {
 			imageIDs = append(imageIDs, img.ID)
@@ -287,7 +284,7 @@ var nextCmd = &cobra.Command{
 			return fmt.Errorf("failed to get home directory: %w", hErr)
 		}
 
-		st, err := storage.New(homeDir, cfg.DownloadPath)
+		s, err := storage.New(homeDir, cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
@@ -299,24 +296,13 @@ var nextCmd = &cobra.Command{
 			setter = wallpaper.NewKDESetter()
 		}
 
-		pixivClient, err := pixiv.NewClient()
-		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
-		}
-
-		c := cache.NewCache(st)
-		sch := scheduler.New(cfg, st, c, pixivClient, setter)
-
 		// Initializing and loading images queue
-		q := storage.NewQueue(st.StateDir())
-		if err := q.Load(); err != nil {
-			log.Warn("Failed to load queue", "error", err)
-		}
-
+		q := storage.NewQueue(s.StateDir())
 		if err := q.Load(); err != nil {
 			return fmt.Errorf("failed to load queue: %w", err)
 		}
 
+		sch := scheduler.New(cfg, s, nil, nil, setter)
 		if err := sch.SetNext(q); err != nil {
 			return err
 		}
