@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -169,17 +170,26 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 	log := logger.WithComponent("scheduler")
 
 	if q.IsEmpty() {
-		log.Debug("Queue empty, loading available images")
-		images, err := sch.storage.LoadMetadata()
+		log.Debug("Queue empty, loading available images from Ranking folder")
+
+		rankingDir := sch.storage.RankingDir()
+		entries, err := os.ReadDir(rankingDir)
 		if err != nil {
-			return fmt.Errorf("failed to load metadata: %w", err)
+			return fmt.Errorf("failed to read ranking directory: %w", err)
 		}
 
-		valid := make([]string, 0, len(images))
-		for id, meta := range images {
-			if meta.Path != "" {
-				valid = append(valid, id)
+		valid := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
 			}
+			name := entry.Name()
+			id := name[:len(name)-4]
+			valid = append(valid, id)
+		}
+
+		if len(valid) == 0 {
+			return fmt.Errorf("no wallpapers found in ranking folder")
 		}
 
 		if err = q.AppendRandom(valid); err != nil {
