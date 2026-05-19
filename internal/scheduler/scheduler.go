@@ -3,7 +3,12 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -138,12 +143,12 @@ func (sch *Scheduler) rotateWallpaper() {
 		}
 	}
 
-	if err := sch.setter.Set(path); err != nil {
+	if err = sch.setter.Set(path); err != nil {
 		log.Error("Failed to set wallpaper", "error", err)
 		return
 	}
 
-	if err := sch.storage.AddToHistory(nextID); err != nil {
+	if err = sch.storage.AddToHistory(nextID); err != nil {
 		log.Error("Failed to update history", "error", err)
 	}
 
@@ -180,11 +185,12 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 
 		valid := make([]string, 0, len(entries))
 		for _, entry := range entries {
-			if entry.IsDir() {
+			if !isValidWallpaperFile(entry, rankingDir) {
 				continue
 			}
+
 			name := entry.Name()
-			id := name[:len(name)-4]
+			id := strings.TrimSuffix(name, filepath.Ext(name))
 			valid = append(valid, id)
 		}
 
@@ -299,4 +305,44 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 
 	log.Info("Applied wallpaper on startup", "path", path)
 	return nil
+}
+
+func isValidWallpaperFile(entry os.DirEntry, rankingDir string) bool {
+	if entry.IsDir() {
+		return false
+	}
+
+	name := entry.Name()
+	ext := strings.ToLower(filepath.Ext(name))
+
+	switch ext {
+	case ".jpg", ".png":
+	default:
+		return false
+	}
+
+	info, err := entry.Info()
+	if err != nil {
+		return false
+	}
+
+	// Reject empty files
+	if info.Size() == 0 {
+		return false
+	}
+
+	// Ensure image is decodable
+	path := filepath.Join(rankingDir, name)
+	f, oErr := os.Open(path)
+	if oErr != nil {
+		return false
+	}
+
+	defer func() {
+		//nolint:errcheck
+		_ = f.Close()
+	}()
+
+	_, _, err = image.DecodeConfig(f)
+	return err == nil
 }

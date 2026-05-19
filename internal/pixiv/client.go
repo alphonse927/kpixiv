@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -241,15 +242,19 @@ func parseNextPage(next any) int {
 func (c *Client) DownloadImage(ctx context.Context, image *Image, destPath string) error {
 	log := logger.WithComponent("pixiv")
 	downloadURL := image.URL
+
 	if strings.Contains(downloadURL, "/img-master/") && c.resolver != nil {
 		originalURL, err := c.resolver.ResolveOriginalURL(ctx, image.URL)
 		if err != nil {
 			return fmt.Errorf("failed to resolve original URL for %s: %w", image.ID, err)
 		}
+
 		downloadURL = originalURL
-		if ext := path.Ext(downloadURL); ext != "" {
-			basePath := destPath[:len(destPath)-len(path.Ext(destPath))]
-			destPath = basePath + ext
+		if u, err := url.Parse(downloadURL); err == nil {
+			if ext := path.Ext(u.Path); ext != "" {
+				basePath := strings.TrimSuffix(destPath, filepath.Ext(destPath))
+				destPath = basePath + ext
+			}
 		}
 	}
 
@@ -280,10 +285,11 @@ func (c *Client) DownloadImage(ctx context.Context, image *Image, destPath strin
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp(destDir, ".kpixiv-*.tmp")
+	tmpFile, err := os.CreateTemp(destDir, ".download-*")
 	if err != nil {
 		return fmt.Errorf("failed to create temporary file: %w", err)
 	}
+
 	tmpPath := tmpFile.Name()
 	defer func() {
 		//nolint:errcheck
@@ -306,7 +312,7 @@ func (c *Client) DownloadImage(ctx context.Context, image *Image, destPath strin
 	}
 
 	if err = os.Rename(tmpPath, destPath); err != nil {
-		return fmt.Errorf("failed to move temporary file into place: %w", err)
+		return fmt.Errorf("failed to move temporary file: %w", err)
 	}
 
 	log.Debug("Image downloaded", "path", destPath, "bytes", written)
