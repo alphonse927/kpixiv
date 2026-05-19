@@ -219,11 +219,12 @@ func (s *Storage) GetImagePath(id string) (string, bool) {
 	}
 
 	meta, exists := images[id]
-	if !exists {
-		return "", false
+	if exists {
+		return meta.Path, true
 	}
 
-	return meta.Path, true
+	// Falling back to the ranking directory
+	return s.findImageInRankingDir(id)
 }
 
 func (s *Storage) LoadHistory() (*History, error) {
@@ -240,7 +241,7 @@ func (s *Storage) LoadHistory() (*History, error) {
 	}
 
 	var history History
-	if err := json.Unmarshal(data, &history); err != nil {
+	if err = json.Unmarshal(data, &history); err != nil {
 		return nil, err
 	}
 
@@ -304,4 +305,33 @@ func (s *Storage) GetNextWallpaper() (string, error) {
 	}
 
 	return history.Images[currentIdx+1], nil
+}
+
+func (s *Storage) findImageInRankingDir(id string) (string, bool) {
+	rankingDir := s.RankingDir()
+
+	var foundPath string
+	err := filepath.Walk(rankingDir, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check if filename contains the image ID
+		filename := filepath.Base(path)
+		if filepath.Ext(filename) != "" {
+			nameWithoutExt := filename[:len(filename)-len(filepath.Ext(filename))]
+			if nameWithoutExt == id || filepath.Base(filepath.Dir(path)) == id {
+				foundPath = path
+				return filepath.SkipAll
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil || foundPath == "" {
+		return "", false
+	}
+
+	return foundPath, true
 }
