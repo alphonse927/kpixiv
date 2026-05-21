@@ -69,12 +69,11 @@ func (q *Queue) AppendRandom(items []string) error {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	if len(q.items) == 0 {
-		q.items = q.shuffleCopy(items)
-	} else {
-		shuffled := q.shuffleCopy(items)
-		q.items = append(q.items, shuffled...)
-	}
+	combined := make([]string, 0, len(q.items)+len(items))
+	combined = append(combined, q.items...)
+	combined = append(combined, items...)
+
+	q.items = q.shuffleCopy(combined)
 
 	return q.Save()
 }
