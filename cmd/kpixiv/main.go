@@ -79,7 +79,7 @@ var fetchCmd = &cobra.Command{
 		}
 
 		fmt.Println("Fetch complete!")
-		fmt.Printf("Total: %d, Filtered: %d, Skipped: %d, Failed: %d\n", result.Total, result.Filtered, result.Skipped, result.Failed)
+		fmt.Printf("Total: %d, Downloaded: %d, Filtered: %d, Skipped: %d, Failed: %d\n", result.Total, result.Downloaded, result.Filtered, result.Skipped, result.Failed)
 		return nil
 	},
 }
