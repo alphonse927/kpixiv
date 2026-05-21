@@ -3,17 +3,14 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"image"
-	_ "image/jpeg"
-	_ "image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/alphonse927/kpixiv/internal/cache"
 	"github.com/alphonse927/kpixiv/internal/config"
+	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/storage"
@@ -23,7 +20,6 @@ import (
 type Scheduler struct {
 	cfg           *config.Config
 	storage       *storage.Storage
-	cache         *cache.Cache
 	pixiv         pixiv.ImageClient
 	setter        wallpaper.Setter
 	page          int
@@ -35,11 +31,10 @@ type Scheduler struct {
 	running       bool
 }
 
-func New(cfg *config.Config, st *storage.Storage, c *cache.Cache, p pixiv.ImageClient, s wallpaper.Setter) *Scheduler {
-	return &Scheduler{
+func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpaper.Setter) *Scheduler {
+	sch := &Scheduler{
 		cfg:           cfg,
 		storage:       st,
-		cache:         c,
 		pixiv:         p,
 		setter:        s,
 		page:          1,
@@ -47,6 +42,13 @@ func New(cfg *config.Config, st *storage.Storage, c *cache.Cache, p pixiv.ImageC
 		fetchInterval: time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute,
 		stopCh:        make(chan struct{}),
 	}
+
+	pageKey := fmt.Sprintf("%s:%t", cfg.Pixiv.Ranking, cfg.Pixiv.R18)
+	if page, err := st.GetRankingPage(pageKey); err == nil && page > 1 {
+		sch.page = page
+	}
+
+	return sch
 }
 
 func (sch *Scheduler) Run(ctx context.Context) error {
@@ -94,65 +96,146 @@ func (sch *Scheduler) run(ctx context.Context) {
 func (sch *Scheduler) fetchImages(ctx context.Context) {
 	log := logger.WithComponent("scheduler")
 
-	nextPage, err := sch.cache.Fetch(ctx, sch.pixiv, sch.cfg.Pixiv.Ranking.String(), sch.page, sch.cfg.Pixiv.R18)
+	f := fetcher.NewFetcher(sch.cfg, sch.storage, sch.pixiv)
+	f.SetPage(sch.page)
+
+	result, err := f.Fetch(ctx)
 	if err != nil {
-		log.Error("Failed to fetch images", "error", err)
-	} else {
-		sch.page = nextPage
-		log.Debug("Advanced ranking page", "nextPage", sch.page)
+		log.Error("Failed to fetch", "error", err)
+		return
 	}
+
+	sch.page = result.NextPage
+	log.Debug("Advanced ranking page", "nextPage", sch.page, "downloaded", result.Downloaded, "filtered", result.Filtered)
 }
 
 func (sch *Scheduler) rotateWallpaper() {
 	log := logger.WithComponent("scheduler")
 
-	images := sch.cache.GetFiltered(sch.cfg.Pixiv.MinWidth, sch.cfg.Pixiv.MinHeight, sch.cfg.Pixiv.LandscapeOnly)
-	if len(images) == 0 {
-		log.Warn("No images available in cache")
+	q := storage.NewQueue(sch.storage.StateDir())
+	if err := q.Load(); err != nil {
+		log.Error("Failed to load queue", "error", err)
 		return
 	}
 
-	nextID, err := sch.storage.GetNextWallpaper()
-	if err != nil {
-		log.Error("Failed to get next wallpaper from history", "error", err)
-		return
-	}
-
-	if nextID == "" {
-		log.Info("No wallpaper in history, setting first available")
-		nextID = images[0].ID
-	}
-
-	path, ok := sch.storage.GetImagePath(nextID)
-	if !ok {
-		log.Warn("Wallpaper not found in storage metadata", "id", nextID)
-
-		for _, img := range images {
-			candidatePath, candidateOK := sch.storage.GetImagePath(img.ID)
-			if candidateOK {
-				nextID = img.ID
-				path = candidatePath
-				ok = true
-				break
-			}
+	if q.IsEmpty() {
+		if err := sch.refillQueueFromRanking(q); err != nil {
+			log.Warn("Failed to refill queue", "error", err)
+			return
 		}
+	}
 
-		if !ok {
+	nextID, hasNext := q.Pop()
+	if !hasNext {
+		log.Warn("No wallpapers found in queue")
+		return
+	}
+
+	path, pathFound := sch.storage.GetImagePath(nextID)
+	if !pathFound {
+		nextID, path, pathFound = sch.findFallbackWallpaper()
+		if !pathFound {
 			log.Warn("No locally downloaded wallpapers available to apply")
 			return
 		}
 	}
 
-	if err = sch.setter.Set(path); err != nil {
+	if err := sch.setter.Set(path); err != nil {
 		log.Error("Failed to set wallpaper", "error", err)
 		return
 	}
 
-	if err = sch.storage.AddToHistory(nextID); err != nil {
+	if err := sch.storage.AddToHistory(nextID); err != nil {
 		log.Error("Failed to update history", "error", err)
 	}
 
 	log.Info("Wallpaper set", "path", path)
+}
+
+func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue) error {
+	log := logger.WithComponent("scheduler")
+	log.Debug("Queue empty, loading available images from Ranking folder")
+
+	entries, err := os.ReadDir(sch.storage.RankingDir())
+	if err != nil {
+		return fmt.Errorf("failed to read ranking directory: %w", err)
+	}
+
+	valid := make([]string, 0)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !isValidWallpaperFile(entry) {
+			continue
+		}
+
+		name := entry.Name()
+		ext := filepath.Ext(name)
+		id := strings.TrimSuffix(name, ext)
+		valid = append(valid, id)
+	}
+
+	if len(valid) == 0 {
+		return fmt.Errorf("no wallpapers found in ranking folder")
+	}
+
+	if err := q.AppendRandom(valid); err != nil {
+		return fmt.Errorf("failed to append to queue: %w", err)
+	}
+
+	log.Debug("Loaded images into queue", "count", len(valid))
+	return nil
+}
+
+func isValidWallpaperFile(entry os.DirEntry) bool {
+	name := entry.Name()
+	ext := strings.ToLower(filepath.Ext(name))
+
+	switch ext {
+	case ".jpg", ".jpeg", ".png":
+	default:
+		return false
+	}
+
+	info, err := entry.Info()
+	if err != nil {
+		return false
+	}
+
+	if info.Size() == 0 {
+		return false
+	}
+
+	return true
+}
+
+func (sch *Scheduler) findFallbackWallpaper() (string, string, bool) {
+	log := logger.WithComponent("scheduler")
+	log.Warn("Wallpaper not found in storage metadata, searching for fallback")
+
+	entries, err := os.ReadDir(sch.storage.RankingDir())
+	if err != nil {
+		return "", "", false
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if !isValidWallpaperFile(entry) {
+			continue
+		}
+
+		name := entry.Name()
+		ext := filepath.Ext(name)
+		id := strings.TrimSuffix(name, ext)
+		if p, found := sch.storage.GetImagePath(id); found {
+			return id, p, true
+		}
+	}
+
+	return "", "", false
 }
 
 func (sch *Scheduler) Stop() {
@@ -176,21 +259,10 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 
 	if q.IsEmpty() {
 		log.Debug("Queue empty, loading available images from Ranking folder")
-		valid, iErr := sch.loadDownloadedImages()
-		if iErr != nil {
-			return fmt.Errorf("failed to load downloaded images: %w", iErr)
-		}
 
-		if len(valid) == 0 {
-			log.Info("No available images found. Skipping wallpaper rotation.")
-			return nil
+		if err := sch.refillQueueFromRanking(q); err != nil {
+			return err
 		}
-
-		if err := q.AppendRandom(valid); err != nil {
-			return fmt.Errorf("failed to append images to queue: %w", err)
-		}
-
-		log.Debug("Loaded images into queue", "count", len(valid))
 	}
 
 	nextID, ok := q.Pop()
@@ -201,20 +273,9 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 	path, ok := sch.storage.GetImagePath(nextID)
 	if !ok {
 		log.Warn("Wallpaper not found in storage", "id", nextID)
-		images, err := sch.storage.LoadMetadata()
-		if err != nil {
-			return fmt.Errorf("failed to load metadata: %w", err)
-		}
 
-		for id, meta := range images {
-			if meta.Path != "" {
-				nextID = id
-				path = meta.Path
-				break
-			}
-		}
-
-		if path == "" {
+		nextID, path, ok = sch.findFallbackWallpaper()
+		if !ok {
 			return fmt.Errorf("no wallpapers available")
 		}
 	}
@@ -285,73 +346,11 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 	if err = sch.setter.Set(path); err != nil {
 		return fmt.Errorf("failed to set wallpaper: %w", err)
 	}
-	log.Info("Wallpaper set successfully")
 
 	if err = sch.storage.AddToHistory(targetID); err != nil {
 		log.Warn("Failed to update history", "error", err)
 	}
 
-	log.Info("Applied wallpaper on startup", "path", path)
+	log.Info("Wallpaper set successfully", "path", path)
 	return nil
-}
-
-func (sch *Scheduler) loadDownloadedImages() ([]string, error) {
-	rankingDir := sch.storage.RankingDir()
-	entries, err := os.ReadDir(rankingDir)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read ranking directory: %w", err)
-	}
-
-	valid := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if !isValidWallpaperFile(entry, rankingDir) {
-			continue
-		}
-
-		name := entry.Name()
-		id := strings.TrimSuffix(name, filepath.Ext(name))
-		valid = append(valid, id)
-	}
-
-	return valid, nil
-}
-
-func isValidWallpaperFile(entry os.DirEntry, rankingDir string) bool {
-	if entry.IsDir() {
-		return false
-	}
-
-	name := entry.Name()
-	ext := strings.ToLower(filepath.Ext(name))
-
-	switch ext {
-	case ".jpg", ".png":
-	default:
-		return false
-	}
-
-	info, err := entry.Info()
-	if err != nil {
-		return false
-	}
-
-	// Reject empty files
-	if info.Size() == 0 {
-		return false
-	}
-
-	// Ensure image is decodable
-	path := filepath.Join(rankingDir, name)
-	f, oErr := os.Open(path)
-	if oErr != nil {
-		return false
-	}
-
-	defer func() {
-		//nolint:errcheck
-		_ = f.Close()
-	}()
-
-	_, _, err = image.DecodeConfig(f)
-	return err == nil
 }

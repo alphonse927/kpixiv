@@ -10,11 +10,12 @@ import (
 type ImageMeta struct {
 	ID           string    `json:"id"`
 	Path         string    `json:"path"`
-	Width        int       `json:"width"`
-	Height       int       `json:"height"`
 	Title        string    `json:"title"`
 	Artist       string    `json:"artist"`
 	ArtistID     string    `json:"artist_id"`
+	Width        int       `json:"width"`
+	Height       int       `json:"height"`
+	Rank         int       `json:"rank"`
 	DownloadedAt time.Time `json:"downloaded_at"`
 }
 
