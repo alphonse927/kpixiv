@@ -275,29 +275,37 @@ func TestQueueFetchAppendsRandomly(t *testing.T) {
 	}
 
 	items := q.GetAll()
-	firstThree := items[:3]
-	newItems := items[3:]
 
-	hasOriginal := false
-	for _, item := range firstThree {
-		if item == "A" || item == "B" || item == "C" {
-			hasOriginal = true
-			break
+	contains := func(target string) bool {
+		for _, item := range items {
+			if item == target {
+				return true
+			}
 		}
-	}
-	if !hasOriginal {
-		t.Error("AppendRandom() should preserve original items")
+		return false
 	}
 
-	hasNew := false
-	for _, item := range newItems {
-		if item == "D" || item == "E" || item == "F" {
-			hasNew = true
-			break
+	for _, expected := range []string{"A", "B", "C", "D", "E", "F"} {
+		if !contains(expected) {
+			t.Errorf("AppendRandom() should contain %s", expected)
 		}
 	}
-	if !hasNew {
-		t.Error("AppendRandom() should include new items")
+}
+
+func TestQueueAppendDoesNotDuplicateIDs(t *testing.T) {
+	tmp := t.TempDir()
+	q := NewQueue(tmp)
+
+	if err := q.AppendRandom([]string{"A", "B", "C"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	if err := q.AppendRandom([]string{"B", "C", "D"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	if q.Len() != 4 {
+		t.Errorf("AppendRandom() with overlapping IDs: got %d, want 4", q.Len())
 	}
 }
 
