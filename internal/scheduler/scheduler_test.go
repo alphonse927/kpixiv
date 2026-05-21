@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alphonse927/kpixiv/internal/cache"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
@@ -75,11 +74,10 @@ func testConfig() *config.Config {
 func TestNew(t *testing.T) {
 	cfg := testConfig()
 	s := testStorage(t)
-	c := cache.NewCache(nil)
 	m := &mockPixivClient{}
 	setter := &mockSetter{}
 
-	sch := New(cfg, s, c, m, setter)
+	sch := New(cfg, s, m, setter)
 	if sch == nil {
 		t.Fatal("New() returned nil")
 	}
@@ -88,11 +86,10 @@ func TestNew(t *testing.T) {
 func TestRunAlreadyRunning(t *testing.T) {
 	cfg := testConfig()
 	s := testStorage(t)
-	c := cache.NewCache(nil)
 	m := &mockPixivClient{}
 	setter := &mockSetter{}
 
-	sch := New(cfg, s, c, m, setter)
+	sch := New(cfg, s, m, setter)
 	ctx := context.Background()
 
 	err := sch.Run(ctx)
@@ -111,11 +108,10 @@ func TestRunAlreadyRunning(t *testing.T) {
 func TestStop(t *testing.T) {
 	cfg := testConfig()
 	s := testStorage(t)
-	c := cache.NewCache(nil)
 	m := &mockPixivClient{}
 	setter := &mockSetter{}
 
-	sch := New(cfg, s, c, m, setter)
+	sch := New(cfg, s, m, setter)
 	ctx := context.Background()
 
 	_ = sch.Run(ctx)
@@ -129,11 +125,10 @@ func TestStop(t *testing.T) {
 func TestStopMultipleTimes(t *testing.T) {
 	cfg := testConfig()
 	s := testStorage(t)
-	c := cache.NewCache(nil)
 	m := &mockPixivClient{}
 	setter := &mockSetter{}
 
-	sch := New(cfg, s, c, m, setter)
+	sch := New(cfg, s, m, setter)
 	ctx := context.Background()
 
 	_ = sch.Run(ctx)
@@ -144,12 +139,11 @@ func TestStopMultipleTimes(t *testing.T) {
 func TestSetNextNoWallpapers(t *testing.T) {
 	cfg := testConfig()
 	s := testStorage(t)
-	c := cache.NewCache(nil)
 	m := &mockPixivClient{}
 	setter := &mockSetter{}
 	q := storage.NewQueue(s.StateDir())
 
-	sch := New(cfg, s, c, m, setter)
+	sch := New(cfg, s, m, setter)
 	if err := sch.SetNext(q); err == nil {
 		t.Error("SetNext() with no wallpapers: got nil, want err")
 	}
@@ -160,25 +154,24 @@ func TestSetNextNoWallpapers(t *testing.T) {
 }
 
 func TestSetNextWithWallpapers(t *testing.T) {
-	t.Skip("SetNext requires images in storage, not cache")
+	t.Skip("SetNext requires queue setup")
 }
 
 func TestSetNextAddsToHistory(t *testing.T) {
-	t.Skip("SetNext requires images in storage, not cache")
+	t.Skip("SetNext requires queue setup")
 }
 
 func TestSetNextIsRandom(t *testing.T) {
-	t.Skip("SetNext requires images in storage, not cache")
+	t.Skip("SetNext requires queue setup")
 }
 
 func TestIsRunning(t *testing.T) {
 	cfg := testConfig()
 	s := testStorage(t)
-	c := cache.NewCache(nil)
 	m := &mockPixivClient{}
 	setter := &mockSetter{}
 
-	sch := New(cfg, s, c, m, setter)
+	sch := New(cfg, s, m, setter)
 
 	if sch.IsRunning() {
 		t.Error("IsRunning() before Run(): got true, want false")

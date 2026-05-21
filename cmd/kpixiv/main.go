@@ -5,14 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"runtime"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/alphonse927/kpixiv/internal/cache"
 	"github.com/alphonse927/kpixiv/internal/config"
+	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
@@ -53,8 +50,6 @@ var fetchCmd = &cobra.Command{
 	Use:   "fetch",
 	Short: "Fetch wallpapers from Pixiv",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		log := logger.WithComponent("fetch")
-
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
@@ -66,209 +61,25 @@ var fetchCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		rMode := cfg.Pixiv.Ranking.String()
-		pageKey := fmt.Sprintf("%s:%t", cfg.Pixiv.Ranking, cfg.Pixiv.R18)
-		page, err := st.GetRankingPage(pageKey)
-		if err != nil {
+		f := fetcher.NewFetcher(cfg, st, pixivClient)
+		if err = f.LoadPage(); err != nil {
 			return fmt.Errorf("failed to load ranking page: %w", err)
 		}
 
-		images, nextPage, err := pixivClient.FetchRanking(ctx, rMode, page, cfg.Pixiv.R18)
-		if err != nil {
-			return fmt.Errorf("failed to fetch rankings: %w", err)
-		}
-
-		if err = st.SetRankingPage(pageKey, nextPage); err != nil {
-			return fmt.Errorf("failed to save next ranking page: %w", err)
-		}
-
-		filtered := 0
-		filteredImages := make([]pixiv.Image, 0)
-		for _, img := range images {
-			if img.Width < cfg.Pixiv.MinWidth || img.Height < cfg.Pixiv.MinHeight {
-				continue
-			}
-			if cfg.Pixiv.LandscapeOnly && img.Height > img.Width {
-				continue
-			}
-			filtered++
-			filteredImages = append(filteredImages, img)
-		}
-
-		log.Debug("Filtered images", "count", filtered, "minWidth", cfg.Pixiv.MinWidth, "minHeight", cfg.Pixiv.MinHeight, "landscapeOnly", cfg.Pixiv.LandscapeOnly)
 		if dryRun {
-			log.Info("Dry-run mode: skipping downloads", "candidates", len(filteredImages))
-			fmt.Println("Fetch dry-run complete!")
-			fmt.Printf("Total: %d, Filtered: %d, Downloaded: 0, Skipped: 0\n", len(images), filtered)
+			if _, err = f.DryRun(ctx); err != nil {
+				return fmt.Errorf("failed to fetch: %w", err)
+			}
 			return nil
 		}
 
-		rankingDir := st.RankingDir()
-		metadata, err := st.LoadMetadata()
+		result, err := f.Fetch(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to load metadata: %w", err)
+			return fmt.Errorf("failed to fetch: %w", err)
 		}
-
-		downloaded := 0
-		skipped := 0
-
-		pending := make([]pixiv.Image, 0, len(filteredImages))
-		for _, img := range filteredImages {
-			if existing, ok := metadata[img.ID]; ok {
-				if _, err := os.Stat(existing.Path); err == nil {
-					skipped++
-					log.Debug("Skipping existing image from metadata", "id", img.ID, "path", existing.Path)
-					continue
-				}
-			}
-
-			destPath := filepath.Join(rankingDir, img.ID+".jpg")
-			altPath := filepath.Join(rankingDir, img.ID+".png")
-
-			if _, err := os.Stat(destPath); err == nil {
-				skipped++
-				metadata[img.ID] = &storage.ImageMeta{
-					ID:           img.ID,
-					Path:         destPath,
-					Width:        img.Width,
-					Height:       img.Height,
-					Title:        img.Title,
-					Artist:       img.Artist,
-					ArtistID:     img.ArtistID,
-					DownloadedAt: time.Now(),
-				}
-				continue
-			}
-
-			if _, err := os.Stat(altPath); err == nil {
-				skipped++
-				metadata[img.ID] = &storage.ImageMeta{
-					ID:           img.ID,
-					Path:         altPath,
-					Width:        img.Width,
-					Height:       img.Height,
-					Title:        img.Title,
-					Artist:       img.Artist,
-					ArtistID:     img.ArtistID,
-					DownloadedAt: time.Now(),
-				}
-				continue
-			}
-
-			pending = append(pending, img)
-		}
-
-		type downloadResult struct {
-			img     pixiv.Image
-			path    string
-			err     error
-			skipped bool
-		}
-
-		workers := runtime.NumCPU()
-		if workers > 4 {
-			workers = 4
-		}
-		if workers < 1 {
-			workers = 1
-		}
-
-		jobs := make(chan pixiv.Image)
-		results := make(chan downloadResult, len(pending))
-		var wg sync.WaitGroup
-
-		for range workers {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for img := range jobs {
-					destPath := filepath.Join(rankingDir, img.ID+".jpg")
-					altPath := filepath.Join(rankingDir, img.ID+".png")
-
-					if _, err := os.Stat(destPath); err == nil {
-						results <- downloadResult{img: img, path: destPath, skipped: true}
-						continue
-					}
-					if _, err := os.Stat(altPath); err == nil {
-						results <- downloadResult{img: img, path: altPath, skipped: true}
-						continue
-					}
-
-					if err := pixivClient.DownloadImage(ctx, &img, destPath); err != nil {
-						results <- downloadResult{img: img, err: err}
-						continue
-					}
-
-					finalPath := destPath
-					if _, err := os.Stat(destPath); os.IsNotExist(err) {
-						if _, err := os.Stat(altPath); err == nil {
-							finalPath = altPath
-						}
-					}
-
-					results <- downloadResult{img: img, path: finalPath}
-				}
-			}()
-		}
-
-		go func() {
-			for _, img := range pending {
-				jobs <- img
-			}
-			close(jobs)
-			wg.Wait()
-			close(results)
-		}()
-
-		for result := range results {
-			if result.err != nil {
-				log.Warn("Failed to download image", "id", result.img.ID, "error", result.err)
-				continue
-			}
-
-			if result.skipped {
-				skipped++
-			}
-
-			metadata[result.img.ID] = &storage.ImageMeta{
-				ID:           result.img.ID,
-				Path:         result.path,
-				Width:        result.img.Width,
-				Height:       result.img.Height,
-				Title:        result.img.Title,
-				Artist:       result.img.Artist,
-				ArtistID:     result.img.ArtistID,
-				DownloadedAt: time.Now(),
-			}
-			if !result.skipped {
-				downloaded++
-			}
-		}
-
-		if err := st.SaveMetadata(metadata); err != nil {
-			return fmt.Errorf("failed to save metadata: %w", err)
-		}
-
-		log.Info("Download summary", "downloaded", downloaded, "skipped", skipped)
-
-		imageIDs := make([]string, 0, len(filteredImages))
-		for _, img := range filteredImages {
-			imageIDs = append(imageIDs, img.ID)
-		}
-
-		q := storage.NewQueue(st.StateDir())
-		if err := q.Load(); err != nil {
-			log.Warn("Failed to load queue", "error", err)
-		}
-
-		if err := q.AppendRandom(imageIDs); err != nil {
-			return fmt.Errorf("failed to append images to queue: %w", err)
-		}
-
-		log.Debug("Appended to queue", "count", len(imageIDs))
 
 		fmt.Println("Fetch complete!")
-		fmt.Printf("Total: %d, Filtered: %d, Downloaded: %d, Skipped: %d\n", len(images), filtered, downloaded, skipped)
+		fmt.Printf("Total: %d, Filtered: %d, Skipped: %d, Failed: %d\n", result.Total, result.Filtered, result.Skipped, result.Failed)
 		return nil
 	},
 }
@@ -302,7 +113,7 @@ var nextCmd = &cobra.Command{
 			return fmt.Errorf("failed to load queue: %w", err)
 		}
 
-		sch := scheduler.New(cfg, s, nil, nil, setter)
+		sch := scheduler.New(cfg, s, nil, setter)
 		if err := sch.SetNext(q); err != nil {
 			return err
 		}
@@ -327,7 +138,7 @@ var daemonCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to initialize pixiv client: %w", err)
 		}
-		c := cache.NewCache(st)
+
 		var setter wallpaper.Setter
 		if dryRun {
 			setter = wallpaper.NewDryRunSetter()
@@ -335,11 +146,10 @@ var daemonCmd = &cobra.Command{
 			setter = wallpaper.NewKDESetter()
 		}
 
-		sch := scheduler.New(cfg, st, c, pixivClient, setter)
-
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
+		sch := scheduler.New(cfg, st, pixivClient, setter)
 		if err := sch.Run(ctx); err != nil {
 			return err
 		}
@@ -353,7 +163,6 @@ var daemonCmd = &cobra.Command{
 		<-ctx.Done()
 		log.Info("Shutting down daemon")
 		sch.Stop()
-
 		log.Info("KPixiv daemon stopped")
 		return nil
 	},

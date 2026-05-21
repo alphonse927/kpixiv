@@ -19,14 +19,15 @@ import (
 )
 
 type Image struct {
+	Timestamp time.Time
 	ID        string
 	URL       string
-	Width     int
-	Height    int
 	Title     string
 	Artist    string
 	ArtistID  string
-	Timestamp time.Time
+	Width     int
+	Height    int
+	Rank      int
 }
 
 const (
@@ -130,6 +131,7 @@ type RankingContent struct {
 	UserID   int64  `json:"user_id"`
 	Width    int    `json:"width"`
 	Height   int    `json:"height"`
+	Rank     int    `json:"rank"`
 	IsMasked bool   `json:"is_masked"`
 }
 
@@ -215,6 +217,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int,
 			Title:     rc.Title,
 			Artist:    rc.UserName,
 			ArtistID:  fmt.Sprintf("%d", rc.UserID),
+			Rank:      rc.Rank,
 			Timestamp: time.Now(),
 		}
 		images = append(images, img)
