@@ -14,6 +14,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Pixiv.Ranking != RankingDailyMode {
 		t.Errorf("Default() Ranking: got %s, want %s", cfg.Pixiv.Ranking, RankingDailyMode)
 	}
+	if cfg.KDE.SetLockScreen {
+		t.Errorf("Default() KDE.SetLockScreen: got %v, want false", cfg.KDE.SetLockScreen)
+	}
 }
 
 func TestLoadCreatesDefault(t *testing.T) {

@@ -104,7 +104,7 @@ var nextCmd = &cobra.Command{
 		if dryRun {
 			setter = wallpaper.NewDryRunSetter()
 		} else {
-			setter = wallpaper.NewKDESetter()
+			setter = wallpaper.NewKDESetter(cfg.KDE.SetLockScreen)
 		}
 
 		// Initializing and loading images queue
@@ -143,7 +143,7 @@ var daemonCmd = &cobra.Command{
 		if dryRun {
 			setter = wallpaper.NewDryRunSetter()
 		} else {
-			setter = wallpaper.NewKDESetter()
+			setter = wallpaper.NewKDESetter(cfg.KDE.SetLockScreen)
 		}
 
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

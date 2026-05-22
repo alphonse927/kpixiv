@@ -1,0 +1,41 @@
+package wallpaper
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestUpdateKDEScreenLockerConfigCreatesSectionOnEmptyInput(t *testing.T) {
+	got := updateKDEScreenLockerConfig("", "file:///tmp/wall.jpg")
+
+	if !strings.Contains(got, kdeLockScreenSection) {
+		t.Fatalf("missing lock screen section in output: %q", got)
+	}
+	if !strings.Contains(got, "Image=file:///tmp/wall.jpg") {
+		t.Fatalf("missing image key in output: %q", got)
+	}
+}
+
+func TestUpdateKDEScreenLockerConfigUpdatesExistingImage(t *testing.T) {
+	input := "[Greeter][Wallpaper][org.kde.image][General]\nImage=file:///old.jpg\n[Other]\nKey=Value\n"
+	got := updateKDEScreenLockerConfig(input, "file:///new.jpg")
+
+	if !strings.Contains(got, "Image=file:///new.jpg") {
+		t.Fatalf("image key was not updated: %q", got)
+	}
+	if strings.Contains(got, "Image=file:///old.jpg") {
+		t.Fatalf("old image key still present: %q", got)
+	}
+}
+
+func TestUpdateKDEScreenLockerConfigAddsImageKeyToSection(t *testing.T) {
+	input := "[Greeter][Wallpaper][org.kde.image][General]\nColor=255,255,255\n[Other]\nKey=Value\n"
+	got := updateKDEScreenLockerConfig(input, "file:///new.jpg")
+
+	if !strings.Contains(got, "Color=255,255,255") {
+		t.Fatalf("existing section values should be preserved: %q", got)
+	}
+	if !strings.Contains(got, "Image=file:///new.jpg") {
+		t.Fatalf("image key was not added: %q", got)
+	}
+}
