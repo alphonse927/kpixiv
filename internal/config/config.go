@@ -11,6 +11,11 @@ type Config struct {
 	DownloadPath string          `yaml:"download_path"`
 	Pixiv        PixivConfig     `yaml:"pixiv"`
 	Wallpaper    WallpaperConfig `yaml:"wallpaper"`
+	KDE          KDEConfig       `yaml:"kde"`
+}
+
+type KDEConfig struct {
+	SetLockScreen bool `yaml:"set_lock_screen"`
 }
 
 type PixivConfig struct {
@@ -47,6 +52,9 @@ func Default() *Config {
 			SetInterval:   DefaultSetInterval,
 			FetchInterval: DefaultFetchInterval,
 		},
+		KDE: KDEConfig{
+			SetLockScreen: false,
+		},
 	}
 }
 
@@ -72,7 +80,7 @@ func Load(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
 

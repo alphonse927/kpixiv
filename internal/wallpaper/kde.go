@@ -2,21 +2,26 @@ package wallpaper
 
 import (
 	"fmt"
+	"net/url"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 )
 
 type KDESetter struct {
-	screen string
-	qdbus  string
+	screen            string
+	qdbus             string
+	setLockScreen     bool
+	lockScreenUpdater *KDELockScreenUpdater
 }
 
-func NewKDESetter() *KDESetter {
+func NewKDESetter(setLockScreen bool) *KDESetter {
 	qdbus := detectQDBusBinary()
 	return &KDESetter{
-		screen: "0",
-		qdbus:  qdbus,
+		screen:            "0",
+		qdbus:             qdbus,
+		setLockScreen:     setLockScreen,
+		lockScreenUpdater: NewKDELockScreenUpdater(),
 	}
 }
 
@@ -59,6 +64,17 @@ for (var i = 0; i < allDesktops.length; i++) {
 			err,
 			string(output),
 		)
+	}
+
+	if !k.setLockScreen {
+		// No need to update the lock screen wallpaper.
+		return nil
+	}
+
+	// Update the lock screen wallpaper.
+	imageURI = (&url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}).String()
+	if updateErr := k.lockScreenUpdater.UpdateImage(imageURI); updateErr != nil {
+		return fmt.Errorf("failed to update KDE lock screen wallpaper: %w", updateErr)
 	}
 
 	return nil
