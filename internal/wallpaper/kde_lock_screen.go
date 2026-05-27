@@ -54,6 +54,7 @@ func (u *KDELockScreenUpdater) UpdateImage(imageURI string) error {
 		return fmt.Errorf("failed to create config directory %s: %w", dir, mkErr)
 	}
 
+	// #nosec G304,G703 -- path is resolved from the current user's config directory.
 	if writeErr := os.WriteFile(u.configPath, []byte(updated), 0600); writeErr != nil {
 		return fmt.Errorf("failed to write %s: %w", u.configPath, writeErr)
 	}

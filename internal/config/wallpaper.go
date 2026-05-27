@@ -26,4 +26,5 @@ type WallpaperConfig struct {
 	KeepHistory   int           `yaml:"keep_history"`
 	SetInterval   int           `yaml:"set_interval"`
 	FetchInterval int           `yaml:"fetch_interval"`
+	CleanupDays   int           `yaml:"cleanup_days"`
 }
