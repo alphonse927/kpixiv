@@ -10,6 +10,9 @@ import (
 const (
 	kdeLockScreenSection = "[Greeter][Wallpaper][org.kde.image][General]"
 	kdeLockScreenKey     = "Image="
+	kdeGreeterSection    = "[Greeter]"
+	kdePluginKey         = "WallpaperPlugin="
+	kdeImagePlugin       = "org.kde.image"
 )
 
 type KDELockScreenUpdater struct {
@@ -52,54 +55,75 @@ func (u *KDELockScreenUpdater) UpdateImage(imageURI string) error {
 }
 
 func updateKDEScreenLockerConfig(content, imageURI string) string {
-	trimmed := strings.TrimSpace(content)
-	if trimmed == "" {
-		return kdeLockScreenSection + "\n" + kdeLockScreenKey + imageURI + "\n"
+	if strings.TrimSpace(content) == "" {
+		return kdeGreeterSection + "\n" +
+			kdePluginKey + kdeImagePlugin + "\n\n" +
+			kdeLockScreenSection + "\n" +
+			kdeLockScreenKey + imageURI + "\n"
 	}
 
+	hadTrailingNewline := strings.HasSuffix(content, "\n")
 	lines := strings.Split(content, "\n")
+
+	lines = upsertSectionKey(lines, kdeGreeterSection, kdePluginKey, kdeImagePlugin)
+	lines = upsertSectionKey(lines, kdeLockScreenSection, kdeLockScreenKey, imageURI)
+
+	result := strings.Join(lines, "\n")
+	if hadTrailingNewline && !strings.HasSuffix(result, "\n") {
+		result += "\n"
+	}
+
+	return result
+}
+
+func upsertSectionKey(lines []string, sectionName, keyPrefix, value string) []string {
 	sectionStart := -1
 	sectionEnd := len(lines)
 
 	for i, line := range lines {
-		if strings.TrimSpace(line) == kdeLockScreenSection {
-			sectionStart = i
-			for j := i + 1; j < len(lines); j++ {
-				lineTrim := strings.TrimSpace(lines[j])
-				if strings.HasPrefix(lineTrim, "[") && strings.HasSuffix(lineTrim, "]") {
-					sectionEnd = j
-					break
-				}
-			}
-			break
+		lineTrim := strings.TrimSpace(line)
+		if lineTrim != sectionName {
+			continue
 		}
+
+		sectionStart = i
+		for j := i + 1; j < len(lines); j++ {
+			nextTrim := strings.TrimSpace(lines[j])
+			if strings.HasPrefix(nextTrim, "[") && strings.HasSuffix(nextTrim, "]") {
+				sectionEnd = j
+				break
+			}
+		}
+		break
 	}
+
+	newEntry := keyPrefix + value
 
 	if sectionStart == -1 {
-		if !strings.HasSuffix(content, "\n") {
-			content += "\n"
+		if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+			lines = append(lines, "")
 		}
-		content += kdeLockScreenSection + "\n"
-		content += kdeLockScreenKey + imageURI + "\n"
-		return content
+		lines = append(lines, sectionName, newEntry)
+		return lines
 	}
 
-	hasImageKey := false
 	for i := sectionStart + 1; i < sectionEnd; i++ {
-		line := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(line, kdeLockScreenKey) {
-			lines[i] = kdeLockScreenKey + imageURI
-			hasImageKey = true
-			break
+		lineTrim := strings.TrimSpace(lines[i])
+		if !strings.HasPrefix(lineTrim, keyPrefix) {
+			continue
 		}
+
+		idx := strings.Index(lines[i], keyPrefix)
+		if idx >= 0 {
+			lines[i] = lines[i][:idx] + newEntry
+		} else {
+			lines[i] = newEntry
+		}
+		return lines
 	}
 
-	if !hasImageKey {
-		before := append([]string{}, lines[:sectionEnd]...)
-		after := append([]string{}, lines[sectionEnd:]...)
-		before = append(before, kdeLockScreenKey+imageURI)
-		lines = append(before, after...)
-	}
-
-	return strings.Join(lines, "\n")
+	before := append([]string{}, lines[:sectionEnd]...)
+	after := append([]string{}, lines[sectionEnd:]...)
+	before = append(before, newEntry)
+	return append(before, after...)
 }
