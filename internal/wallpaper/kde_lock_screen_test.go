@@ -8,11 +8,44 @@ import (
 func TestUpdateKDEScreenLockerConfigCreatesSectionOnEmptyInput(t *testing.T) {
 	got := updateKDEScreenLockerConfig("", "file:///tmp/wall.jpg")
 
+	if !strings.Contains(got, kdeGreeterSection) {
+		t.Fatalf("missing greeter section in output: %q", got)
+	}
+	if !strings.Contains(got, "WallpaperPlugin=org.kde.image") {
+		t.Fatalf("missing wallpaper plugin key in output: %q", got)
+	}
 	if !strings.Contains(got, kdeLockScreenSection) {
 		t.Fatalf("missing lock screen section in output: %q", got)
 	}
 	if !strings.Contains(got, "Image=file:///tmp/wall.jpg") {
 		t.Fatalf("missing image key in output: %q", got)
+	}
+}
+
+func TestUpdateKDEScreenLockerConfigUpdatesGreeterPlugin(t *testing.T) {
+	input := "[Greeter]\nWallpaperPlugin=org.kde.color\n[Greeter][Wallpaper][org.kde.color][General]\nColor=0,0,0\n"
+	got := updateKDEScreenLockerConfig(input, "file:///new.jpg")
+
+	if !strings.Contains(got, "WallpaperPlugin=org.kde.image") {
+		t.Fatalf("greeter plugin was not updated: %q", got)
+	}
+	if !strings.Contains(got, "[Greeter][Wallpaper][org.kde.color][General]") {
+		t.Fatalf("other wallpaper section should be preserved: %q", got)
+	}
+	if !strings.Contains(got, "Color=0,0,0") {
+		t.Fatalf("other wallpaper settings should be preserved: %q", got)
+	}
+}
+
+func TestUpdateKDEScreenLockerConfigInsertsGreeterPluginWhenMissing(t *testing.T) {
+	input := "[Greeter]\nSomeOtherKey=true\n"
+	got := updateKDEScreenLockerConfig(input, "file:///new.jpg")
+
+	if !strings.Contains(got, "SomeOtherKey=true") {
+		t.Fatalf("existing greeter keys should be preserved: %q", got)
+	}
+	if !strings.Contains(got, "WallpaperPlugin=org.kde.image") {
+		t.Fatalf("greeter plugin key should be inserted: %q", got)
 	}
 }
 
