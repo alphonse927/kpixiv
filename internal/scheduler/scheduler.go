@@ -145,7 +145,7 @@ func (sch *Scheduler) rotateWallpaper() {
 		return
 	}
 
-	if err := sch.storage.AddToHistory(nextID); err != nil {
+	if err := sch.storage.AddToHistoryWithLimit(nextID, sch.cfg.Wallpaper.HistoryLimit); err != nil {
 		log.Error("Failed to update history", "error", err)
 	}
 
@@ -284,7 +284,7 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 		return fmt.Errorf("failed to set wallpaper: %w", err)
 	}
 
-	if err := sch.storage.AddToHistory(nextID); err != nil {
+	if err := sch.storage.AddToHistoryWithLimit(nextID, sch.cfg.Wallpaper.HistoryLimit); err != nil {
 		return fmt.Errorf("failed to update history: %w", err)
 	}
 
@@ -347,7 +347,7 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 		return fmt.Errorf("failed to set wallpaper: %w", err)
 	}
 
-	if err = sch.storage.AddToHistory(targetID); err != nil {
+	if err = sch.storage.AddToHistoryWithLimit(targetID, sch.cfg.Wallpaper.HistoryLimit); err != nil {
 		log.Warn("Failed to update history", "error", err)
 	}
 

@@ -260,20 +260,34 @@ func (s *Storage) SaveHistory(history *History) error {
 	return os.WriteFile(s.HistoryPath(), data, 0600)
 }
 
-func (s *Storage) AddToHistory(imageID string) error {
+func (s *Storage) AddToHistoryWithLimit(imageID string, historyLimit int) error {
 	history, err := s.LoadHistory()
 	if err != nil {
 		return err
 	}
 
-	history.Images = append(history.Images, imageID)
-	history.Current = imageID
-
-	if len(history.Images) > 50 {
-		history.Images = history.Images[len(history.Images)-50:]
+	if history.Current != "" && history.Current != imageID {
+		history.Images = append(history.Images, history.Current)
 	}
 
+	history.Current = imageID
+	trimHistory(history, historyLimit)
+
 	return s.SaveHistory(history)
+}
+
+func trimHistory(history *History, historyLimit int) bool {
+	limit := historyLimit
+	if limit < 1 {
+		limit = 1
+	}
+
+	if len(history.Images) <= limit {
+		return false
+	}
+
+	history.Images = history.Images[len(history.Images)-limit:]
+	return true
 }
 
 func (s *Storage) GetCurrentWallpaper() (string, error) {

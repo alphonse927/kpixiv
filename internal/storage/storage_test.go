@@ -323,7 +323,7 @@ func TestAddToHistory(t *testing.T) {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
-	if err = s.AddToHistory("AAAAA"); err != nil {
+	if err = s.AddToHistoryWithLimit("AAAAA", 50); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestAddToHistory(t *testing.T) {
 		t.Errorf("AddToHistory() Current: got %q, want %q", history.Current, "AAAAA")
 	}
 
-	if err = s.AddToHistory("BBBBB"); err != nil {
+	if err = s.AddToHistoryWithLimit("BBBBB", 50); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 
@@ -348,8 +348,11 @@ func TestAddToHistory(t *testing.T) {
 		t.Errorf("AddToHistory() second call Current: got %q, want %q", history.Current, "BBBBB")
 	}
 
-	if len(history.Images) != 2 {
-		t.Errorf("AddToHistory() Images count: got %d, want 2", len(history.Images))
+	if len(history.Images) != 1 {
+		t.Errorf("AddToHistory() Images count: got %d, want 1", len(history.Images))
+	}
+	if history.Images[0] != "AAAAA" {
+		t.Errorf("AddToHistory() history item: got %q, want %q", history.Images[0], "AAAAA")
 	}
 }
 
@@ -374,7 +377,7 @@ func TestAddToHistoryTruncatesHistory(t *testing.T) {
 		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
-	if err = s.AddToHistory("idNew"); err != nil {
+	if err = s.AddToHistoryWithLimit("idNew", 50); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 
@@ -390,8 +393,11 @@ func TestAddToHistoryTruncatesHistory(t *testing.T) {
 		t.Errorf("AddToHistory() kept wrong items: first item is %q, want id01", loaded.Images[0])
 	}
 
-	if loaded.Images[49] != "idNew" {
-		t.Errorf("AddToHistory() last item: got %q, want idNew", loaded.Images[49])
+	if loaded.Images[49] != "id50" {
+		t.Errorf("AddToHistory() last item: got %q, want id50", loaded.Images[49])
+	}
+	if loaded.Current != "idNew" {
+		t.Errorf("AddToHistory() current item: got %q, want idNew", loaded.Current)
 	}
 }
 
@@ -410,7 +416,7 @@ func TestGetCurrentWallpaper(t *testing.T) {
 		t.Errorf("GetCurrentWallpaper() with no history: got %q, want empty", current)
 	}
 
-	if err = s.AddToHistory("XXXXX"); err != nil {
+	if err = s.AddToHistoryWithLimit("XXXXX", 50); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 
@@ -457,7 +463,7 @@ func TestGetNextWallpaper(t *testing.T) {
 		t.Errorf("GetNextWallpaper() at position 1: got %q, want %q", next, "CCCCC")
 	}
 
-	if err = s.AddToHistory("CCCCC"); err != nil {
+	if err = s.AddToHistoryWithLimit("CCCCC", 50); err != nil {
 		t.Fatalf("AddToHistory() returned error: %v", err)
 	}
 	next, err = s.GetNextWallpaper()
@@ -610,5 +616,67 @@ func TestCleanupImagesOlderThanDaysResetRemovesAll(t *testing.T) {
 
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
 		t.Fatalf("image should be removed by reset cleanup, stat error: %v", statErr)
+	}
+}
+
+func TestAddToHistoryWithLimit(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(tmp, tmp)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	for i := range 12 {
+		id := fmt.Sprintf("id%02d", i)
+		if err = s.AddToHistoryWithLimit(id, 10); err != nil {
+			t.Fatalf("AddToHistoryWithLimit() returned error: %v", err)
+		}
+	}
+
+	history, err := s.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+
+	if len(history.Images) != 10 {
+		t.Fatalf("history should keep 10 items, got %d", len(history.Images))
+	}
+	if history.Images[0] != "id01" {
+		t.Fatalf("history should keep newest 10, first got %s", history.Images[0])
+	}
+	if history.Current != "id11" {
+		t.Fatalf("current should be latest id11, got %s", history.Current)
+	}
+}
+
+func TestEnforceHistoryLimit(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(tmp, tmp)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	history := &History{Current: "id00", Images: []string{"id00", "id01", "id02", "id03"}, UpdatedAt: time.Now()}
+	if err = s.SaveHistory(history); err != nil {
+		t.Fatalf("SaveHistory() returned error: %v", err)
+	}
+
+	if err = s.EnforceHistoryLimit(2); err != nil {
+		t.Fatalf("EnforceHistoryLimit() returned error: %v", err)
+	}
+
+	history, err = s.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+
+	if len(history.Images) != 2 {
+		t.Fatalf("history should be trimmed to 2, got %d", len(history.Images))
+	}
+	if history.Images[0] != "id02" || history.Images[1] != "id03" {
+		t.Fatalf("history should keep newest entries, got %v", history.Images)
+	}
+	if history.Current != "id00" {
+		t.Fatalf("current should remain unchanged, got %s", history.Current)
 	}
 }

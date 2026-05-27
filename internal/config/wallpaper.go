@@ -23,7 +23,7 @@ func (w WallpaperMode) String() string {
 
 type WallpaperConfig struct {
 	Mode          WallpaperMode `yaml:"mode"`
-	KeepHistory   int           `yaml:"keep_history"`
+	HistoryLimit  int           `yaml:"history_limit"`
 	SetInterval   int           `yaml:"set_interval"`
 	FetchInterval int           `yaml:"fetch_interval"`
 	CleanupDays   int           `yaml:"cleanup_days"`

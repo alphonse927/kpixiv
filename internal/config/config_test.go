@@ -20,6 +20,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Wallpaper.CleanupDays != DefaultCleanupDays {
 		t.Errorf("Default() Wallpaper.CleanupDays: got %d, want %d", cfg.Wallpaper.CleanupDays, DefaultCleanupDays)
 	}
+	if cfg.Wallpaper.HistoryLimit != DefaultHistoryLimit {
+		t.Errorf("Default() Wallpaper.HistoryLimit: got %d, want %d", cfg.Wallpaper.HistoryLimit, DefaultHistoryLimit)
+	}
 }
 
 func TestLoadCreatesDefault(t *testing.T) {
@@ -118,5 +121,13 @@ func TestValidate(t *testing.T) {
 	}
 	if cfg.Wallpaper.CleanupDays != DefaultCleanupDays {
 		t.Errorf("Validate() clamped CleanupDays: got %d, want %d", cfg.Wallpaper.CleanupDays, DefaultCleanupDays)
+	}
+
+	cfg.Wallpaper.HistoryLimit = 0
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with HistoryLimit=0: should clamp, got error %v", err)
+	}
+	if cfg.Wallpaper.HistoryLimit != DefaultHistoryLimit {
+		t.Errorf("Validate() clamped HistoryLimit: got %d, want %d", cfg.Wallpaper.HistoryLimit, DefaultHistoryLimit)
 	}
 }
