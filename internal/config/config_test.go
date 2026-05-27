@@ -14,6 +14,15 @@ func TestDefault(t *testing.T) {
 	if cfg.Pixiv.Ranking != RankingDailyMode {
 		t.Errorf("Default() Ranking: got %s, want %s", cfg.Pixiv.Ranking, RankingDailyMode)
 	}
+
+	homeDir, err := os.UserHomeDir()
+	if err == nil && homeDir != "" {
+		expected := filepath.Join(homeDir, DefaultDownloadPath)
+		if cfg.DownloadPath != expected {
+			t.Errorf("Default() DownloadPath: got %s, want %s", cfg.DownloadPath, expected)
+		}
+	}
+
 	if cfg.KDE.SetLockScreen {
 		t.Errorf("Default() KDE.SetLockScreen: got %v, want false", cfg.KDE.SetLockScreen)
 	}

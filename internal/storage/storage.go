@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -58,10 +59,7 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 		return nil, err
 	}
 
-	downloadDir := downloadPath
-	if downloadPath == "" {
-		downloadDir = filepath.Join(homeDir, "Pictures", "KPixiv")
-	}
+	downloadDir := resolveDownloadDir(homeDir, downloadPath)
 
 	if err := os.MkdirAll(downloadDir, 0750); err != nil {
 		return nil, err
@@ -74,6 +72,23 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 		homeDir:      homeDir,
 		stateDir:     stateDir,
 	}, nil
+}
+
+func resolveDownloadDir(homeDir, downloadPath string) string {
+	trimmed := strings.TrimSpace(downloadPath)
+	if trimmed == "" {
+		return filepath.Join(homeDir, "Pictures", "KPixiv")
+	}
+
+	if trimmed == "~" {
+		return homeDir
+	}
+
+	if strings.HasPrefix(trimmed, "~/") {
+		return filepath.Join(homeDir, strings.TrimPrefix(trimmed, "~/"))
+	}
+
+	return trimmed
 }
 
 func (s *Storage) DataDir() string {

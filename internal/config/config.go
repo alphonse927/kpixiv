@@ -27,7 +27,7 @@ type PixivConfig struct {
 }
 
 const (
-	DefaultDownloadPath  = "~/Pictures/KPixiv"
+	DefaultDownloadPath  = "Pictures/KPixiv"
 	DefaultPixivRanking  = 0
 	DefaultMinWidth      = 1280
 	DefaultMinHeight     = 720
@@ -38,8 +38,10 @@ const (
 )
 
 func Default() *Config {
+	defaultDownloadPath := resolveDefaultDownloadPath()
+
 	return &Config{
-		DownloadPath: DefaultDownloadPath,
+		DownloadPath: defaultDownloadPath,
 		Pixiv: PixivConfig{
 			Ranking:       DefaultPixivRanking,
 			R18:           false,
@@ -105,7 +107,7 @@ func Save(path string, cfg *Config) error {
 
 func (c *Config) Validate() error {
 	if c.DownloadPath == "" {
-		c.DownloadPath = DefaultDownloadPath
+		c.DownloadPath = resolveDefaultDownloadPath()
 	}
 	if c.Pixiv.MinWidth < 1280 {
 		c.Pixiv.MinWidth = DefaultMinWidth
@@ -126,4 +128,13 @@ func (c *Config) Validate() error {
 		c.Wallpaper.CleanupDays = DefaultCleanupDays
 	}
 	return nil
+}
+
+func resolveDefaultDownloadPath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return DefaultDownloadPath
+	}
+
+	return filepath.Join(homeDir, DefaultDownloadPath)
 }
