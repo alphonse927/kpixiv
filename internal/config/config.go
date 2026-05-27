@@ -31,7 +31,7 @@ const (
 	DefaultPixivRanking  = 0
 	DefaultMinWidth      = 1280
 	DefaultMinHeight     = 720
-	DefaultKeepHistory   = 5
+	DefaultHistoryLimit  = 10
 	DefaultSetInterval   = 5
 	DefaultFetchInterval = 30
 	DefaultCleanupDays   = 7
@@ -49,7 +49,7 @@ func Default() *Config {
 		},
 		Wallpaper: WallpaperConfig{
 			Mode:          WallpaperFillMode,
-			KeepHistory:   DefaultKeepHistory,
+			HistoryLimit:  DefaultHistoryLimit,
 			SetInterval:   DefaultSetInterval,
 			FetchInterval: DefaultFetchInterval,
 			CleanupDays:   DefaultCleanupDays,
@@ -113,14 +113,14 @@ func (c *Config) Validate() error {
 	if c.Pixiv.MinHeight < 720 {
 		c.Pixiv.MinHeight = DefaultMinHeight
 	}
-	if c.Wallpaper.KeepHistory < 5 {
-		c.Wallpaper.KeepHistory = DefaultKeepHistory
-	}
 	if c.Wallpaper.SetInterval < 5 {
 		c.Wallpaper.SetInterval = DefaultSetInterval
 	}
 	if c.Wallpaper.FetchInterval < 30 {
 		c.Wallpaper.FetchInterval = DefaultFetchInterval
+	}
+	if c.Wallpaper.HistoryLimit < 1 {
+		c.Wallpaper.HistoryLimit = DefaultHistoryLimit
 	}
 	if c.Wallpaper.CleanupDays < 1 {
 		c.Wallpaper.CleanupDays = DefaultCleanupDays
