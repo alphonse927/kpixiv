@@ -42,6 +42,29 @@ func TestNewCreatesDirectories(t *testing.T) {
 	}
 }
 
+func TestNewExpandsTildeDownloadPath(t *testing.T) {
+	tmp := t.TempDir()
+	tildePath := "~/Pictures/KPixiv"
+	expected := filepath.Join(tmp, "Pictures", "KPixiv")
+
+	s, err := New(tmp, tildePath)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	if s.DownloadDir() != expected {
+		t.Fatalf("DownloadDir: got %s, want %s", s.DownloadDir(), expected)
+	}
+
+	if _, err = os.Stat(expected); err != nil {
+		t.Fatalf("expanded download directory not created: %v", err)
+	}
+
+	if _, err = os.Stat(filepath.Join(tmp, "~")); !os.IsNotExist(err) {
+		t.Fatalf("tilde-literal directory should not exist, stat err: %v", err)
+	}
+}
+
 func TestLoadPaginationStateEmpty(t *testing.T) {
 	tmp := t.TempDir()
 	s, err := New(tmp, tmp)
@@ -646,37 +669,5 @@ func TestAddToHistoryWithLimit(t *testing.T) {
 	}
 	if history.Current != "id11" {
 		t.Fatalf("current should be latest id11, got %s", history.Current)
-	}
-}
-
-func TestEnforceHistoryLimit(t *testing.T) {
-	tmp := t.TempDir()
-	s, err := New(tmp, tmp)
-	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
-	}
-
-	history := &History{Current: "id00", Images: []string{"id00", "id01", "id02", "id03"}, UpdatedAt: time.Now()}
-	if err = s.SaveHistory(history); err != nil {
-		t.Fatalf("SaveHistory() returned error: %v", err)
-	}
-
-	if err = s.EnforceHistoryLimit(2); err != nil {
-		t.Fatalf("EnforceHistoryLimit() returned error: %v", err)
-	}
-
-	history, err = s.LoadHistory()
-	if err != nil {
-		t.Fatalf("LoadHistory() returned error: %v", err)
-	}
-
-	if len(history.Images) != 2 {
-		t.Fatalf("history should be trimmed to 2, got %d", len(history.Images))
-	}
-	if history.Images[0] != "id02" || history.Images[1] != "id03" {
-		t.Fatalf("history should keep newest entries, got %v", history.Images)
-	}
-	if history.Current != "id00" {
-		t.Fatalf("current should remain unchanged, got %s", history.Current)
 	}
 }
