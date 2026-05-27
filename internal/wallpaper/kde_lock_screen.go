@@ -20,14 +20,21 @@ type KDELockScreenUpdater struct {
 }
 
 func NewKDELockScreenUpdater() *KDELockScreenUpdater {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = ""
+	return &KDELockScreenUpdater{configPath: kdeScreenLockerConfigPath()}
+}
+
+func kdeScreenLockerConfigPath() string {
+	if configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); configHome != "" {
+		return filepath.Join(configHome, "kscreenlockerrc")
 	}
 
-	return &KDELockScreenUpdater{
-		configPath: filepath.Join(homeDir, ".config", "kscreenlockerrc"),
+	homeDir, err := os.UserHomeDir()
+	if err == nil && strings.TrimSpace(homeDir) != "" {
+		return filepath.Join(homeDir, ".config", "kscreenlockerrc")
 	}
+
+	// Last-resort fallback for unusual environments.
+	return filepath.Join(".config", "kscreenlockerrc")
 }
 
 func (u *KDELockScreenUpdater) UpdateImage(imageURI string) error {

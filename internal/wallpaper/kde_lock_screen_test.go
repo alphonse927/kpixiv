@@ -1,6 +1,8 @@
 package wallpaper
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -46,6 +48,29 @@ func TestUpdateKDEScreenLockerConfigInsertsGreeterPluginWhenMissing(t *testing.T
 	}
 	if !strings.Contains(got, "WallpaperPlugin=org.kde.image") {
 		t.Fatalf("greeter plugin key should be inserted: %q", got)
+	}
+}
+
+func TestKDELockScreenUpdaterCreatesMissingConfigFile(t *testing.T) {
+	tmp := t.TempDir()
+	configPath := filepath.Join(tmp, "kscreenlockerrc")
+
+	updater := &KDELockScreenUpdater{configPath: configPath}
+	if err := updater.UpdateImage("file:///tmp/new.jpg"); err != nil {
+		t.Fatalf("UpdateImage() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("expected config file to be created, read error: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "WallpaperPlugin=org.kde.image") {
+		t.Fatalf("missing greeter plugin setting in created config: %q", content)
+	}
+	if !strings.Contains(content, "Image=file:///tmp/new.jpg") {
+		t.Fatalf("missing image setting in created config: %q", content)
 	}
 }
 
