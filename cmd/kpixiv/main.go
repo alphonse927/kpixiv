@@ -23,6 +23,7 @@ var (
 	cfgPath string
 	verbose bool
 	dryRun  bool
+	reset   bool
 	cfg     *config.Config
 )
 
@@ -146,6 +147,18 @@ var daemonCmd = &cobra.Command{
 			setter = wallpaper.NewKDESetter(cfg.KDE.SetLockScreen)
 		}
 
+		cleanupDays := cfg.Wallpaper.CleanupDays
+		if reset {
+			cleanupDays = 0
+		}
+
+		removed, cleanupErr := st.CleanupImagesOlderThanDays(cleanupDays)
+		if cleanupErr != nil {
+			log.Warn("Failed to cleanup old images", "error", cleanupErr)
+		} else {
+			log.Info("Image cleanup complete", "removed", removed, "days", cleanupDays)
+		}
+
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 
@@ -208,6 +221,7 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Data directory: %s\n", st.DataDir())
 		fmt.Printf("Set interval: %d minutes\n", cfg.Wallpaper.SetInterval)
 		fmt.Printf("Fetch interval: %d minutes\n", cfg.Wallpaper.FetchInterval)
+		fmt.Printf("Cleanup images older than: %d days\n", cfg.Wallpaper.CleanupDays)
 		fmt.Printf("\n=== Wallpaper History ===\n")
 		fmt.Printf("Total wallpapers: %d\n", totalWallpapers)
 		fmt.Printf("Current: %s\n", history.Current)
@@ -224,6 +238,7 @@ func main() {
 	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "Path to config file (default: ~/.config/kpixiv/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show actions without applying or downloading")
+	daemonCmd.Flags().BoolVar(&reset, "reset", false, "Remove all cached images before daemon starts")
 
 	rootCmd.AddCommand(fetchCmd)
 	rootCmd.AddCommand(nextCmd)

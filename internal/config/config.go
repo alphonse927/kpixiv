@@ -34,6 +34,7 @@ const (
 	DefaultKeepHistory   = 5
 	DefaultSetInterval   = 5
 	DefaultFetchInterval = 30
+	DefaultCleanupDays   = 7
 )
 
 func Default() *Config {
@@ -51,6 +52,7 @@ func Default() *Config {
 			KeepHistory:   DefaultKeepHistory,
 			SetInterval:   DefaultSetInterval,
 			FetchInterval: DefaultFetchInterval,
+			CleanupDays:   DefaultCleanupDays,
 		},
 		KDE: KDEConfig{
 			SetLockScreen: false,
@@ -119,6 +121,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Wallpaper.FetchInterval < 30 {
 		c.Wallpaper.FetchInterval = DefaultFetchInterval
+	}
+	if c.Wallpaper.CleanupDays < 1 {
+		c.Wallpaper.CleanupDays = DefaultCleanupDays
 	}
 	return nil
 }

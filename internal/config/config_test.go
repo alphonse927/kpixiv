@@ -17,6 +17,9 @@ func TestDefault(t *testing.T) {
 	if cfg.KDE.SetLockScreen {
 		t.Errorf("Default() KDE.SetLockScreen: got %v, want false", cfg.KDE.SetLockScreen)
 	}
+	if cfg.Wallpaper.CleanupDays != DefaultCleanupDays {
+		t.Errorf("Default() Wallpaper.CleanupDays: got %d, want %d", cfg.Wallpaper.CleanupDays, DefaultCleanupDays)
+	}
 }
 
 func TestLoadCreatesDefault(t *testing.T) {
@@ -108,4 +111,12 @@ func TestValidate(t *testing.T) {
 		t.Errorf("Validate() clamped MinHeight: got %d, want %d", cfg.Pixiv.MinHeight, DefaultMinHeight)
 	}
 	cfg.Pixiv.MinHeight = originalMinHeight
+
+	cfg.Wallpaper.CleanupDays = 0
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with CleanupDays=0: should clamp, got error %v", err)
+	}
+	if cfg.Wallpaper.CleanupDays != DefaultCleanupDays {
+		t.Errorf("Validate() clamped CleanupDays: got %d, want %d", cfg.Wallpaper.CleanupDays, DefaultCleanupDays)
+	}
 }
