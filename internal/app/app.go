@@ -82,7 +82,7 @@ func (c *Controller) Start() error {
 	}
 
 	if len(images) == 0 {
-		log := logger.WithComponent("app")
+		log := logger.WithComponent(componentName)
 		log.Info("No downloaded images found, fetching initial wallpapers")
 
 		// Fetch initial wallpapers
@@ -100,7 +100,7 @@ func (c *Controller) Start() error {
 
 	// Apply wallpaper
 	if err = c.sch.ApplyCurrentOrNext(); err != nil {
-		logger.WithComponent("app").Warn("Could not apply wallpaper on startup", "error", err)
+		logger.WithComponent(componentName).Warn("Could not apply wallpaper on startup", "error", err)
 	}
 
 	return nil
@@ -138,14 +138,6 @@ func (c *Controller) ResumeRotation() {
 	c.sch.Resume()
 }
 
-// RestartRotation restarts scheduler timers and fetch loop.
-func (c *Controller) RestartRotation(ctx context.Context) {
-	c.mu.Lock()
-	c.paused = false
-	c.mu.Unlock()
-	c.sch.Restart(ctx, componentName)
-}
-
 // OpenCurrentArtwork opens the currently active wallpaper in the system default app.
 func (c *Controller) OpenCurrentArtwork() error {
 	currentID, err := c.st.GetCurrentWallpaper()
@@ -164,12 +156,6 @@ func (c *Controller) OpenCurrentArtwork() error {
 
 	//nolint:gosec // xdg-open is intentionally used with a local filesystem path.
 	return exec.Command("xdg-open", path).Start()
-}
-
-// OpenFolder opens the configured wallpaper directory in the file manager.
-func (c *Controller) OpenFolder() error {
-	//nolint:gosec // xdg-open is intentionally used with a configured local directory.
-	return exec.Command("xdg-open", c.st.DownloadDir()).Start()
 }
 
 // Shutdown cancels running work and stops the scheduler.
