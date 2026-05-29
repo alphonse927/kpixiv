@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// IsImageResponse reports whether a response is a successful image response.
 func IsImageResponse(resp *http.Response) bool {
 	if resp.StatusCode != http.StatusOK {
 		return false
@@ -28,6 +29,7 @@ func IsImageResponse(resp *http.Response) bool {
 	return true
 }
 
+// HasContent reports whether the response body contains at least one byte.
 func HasContent(resp *http.Response) bool {
 	if resp.Body == nil {
 		return false

@@ -241,7 +241,7 @@ func TestSaveAndLoadMetadata(t *testing.T) {
 	}
 }
 
-func TestAddImage(t *testing.T) {
+func TestSaveMetadataAddsImage(t *testing.T) {
 	tmp := t.TempDir()
 	s, err := New(tmp, tmp)
 	if err != nil {
@@ -254,16 +254,20 @@ func TestAddImage(t *testing.T) {
 		Width: 1920,
 	}
 
-	if err = s.AddImage(meta); err != nil {
-		t.Fatalf("AddImage() returned error: %v", err)
+	images := map[string]*ImageMeta{
+		meta.ID: meta,
 	}
 
-	has, err := s.HasImage("11111")
+	if err = s.SaveMetadata(images); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+
+	has, err := hasImage(s, "11111")
 	if err != nil {
-		t.Fatalf("HasImage() returned error: %v", err)
+		t.Fatalf("hasImage() returned error: %v", err)
 	}
 	if !has {
-		t.Error("HasImage() after AddImage: got false, want true")
+		t.Error("hasImage() after AddImage: got false, want true")
 	}
 
 	path, ok := s.GetImagePath("11111")
@@ -274,13 +278,23 @@ func TestAddImage(t *testing.T) {
 		t.Errorf("GetImagePath() path: got %q, want %q", path, "/some/path.jpg")
 	}
 
-	has, err = s.HasImage("99999")
+	has, err = hasImage(s, "99999")
 	if err != nil {
-		t.Fatalf("HasImage() returned error: %v", err)
+		t.Fatalf("hasImage() returned error: %v", err)
 	}
 	if has {
-		t.Error("HasImage() for non-existent ID: got true, want false")
+		t.Error("hasImage() for non-existent ID: got true, want false")
 	}
+}
+
+func hasImage(s *Storage, id string) (bool, error) {
+	images, err := s.LoadMetadata()
+	if err != nil {
+		return false, err
+	}
+
+	_, exists := images[id]
+	return exists, nil
 }
 
 func TestLoadHistoryEmpty(t *testing.T) {

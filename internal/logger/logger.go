@@ -7,6 +7,7 @@ import (
 
 var log *slog.Logger
 
+// Init configures the global logger with info or debug level.
 func Init(verbose bool) {
 	level := slog.LevelInfo
 	if verbose {
@@ -18,18 +19,22 @@ func Init(verbose bool) {
 	}))
 }
 
+// WithComponent returns a logger tagged with a component name.
 func WithComponent(name string) *slog.Logger {
 	return log.With("component", name)
 }
 
+// Debug logs a debug-level message.
 func Debug(msg string, args ...any) {
 	log.Debug(msg, args...)
 }
 
+// Info logs an info-level message.
 func Info(msg string, args ...any) {
 	log.Info(msg, args...)
 }
 
+// Error logs an error-level message.
 func Error(msg string, args ...any) {
 	log.Error(msg, args...)
 }

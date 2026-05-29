@@ -15,6 +15,7 @@ type MockRankingClient struct {
 	contentType  string
 }
 
+// Do records request info and returns a configurable mock HTTP response.
 func (m *MockRankingClient) Do(req *http.Request) (*http.Response, error) {
 	m.capturedReq = req
 	if req.URL != nil {
@@ -30,24 +31,28 @@ func (m *MockRankingClient) Do(req *http.Request) (*http.Response, error) {
 
 type MockRankingClientOption func(*MockRankingClient)
 
+// WithMockRankingStatusCode sets the response status code for the mock client.
 func WithMockRankingStatusCode(code int) MockRankingClientOption {
 	return func(m *MockRankingClient) {
 		m.resp.StatusCode = code
 	}
 }
 
+// WithMockRankingBody sets the response body for the mock client.
 func WithMockRankingBody(body []byte) MockRankingClientOption {
 	return func(m *MockRankingClient) {
 		m.data = body
 	}
 }
 
+// WithMockRankingContentType sets the content type header for the mock client.
 func WithMockRankingContentType(ct string) MockRankingClientOption {
 	return func(m *MockRankingClient) {
 		m.contentType = ct
 	}
 }
 
+// NewMockRankingClient creates a mock ranking HTTP client for tests.
 func NewMockRankingClient(opts ...MockRankingClientOption) *MockRankingClient {
 	m := &MockRankingClient{
 		resp: &http.Response{
@@ -61,6 +66,7 @@ func NewMockRankingClient(opts ...MockRankingClientOption) *MockRankingClient {
 	return m
 }
 
+// CapturedQuery returns the last captured request query string.
 func (m *MockRankingClient) CapturedQuery() string {
 	return m.capturedPath
 }

@@ -1,5 +1,5 @@
 [Unit]
-Description=KPixiv wallpaper daemon for KDE Plasma
+Description=KPixiv wallpaper app for KDE Plasma
 After=graphical-session.target
 Wants=graphical-session.target
 

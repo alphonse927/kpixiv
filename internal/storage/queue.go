@@ -20,6 +20,7 @@ type QueueData struct {
 	Items []string `json:"items"`
 }
 
+// NewQueue creates a queue persisted in the provided state directory.
 func NewQueue(stateDir string) *Queue {
 	path := filepath.Join(stateDir, "queue.json")
 	return &Queue{
@@ -28,6 +29,7 @@ func NewQueue(stateDir string) *Queue {
 	}
 }
 
+// Load reads queue contents from disk.
 func (q *Queue) Load() error {
 	data, err := os.ReadFile(q.path)
 	if err != nil {
@@ -46,6 +48,7 @@ func (q *Queue) Load() error {
 	return nil
 }
 
+// Save writes queue contents to disk.
 func (q *Queue) Save() error {
 	data, err := json.MarshalIndent(QueueData{Items: q.items}, "", "  ")
 	if err != nil {
@@ -55,12 +58,14 @@ func (q *Queue) Save() error {
 	return os.WriteFile(q.path, data, 0600)
 }
 
+// Len returns the number of queued IDs.
 func (q *Queue) Len() int {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
 	return len(q.items)
 }
 
+// AppendRandom merges IDs and shuffles queue order without duplicates.
 func (q *Queue) AppendRandom(items []string) error {
 	if len(items) == 0 {
 		return nil
@@ -93,6 +98,7 @@ func (q *Queue) AppendRandom(items []string) error {
 	return q.Save()
 }
 
+// Pop removes and returns the next queued ID.
 func (q *Queue) Pop() (string, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -110,6 +116,7 @@ func (q *Queue) Pop() (string, bool) {
 	return item, true
 }
 
+// Peek returns the next queued ID without removing it.
 func (q *Queue) Peek() (string, bool) {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
@@ -121,6 +128,7 @@ func (q *Queue) Peek() (string, bool) {
 	return q.items[0], true
 }
 
+// GetAll returns a copy of all queued IDs.
 func (q *Queue) GetAll() []string {
 	q.mu.RLock()
 	defer q.mu.RUnlock()
@@ -130,6 +138,7 @@ func (q *Queue) GetAll() []string {
 	return result
 }
 
+// IsEmpty reports whether the queue has no items.
 func (q *Queue) IsEmpty() bool {
 	q.mu.RLock()
 	defer q.mu.RUnlock()

@@ -30,6 +30,7 @@ type Fetcher struct {
 	page    int
 }
 
+// NewFetcher creates a fetcher bound to config, storage, and pixiv client.
 func NewFetcher(cfg *config.Config, st *storage.Storage, client pixiv.ImageClient) *Fetcher {
 	return &Fetcher{
 		cfg:     cfg,
@@ -39,6 +40,7 @@ func NewFetcher(cfg *config.Config, st *storage.Storage, client pixiv.ImageClien
 	}
 }
 
+// Fetch downloads ranking images, updates metadata, and appends queue candidates.
 func (f *Fetcher) Fetch(ctx context.Context) (*FetchResult, error) {
 	log := logger.WithComponent("fetcher")
 
@@ -90,7 +92,6 @@ func (f *Fetcher) Fetch(ctx context.Context) (*FetchResult, error) {
 	}
 
 	f.page = nextPage
-	log.Debug("Advanced ranking page", "nextPage", f.page)
 	return result, nil
 }
 
@@ -230,14 +231,17 @@ func (f *Fetcher) collectAvailableIDs(filteredImages []pixiv.Image, downloadedID
 	return ids
 }
 
+// GetPage returns the current ranking page pointer used by the fetcher.
 func (f *Fetcher) GetPage() int {
 	return f.page
 }
 
+// SetPage sets the current ranking page pointer used by the fetcher.
 func (f *Fetcher) SetPage(page int) {
 	f.page = page
 }
 
+// LoadPage loads the persisted ranking page pointer from storage.
 func (f *Fetcher) LoadPage() error {
 	pageKey := fmt.Sprintf("%s:%t", f.cfg.Pixiv.Ranking, f.cfg.Pixiv.R18)
 	page, err := f.storage.GetRankingPage(pageKey)
@@ -249,6 +253,7 @@ func (f *Fetcher) LoadPage() error {
 	return nil
 }
 
+// DryRun fetches rankings and filtering stats without downloading files.
 func (f *Fetcher) DryRun(ctx context.Context) (*FetchResult, error) {
 	log := logger.WithComponent("fetcher")
 

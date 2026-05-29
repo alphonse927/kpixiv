@@ -2,18 +2,21 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/alphonse927/kpixiv/internal/app"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
 	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/tray"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 
 	"github.com/spf13/cobra"
@@ -91,12 +94,7 @@ var nextCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.WithComponent("next")
 
-		homeDir, hErr := os.UserHomeDir()
-		if hErr != nil {
-			return fmt.Errorf("failed to get home directory: %w", hErr)
-		}
-
-		s, err := storage.New(homeDir, cfg.DownloadPath)
+		s, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
@@ -114,12 +112,15 @@ var nextCmd = &cobra.Command{
 			return fmt.Errorf("failed to load queue: %w", err)
 		}
 
+		log.Debug("Setting wallpaper")
 		sch := scheduler.New(cfg, s, nil, setter)
-		if err := sch.SetNext(q); err != nil {
+		if err := sch.SetNextWallpaper(q, "next"); err != nil {
+			if errors.Is(err, scheduler.ErrImageNotFound) {
+				return nil
+			}
+
 			return err
 		}
-
-		log.Info("Next wallpaper set")
 		return nil
 	},
 }
@@ -129,54 +130,28 @@ var daemonCmd = &cobra.Command{
 	Short: "Run the KPixiv wallpaper daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		log := logger.WithComponent("daemon")
-
-		st, err := storage.New("", cfg.DownloadPath)
+		controller, err := app.New(cfg, dryRun, reset)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
-		}
-
-		pixivClient, err := pixiv.NewClient()
-		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
-		}
-
-		var setter wallpaper.Setter
-		if dryRun {
-			setter = wallpaper.NewDryRunSetter()
-		} else {
-			setter = wallpaper.NewKDESetter(cfg.KDE.SetLockScreen)
-		}
-
-		cleanupDays := cfg.Wallpaper.CleanupDays
-		if reset {
-			cleanupDays = 0
-		}
-
-		removed, cleanupErr := st.CleanupImagesOlderThanDays(cleanupDays)
-		if cleanupErr != nil {
-			log.Warn("Failed to cleanup old images", "error", cleanupErr)
-		} else {
-			log.Info("Image cleanup complete", "removed", removed, "days", cleanupDays)
-		}
-
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-		defer stop()
-
-		sch := scheduler.New(cfg, st, pixivClient, setter)
-		if err := sch.Run(ctx); err != nil {
 			return err
 		}
 
-		log.Info("KPixiv daemon started")
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-		if err := sch.ApplyCurrentOrNext(); err != nil {
-			log.Warn("Could not apply wallpaper on startup", "error", err)
-		}
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigCh)
 
-		<-ctx.Done()
-		log.Info("Shutting down daemon")
-		sch.Stop()
-		log.Info("KPixiv daemon stopped")
+		go func() {
+			<-sigCh
+			log.Info("Received shutdown signal")
+			controller.Shutdown()
+			cancel()
+		}()
+
+		log.Info("Starting tray-enabled kPixiv")
+		tray.Run(ctx, controller)
+		log.Info("kPixiv stopped")
 		return nil
 	},
 }

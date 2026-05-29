@@ -39,6 +39,7 @@ type Storage struct {
 	stateDir     string
 }
 
+// New initializes storage directories and returns a storage handle.
 func New(homeDir, downloadPath string) (*Storage, error) {
 	if homeDir == "" {
 		homeDir, _ = os.UserHomeDir() //nolint: errcheck // ignore error
@@ -91,34 +92,42 @@ func resolveDownloadDir(homeDir, downloadPath string) string {
 	return trimmed
 }
 
+// DataDir returns the base data directory.
 func (s *Storage) DataDir() string {
 	return s.dataDir
 }
 
+// StateDir returns the base state directory.
 func (s *Storage) StateDir() string {
 	return s.stateDir
 }
 
+// DownloadDir returns the configured wallpaper download directory.
 func (s *Storage) DownloadDir() string {
 	return s.downloadDir
 }
 
+// RankingDir returns the ranking image directory.
 func (s *Storage) RankingDir() string {
 	return filepath.Join(s.dataDir, "Ranking")
 }
 
+// MetadataPath returns the metadata JSON file path.
 func (s *Storage) MetadataPath() string {
 	return filepath.Join(s.stateDir, "metadata.json")
 }
 
+// HistoryPath returns the history JSON file path.
 func (s *Storage) HistoryPath() string {
 	return filepath.Join(s.stateDir, "history.json")
 }
 
+// PaginationPath returns the pagination JSON file path.
 func (s *Storage) PaginationPath() string {
 	return filepath.Join(s.stateDir, "pagination.json")
 }
 
+// LoadPaginationState reads persisted ranking pagination state.
 func (s *Storage) LoadPaginationState() (*PaginationState, error) {
 	path := s.PaginationPath()
 	data, err := os.ReadFile(path)
@@ -141,6 +150,7 @@ func (s *Storage) LoadPaginationState() (*PaginationState, error) {
 	return &state, nil
 }
 
+// SavePaginationState writes ranking pagination state.
 func (s *Storage) SavePaginationState(state *PaginationState) error {
 	if state.Pages == nil {
 		state.Pages = map[string]int{}
@@ -154,6 +164,7 @@ func (s *Storage) SavePaginationState(state *PaginationState) error {
 	return os.WriteFile(s.PaginationPath(), data, 0600)
 }
 
+// GetRankingPage returns the persisted page for a ranking key.
 func (s *Storage) GetRankingPage(key string) (int, error) {
 	state, err := s.LoadPaginationState()
 	if err != nil {
@@ -168,6 +179,7 @@ func (s *Storage) GetRankingPage(key string) (int, error) {
 	return page, nil
 }
 
+// SetRankingPage persists the page for a ranking key.
 func (s *Storage) SetRankingPage(key string, page int) error {
 	if page < 1 {
 		page = 1
@@ -182,6 +194,7 @@ func (s *Storage) SetRankingPage(key string, page int) error {
 	return s.SavePaginationState(state)
 }
 
+// LoadMetadata reads image metadata from disk.
 func (s *Storage) LoadMetadata() (map[string]*ImageMeta, error) {
 	path := s.MetadataPath()
 	data, rfErr := os.ReadFile(path)
@@ -200,6 +213,7 @@ func (s *Storage) LoadMetadata() (map[string]*ImageMeta, error) {
 	return images, nil
 }
 
+// SaveMetadata writes image metadata to disk.
 func (s *Storage) SaveMetadata(images map[string]*ImageMeta) error {
 	data, err := json.MarshalIndent(images, "", "  ")
 	if err != nil {
@@ -209,26 +223,7 @@ func (s *Storage) SaveMetadata(images map[string]*ImageMeta) error {
 	return os.WriteFile(s.MetadataPath(), data, 0600)
 }
 
-func (s *Storage) AddImage(meta *ImageMeta) error {
-	images, err := s.LoadMetadata()
-	if err != nil {
-		return err
-	}
-
-	images[meta.ID] = meta
-	return s.SaveMetadata(images)
-}
-
-func (s *Storage) HasImage(id string) (bool, error) {
-	images, err := s.LoadMetadata()
-	if err != nil {
-		return false, err
-	}
-
-	_, exists := images[id]
-	return exists, nil
-}
-
+// GetImagePath returns an image path from metadata or ranking fallback.
 func (s *Storage) GetImagePath(id string) (string, bool) {
 	images, err := s.LoadMetadata()
 	if err != nil {
@@ -244,6 +239,7 @@ func (s *Storage) GetImagePath(id string) (string, bool) {
 	return s.findImageInRankingDir(id)
 }
 
+// LoadHistory reads wallpaper history from disk.
 func (s *Storage) LoadHistory() (*History, error) {
 	path := s.HistoryPath()
 	data, err := os.ReadFile(path)
@@ -265,6 +261,7 @@ func (s *Storage) LoadHistory() (*History, error) {
 	return &history, nil
 }
 
+// SaveHistory writes wallpaper history to disk.
 func (s *Storage) SaveHistory(history *History) error {
 	history.UpdatedAt = time.Now()
 	data, err := json.MarshalIndent(history, "", "  ")
@@ -275,6 +272,7 @@ func (s *Storage) SaveHistory(history *History) error {
 	return os.WriteFile(s.HistoryPath(), data, 0600)
 }
 
+// AddToHistoryWithLimit updates current wallpaper and trims history length.
 func (s *Storage) AddToHistoryWithLimit(imageID string, historyLimit int) error {
 	history, err := s.LoadHistory()
 	if err != nil {
@@ -305,6 +303,7 @@ func trimHistory(history *History, historyLimit int) bool {
 	return true
 }
 
+// GetCurrentWallpaper returns the current wallpaper ID.
 func (s *Storage) GetCurrentWallpaper() (string, error) {
 	history, err := s.LoadHistory()
 	if err != nil {
@@ -314,6 +313,7 @@ func (s *Storage) GetCurrentWallpaper() (string, error) {
 	return history.Current, nil
 }
 
+// GetNextWallpaper returns the next wallpaper ID from history order.
 func (s *Storage) GetNextWallpaper() (string, error) {
 	history, err := s.LoadHistory()
 	if err != nil {
@@ -367,6 +367,7 @@ func (s *Storage) findImageInRankingDir(id string) (string, bool) {
 	return foundPath, true
 }
 
+// CleanupImagesOlderThanDays removes old images and syncs metadata/history.
 func (s *Storage) CleanupImagesOlderThanDays(days int) (int, error) {
 	images, err := s.LoadMetadata()
 	if err != nil {

@@ -8,6 +8,7 @@ const (
 	WallpaperFitMode
 )
 
+// String returns the string representation of a wallpaper mode.
 func (w WallpaperMode) String() string {
 	switch w {
 	case WallpaperFillMode:

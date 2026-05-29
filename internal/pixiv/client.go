@@ -57,6 +57,7 @@ type Client struct {
 	resolver      OriginalURLResolver
 }
 
+// NewClient constructs a Pixiv client for ranking and image downloads.
 func NewClient() (*Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -79,9 +80,11 @@ func NewClient() (*Client, error) {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
 			}
+
 			if req.URL.Path == "/login.php" {
 				return fmt.Errorf("redirected to login page")
 			}
+
 			return nil
 		},
 	}
@@ -106,9 +109,9 @@ func NewClient() (*Client, error) {
 		},
 	}
 
-	r, err := resolver.NewResolver()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create resolver: %w", err)
+	r, rErr := resolver.NewResolver()
+	if rErr != nil {
+		return nil, fmt.Errorf("failed to create resolver: %w", rErr)
 	}
 
 	return &Client{
@@ -135,6 +138,7 @@ type RankingContent struct {
 	IsMasked bool   `json:"is_masked"`
 }
 
+// FetchRanking fetches ranking entries and returns parsed image candidates.
 func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int, r18 bool) ([]Image, int, error) {
 	mode := rankingMode
 	if r18 {
@@ -242,6 +246,7 @@ func parseNextPage(next any) int {
 	return 1
 }
 
+// DownloadImage downloads an image to destination path atomically.
 func (c *Client) DownloadImage(ctx context.Context, image *Image, destPath string) error {
 	log := logger.WithComponent("pixiv")
 	downloadURL := image.URL

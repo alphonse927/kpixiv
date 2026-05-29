@@ -19,6 +19,7 @@ type KDELockScreenUpdater struct {
 	configPath string
 }
 
+// NewKDELockScreenUpdater creates an updater for KDE lock screen config.
 func NewKDELockScreenUpdater() *KDELockScreenUpdater {
 	return &KDELockScreenUpdater{configPath: kdeScreenLockerConfigPath()}
 }
@@ -37,6 +38,7 @@ func kdeScreenLockerConfigPath() string {
 	return filepath.Join(".config", "kscreenlockerrc")
 }
 
+// UpdateImage writes the lock screen image URI to kscreenlockerrc.
 func (u *KDELockScreenUpdater) UpdateImage(imageURI string) error {
 	if !strings.HasPrefix(imageURI, "file://") {
 		return fmt.Errorf("invalid image URI: %s", imageURI)
