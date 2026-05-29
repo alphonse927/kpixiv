@@ -17,6 +17,11 @@ import (
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
+const componentName = "scheduler"
+
+// ErrImageNotFound indicates that a queued wallpaper ID does not exist in metadata.
+var ErrImageNotFound = fmt.Errorf("image not found")
+
 type Scheduler struct {
 	cfg           *config.Config
 	storage       *storage.Storage
@@ -26,11 +31,13 @@ type Scheduler struct {
 	setInterval   time.Duration
 	fetchInterval time.Duration
 	stopCh        chan struct{}
+	pauseCh       chan bool
 	wg            sync.WaitGroup
 	mu            sync.Mutex
 	running       bool
 }
 
+// New creates a scheduler for wallpaper rotation and periodic fetching.
 func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpaper.Setter) *Scheduler {
 	sch := &Scheduler{
 		cfg:           cfg,
@@ -48,9 +55,11 @@ func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpap
 		sch.page = page
 	}
 
+	sch.pauseCh = make(chan bool, 1)
 	return sch
 }
 
+// Run starts scheduler goroutines and ticker loops.
 func (sch *Scheduler) Run(ctx context.Context) error {
 	sch.mu.Lock()
 	if sch.running {
@@ -58,18 +67,20 @@ func (sch *Scheduler) Run(ctx context.Context) error {
 		return fmt.Errorf("scheduler already running")
 	}
 	sch.running = true
+	sch.stopCh = make(chan struct{})
 	sch.mu.Unlock()
 
-	log := logger.WithComponent("scheduler")
+	log := logger.WithComponent(componentName)
 	log.Info("Starting scheduler", "setInterval", sch.setInterval, "fetchInterval", sch.fetchInterval)
 
 	sch.wg.Add(1)
-	go sch.run(ctx)
+	go sch.run(ctx, componentName)
 
 	return nil
 }
 
-func (sch *Scheduler) run(ctx context.Context) {
+func (sch *Scheduler) run(ctx context.Context, cname string) {
+	log := logger.WithComponent(cname)
 	defer sch.wg.Done()
 
 	setTicker := time.NewTicker(sch.setInterval)
@@ -78,23 +89,80 @@ func (sch *Scheduler) run(ctx context.Context) {
 	fetchTicker := time.NewTicker(sch.fetchInterval)
 	defer fetchTicker.Stop()
 
+	paused := false
+
 	for {
 		select {
 		case <-sch.stopCh:
 			logger.Info("Scheduler stopped")
 			return
+		case pause := <-sch.pauseCh:
+			paused = pause
 		case <-setTicker.C:
-			sch.rotateWallpaper()
+			if !paused {
+				log.Debug("Setting wallpaper")
+				if err := sch.rotateWallpaper(cname); err != nil {
+					log.Warn("Failed to set wallpaper", "error", err)
+				}
+			}
 		case <-fetchTicker.C:
-			sch.fetchImages(ctx)
+			if err := sch.fetchImages(ctx, cname); err != nil {
+				log.Warn("Fetch tick failed", "error", err)
+			}
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (sch *Scheduler) fetchImages(ctx context.Context) {
-	log := logger.WithComponent("scheduler")
+// Pause pauses scheduled rotation and fetch operations.
+func (sch *Scheduler) Pause() {
+	select {
+	case sch.pauseCh <- true:
+	default:
+	}
+}
+
+// Resume resumes scheduled rotation and fetch operations.
+func (sch *Scheduler) Resume() {
+	select {
+	case sch.pauseCh <- false:
+	default:
+	}
+}
+
+// Restart stops and starts the scheduler, then triggers an immediate fetch.
+func (sch *Scheduler) Restart(ctx context.Context, cname string) {
+	sch.Stop(cname)
+	if err := sch.Run(ctx); err != nil {
+		logger.WithComponent("scheduler").Warn("Failed to restart scheduler", "error", err)
+		return
+	}
+	sch.FetchNow(ctx, cname)
+}
+
+// FetchNow triggers an immediate image fetch for the provided component.
+func (sch *Scheduler) FetchNow(ctx context.Context, cname string) {
+	if !sch.IsRunning() {
+		go func() {
+			if err := sch.fetchImages(ctx, cname); err != nil {
+				logger.WithComponent("scheduler").Debug("Background fetch failed", "error", err)
+			}
+		}()
+		return
+	}
+}
+
+// FetchNowSync performs a blocking fetch for the provided component.
+func (sch *Scheduler) FetchNowSync(ctx context.Context, cname string) error {
+	return sch.fetchImages(ctx, cname)
+}
+
+func (sch *Scheduler) fetchImages(ctx context.Context, cname string) error {
+	log := logger.WithComponent(cname)
+	if sch.pixiv == nil {
+		return fmt.Errorf("pixiv client is not configured")
+	}
 
 	f := fetcher.NewFetcher(sch.cfg, sch.storage, sch.pixiv)
 	f.SetPage(sch.page)
@@ -102,58 +170,16 @@ func (sch *Scheduler) fetchImages(ctx context.Context) {
 	result, err := f.Fetch(ctx)
 	if err != nil {
 		log.Error("Failed to fetch", "error", err)
-		return
+		return err
 	}
 
 	sch.page = result.NextPage
 	log.Debug("Advanced ranking page", "nextPage", sch.page, "downloaded", result.Downloaded, "filtered", result.Filtered)
+	return nil
 }
 
-func (sch *Scheduler) rotateWallpaper() {
-	log := logger.WithComponent("scheduler")
-
-	q := storage.NewQueue(sch.storage.StateDir())
-	if err := q.Load(); err != nil {
-		log.Error("Failed to load queue", "error", err)
-		return
-	}
-
-	if q.IsEmpty() {
-		if err := sch.refillQueueFromRanking(q); err != nil {
-			log.Warn("Failed to refill queue", "error", err)
-			return
-		}
-	}
-
-	nextID, hasNext := q.Pop()
-	if !hasNext {
-		log.Warn("No wallpapers found in queue")
-		return
-	}
-
-	path, pathFound := sch.storage.GetImagePath(nextID)
-	if !pathFound {
-		nextID, path, pathFound = sch.findFallbackWallpaper()
-		if !pathFound {
-			log.Warn("No locally downloaded wallpapers available to apply")
-			return
-		}
-	}
-
-	if err := sch.setter.Set(path); err != nil {
-		log.Error("Failed to set wallpaper", "error", err)
-		return
-	}
-
-	if err := sch.storage.AddToHistoryWithLimit(nextID, sch.cfg.Wallpaper.HistoryLimit); err != nil {
-		log.Error("Failed to update history", "error", err)
-	}
-
-	log.Info("Wallpaper set", "path", path)
-}
-
-func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue) error {
-	log := logger.WithComponent("scheduler")
+func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue, cname string) error {
+	log := logger.WithComponent(cname)
 	log.Debug("Queue empty, loading available images from Ranking folder")
 
 	entries, err := os.ReadDir(sch.storage.RankingDir())
@@ -180,7 +206,7 @@ func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue) error {
 		return fmt.Errorf("no wallpapers found in ranking folder")
 	}
 
-	if err := q.AppendRandom(valid); err != nil {
+	if err = q.AppendRandom(valid); err != nil {
 		return fmt.Errorf("failed to append to queue: %w", err)
 	}
 
@@ -210,35 +236,8 @@ func isValidWallpaperFile(entry os.DirEntry) bool {
 	return true
 }
 
-func (sch *Scheduler) findFallbackWallpaper() (string, string, bool) {
-	log := logger.WithComponent("scheduler")
-	log.Warn("Wallpaper not found in storage metadata, searching for fallback")
-
-	entries, err := os.ReadDir(sch.storage.RankingDir())
-	if err != nil {
-		return "", "", false
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		if !isValidWallpaperFile(entry) {
-			continue
-		}
-
-		name := entry.Name()
-		ext := filepath.Ext(name)
-		id := strings.TrimSuffix(name, ext)
-		if p, found := sch.storage.GetImagePath(id); found {
-			return id, p, true
-		}
-	}
-
-	return "", "", false
-}
-
-func (sch *Scheduler) Stop() {
+// Stop stops scheduler goroutines and waits for completion.
+func (sch *Scheduler) Stop(cname string) {
 	sch.mu.Lock()
 	if !sch.running {
 		sch.mu.Unlock()
@@ -247,20 +246,19 @@ func (sch *Scheduler) Stop() {
 	sch.running = false
 	sch.mu.Unlock()
 
-	log := logger.WithComponent("scheduler")
+	log := logger.WithComponent(cname)
 	log.Info("Stopping scheduler")
 
 	close(sch.stopCh)
 	sch.wg.Wait()
 }
 
-func (sch *Scheduler) SetNext(q *storage.Queue) error {
-	log := logger.WithComponent("scheduler")
+// SetNextWallpaper applies the next wallpaper from queue and updates history.
+func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
+	log := logger.WithComponent(cname)
 
 	if q.IsEmpty() {
-		log.Debug("Queue empty, loading available images from Ranking folder")
-
-		if err := sch.refillQueueFromRanking(q); err != nil {
+		if err := sch.refillQueueFromRanking(q, cname); err != nil {
 			return err
 		}
 	}
@@ -272,12 +270,8 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 
 	path, ok := sch.storage.GetImagePath(nextID)
 	if !ok {
-		log.Warn("Wallpaper not found in storage", "id", nextID)
-
-		nextID, path, ok = sch.findFallbackWallpaper()
-		if !ok {
-			return fmt.Errorf("no wallpapers available")
-		}
+		log.Warn("Wallpaper not found in storage, skipping...", "id", nextID)
+		return ErrImageNotFound
 	}
 
 	if err := sch.setter.Set(path); err != nil {
@@ -288,16 +282,18 @@ func (sch *Scheduler) SetNext(q *storage.Queue) error {
 		return fmt.Errorf("failed to update history: %w", err)
 	}
 
-	log.Info("Manually set next wallpaper", "path", path)
+	log.Info("New wallpaper set", "path", path)
 	return nil
 }
 
+// IsRunning reports whether the scheduler is currently active.
 func (sch *Scheduler) IsRunning() bool {
 	sch.mu.Lock()
 	defer sch.mu.Unlock()
 	return sch.running
 }
 
+// ApplyCurrentOrNext applies the current wallpaper or a valid fallback.
 func (sch *Scheduler) ApplyCurrentOrNext() error {
 	log := logger.WithComponent("scheduler")
 
@@ -322,11 +318,13 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 			targetID = currentID
 		}
 	}
+
 	if targetID == "" && nextID != "" {
 		if _, ok := images[nextID]; ok {
 			targetID = nextID
 		}
 	}
+
 	if targetID == "" {
 		for id, meta := range images {
 			if meta.Path != "" {
@@ -353,4 +351,13 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 
 	log.Info("Wallpaper set successfully", "path", path)
 	return nil
+}
+
+func (sch *Scheduler) rotateWallpaper(cname string) error {
+	q := storage.NewQueue(sch.storage.StateDir())
+	if err := q.Load(); err != nil {
+		return fmt.Errorf("failed to load queue: %w", err)
+	}
+
+	return sch.SetNextWallpaper(q, cname)
 }

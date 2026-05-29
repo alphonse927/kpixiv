@@ -24,6 +24,7 @@ type Resolver struct {
 	client *http.Client
 }
 
+// NewResolver creates a URL resolver for Pixiv original image links.
 func NewResolver() (*Resolver, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -53,6 +54,7 @@ func NewResolver() (*Resolver, error) {
 	return &Resolver{client: client}, nil
 }
 
+// ResolveOriginalURL resolves a thumbnail URL to a downloadable original URL.
 func (r *Resolver) ResolveOriginalURL(ctx context.Context, thumbnailURL string) (string, error) {
 	log := logger.WithComponent("resolver")
 
@@ -155,6 +157,7 @@ func (r *Resolver) validateURL(ctx context.Context, imageURL string) (bool, erro
 	return HasContent(resp), nil
 }
 
+// TruncateString truncates a string and appends ellipsis when needed.
 func TruncateString(s string, limit int) string {
 	if limit <= 0 {
 		return ""

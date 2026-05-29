@@ -15,6 +15,7 @@ type KDESetter struct {
 	lockScreenUpdater *KDELockScreenUpdater
 }
 
+// NewKDESetter creates a KDE wallpaper setter using qdbus.
 func NewKDESetter(setLockScreen bool) *KDESetter {
 	qdbus := detectQDBusBinary()
 	return &KDESetter{
@@ -25,6 +26,7 @@ func NewKDESetter(setLockScreen bool) *KDESetter {
 	}
 }
 
+// Set applies the wallpaper on KDE Plasma and optionally lock screen.
 func (k *KDESetter) Set(path string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {

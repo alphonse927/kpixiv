@@ -1,6 +1,6 @@
 # KPixiv
 
-A lightweight CLI wallpaper daemon for fetching and rotating Pixiv wallpapers on KDE Plasma.
+A tray-centric Linux wallpaper application for fetching and rotating Pixiv wallpapers on KDE Plasma, supervised by systemd user services.
 
 ## Features
 
@@ -8,7 +8,7 @@ A lightweight CLI wallpaper daemon for fetching and rotating Pixiv wallpapers on
 - Resolve original resolution images from Pixiv thumbnails
 - Download and store wallpapers locally with deduplication
 - Apply wallpapers directly to KDE Plasma desktop
-- Daemon mode for automatic wallpaper rotation
+- Tray-centric runtime with automatic wallpaper rotation
 - Dry-run mode for testing
 
 ## Requirements
@@ -22,7 +22,7 @@ A lightweight CLI wallpaper daemon for fetching and rotating Pixiv wallpapers on
 ```bash
 # Build and link to ~/.local/bin/kpixiv
 make install
-sudo systemctl enable --now kpixiv
+systemctl --user enable --now kpixiv.service
 ```
 
 This builds the binary, copies it to `/usr/local/bin/`, installs the systemd user service, and reloads systemd.
@@ -63,11 +63,34 @@ wallpaper:
 | `wallpaper.set_interval` | `5` | Minutes between wallpaper changes |
 | `wallpaper.fetch_interval` | `30` | Minutes between fetching new images |
 
+## Runtime Architecture
+
+KPixiv runs as one process:
+
+`systemd user service -> kpixiv process -> tray + scheduler + fetch + wallpaper management`
+
+- No split daemon/tray design
+- No IPC or local socket layer
+- Tray lifecycle is app lifecycle (`Quit` stops the whole process)
+- systemd still supervises startup and restart behavior
+
 ## Usage
 
 ```bash
 kpixiv fetch       # Download wallpapers
 kpixiv next        # Apply next wallpaper
-kpixiv daemon      # Run with automatic rotation
+kpixiv daemon      # Launch tray-enabled runtime (used by systemd)
 kpixiv status      # Show cache and storage info
 ```
+
+### Tray Menu
+
+When running `kpixiv daemon`, the tray menu provides:
+
+- Next Wallpaper
+- Pause Rotation
+- Resume Rotation
+- Open Current Artwork
+- Open Folder
+- Restart Rotation
+- Quit

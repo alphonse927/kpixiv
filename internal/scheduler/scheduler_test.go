@@ -102,7 +102,7 @@ func TestRunAlreadyRunning(t *testing.T) {
 		t.Error("Run() second time: got nil, want error")
 	}
 
-	sch.Stop()
+	sch.Stop("test")
 }
 
 func TestStop(t *testing.T) {
@@ -115,7 +115,7 @@ func TestStop(t *testing.T) {
 	ctx := context.Background()
 
 	_ = sch.Run(ctx)
-	sch.Stop()
+	sch.Stop("test")
 
 	if sch.IsRunning() {
 		t.Error("IsRunning() after Stop(): got true, want false")
@@ -132,8 +132,8 @@ func TestStopMultipleTimes(t *testing.T) {
 	ctx := context.Background()
 
 	_ = sch.Run(ctx)
-	sch.Stop()
-	sch.Stop()
+	sch.Stop("test")
+	sch.Stop("test")
 }
 
 func TestSetNextNoWallpapers(t *testing.T) {
@@ -144,7 +144,7 @@ func TestSetNextNoWallpapers(t *testing.T) {
 	q := storage.NewQueue(s.StateDir())
 
 	sch := New(cfg, s, m, setter)
-	if err := sch.SetNext(q); err == nil {
+	if err := sch.SetNextWallpaper(q, "test"); err == nil {
 		t.Error("SetNext() with no wallpapers: got nil, want err")
 	}
 
@@ -184,7 +184,7 @@ func TestIsRunning(t *testing.T) {
 		t.Error("IsRunning() during Run(): got false, want true")
 	}
 
-	sch.Stop()
+	sch.Stop("test")
 
 	if sch.IsRunning() {
 		t.Error("IsRunning() after Stop(): got true, want false")

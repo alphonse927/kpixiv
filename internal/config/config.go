@@ -37,6 +37,7 @@ const (
 	DefaultCleanupDays   = 7
 )
 
+// Default returns the default application configuration.
 func Default() *Config {
 	defaultDownloadPath := resolveDefaultDownloadPath()
 
@@ -62,6 +63,7 @@ func Default() *Config {
 	}
 }
 
+// Load reads configuration from disk or creates defaults when missing.
 func Load(path string) (*Config, error) {
 	if path == "" {
 		homeDir, err := os.UserHomeDir()
@@ -91,6 +93,7 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
+// Save writes configuration to disk.
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0750); err != nil {
@@ -105,6 +108,7 @@ func Save(path string, cfg *Config) error {
 	return os.WriteFile(path, data, 0600)
 }
 
+// Validate normalizes and enforces minimum configuration values.
 func (c *Config) Validate() error {
 	if c.DownloadPath == "" {
 		c.DownloadPath = resolveDefaultDownloadPath()
