@@ -187,12 +187,10 @@ func (f *Fetcher) downloadAndSave(ctx context.Context, pending []pixiv.Image, me
 			continue
 		}
 
-		finalPath := destPath
-		if _, err := os.Stat(destPath); os.IsNotExist(err) {
-			altPath := filepath.Join(rankingDir, img.ID+".png")
-			if _, err = os.Stat(altPath); err == nil {
-				finalPath = altPath
-			}
+		finalPath, ok := downloadedImagePath(rankingDir, img.ID)
+		if !ok {
+			log.Warn("Download completed without a saved file", "id", img.ID)
+			continue
 		}
 
 		metadata[img.ID] = &storage.ImageMeta{
@@ -214,6 +212,19 @@ func (f *Fetcher) downloadAndSave(ctx context.Context, pending []pixiv.Image, me
 	}
 
 	return downloadedIDs
+}
+
+func downloadedImagePath(rankingDir, imageID string) (string, bool) {
+	for _, path := range []string{
+		filepath.Join(rankingDir, imageID+".jpg"),
+		filepath.Join(rankingDir, imageID+".png"),
+	} {
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+
+	return "", false
 }
 
 func (f *Fetcher) collectAvailableIDs(filteredImages []pixiv.Image, downloadedIDs []string, metadata map[string]*storage.ImageMeta) []string {
@@ -288,7 +299,7 @@ func (f *Fetcher) DryRun(ctx context.Context) (*FetchResult, error) {
 
 	log.Info("Dry-run mode: skipping downloads", "candidates", result.Filtered)
 	fmt.Println("Fetch dry-run complete!")
-	fmt.Printf("Total: %d, Filtered: %d, Downloaded: 0, Skipped: 0\n", result.Total, result.Filtered)
+	fmt.Printf("Total: %d, Filtered: %d, Downloaded: 0, Skipped: %d\n", result.Total, result.Filtered, result.Skipped)
 
 	return result, nil
 }

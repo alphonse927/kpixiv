@@ -453,6 +453,14 @@ func (s *Storage) findImageInRankingDir(id string) (string, bool) {
 
 	var foundPath string
 	err := filepath.Walk(rankingDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info == nil {
+			return nil
+		}
+
 		if info.IsDir() {
 			return nil
 		}
