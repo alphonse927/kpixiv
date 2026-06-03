@@ -115,7 +115,7 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 	}
 }
 
-// Pause pauses scheduled rotation and fetch operations.
+// Pause pauses scheduled wallpaper rotation.
 func (sch *Scheduler) Pause() {
 	select {
 	case sch.pauseCh <- true:
@@ -123,7 +123,7 @@ func (sch *Scheduler) Pause() {
 	}
 }
 
-// Resume resumes scheduled rotation and fetch operations.
+// Resume resumes scheduled wallpaper rotation.
 func (sch *Scheduler) Resume() {
 	select {
 	case sch.pauseCh <- false:
@@ -143,14 +143,11 @@ func (sch *Scheduler) Restart(ctx context.Context, cname string) {
 
 // FetchNow triggers an immediate image fetch for the provided component.
 func (sch *Scheduler) FetchNow(ctx context.Context, cname string) {
-	if !sch.IsRunning() {
-		go func() {
-			if err := sch.fetchImages(ctx, cname); err != nil {
-				logger.WithComponent("scheduler").Debug("Background fetch failed", "error", err)
-			}
-		}()
-		return
-	}
+	go func() {
+		if err := sch.fetchImages(ctx, cname); err != nil {
+			logger.WithComponent("scheduler").Debug("Background fetch failed", "error", err)
+		}
+	}()
 }
 
 // FetchNowSync performs a blocking fetch for the provided component.
@@ -271,6 +268,7 @@ func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 
 	attempts := 0
 	maxAttempts := 5
+	applied := false
 	for attempts < maxAttempts {
 		attempts++
 
@@ -309,6 +307,12 @@ func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 		}
 
 		log.Info("New wallpaper set", "path", path)
+		applied = true
+		break
+	}
+
+	if !applied {
+		return ErrImageNotFound
 	}
 
 	return nil

@@ -2,9 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -207,6 +210,28 @@ func TestSetNextIsRandom(t *testing.T) {
 	t.Skip("SetNext requires queue setup")
 }
 
+func TestSetNextReturnsImageNotFoundWhenNoValidWallpaperApplied(t *testing.T) {
+	cfg := testConfig()
+	s := testStorage(t)
+	m := &mockPixivClient{}
+	setter := &mockSetter{}
+	q := storage.NewQueue(s.StateDir())
+
+	if err := q.AppendRandom([]string{"missing-1", "missing-2", "missing-3", "missing-4", "missing-5"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	sch := New(cfg, s, m, setter)
+	err := sch.SetNextWallpaper(q, "test")
+	if !errors.Is(err, ErrImageNotFound) {
+		t.Fatalf("SetNextWallpaper() error: got %v, want ErrImageNotFound", err)
+	}
+
+	if setter.setCalled {
+		t.Fatal("SetNextWallpaper() should not set a wallpaper")
+	}
+}
+
 func TestApplyCurrentOrNextSkipsBlacklistedCurrent(t *testing.T) {
 	cfg := testConfig()
 	s := testStorage(t)
@@ -245,6 +270,55 @@ func TestApplyCurrentOrNextSkipsBlacklistedCurrent(t *testing.T) {
 	if setter.lastPath != secondPath {
 		t.Fatalf("ApplyCurrentOrNext() path: got %q, want %q", setter.lastPath, secondPath)
 	}
+}
+
+func TestFetchNowTriggersFetchWhileRunning(t *testing.T) {
+	cfg := testConfig()
+	s := testStorage(t)
+	setter := &mockSetter{}
+	var calls atomic.Int32
+	m := &mockPixivClient{
+		images:   []pixiv.Image{},
+		nextPage: 2,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	client := &mockPixivClientWithHook{mockPixivClient: m, onFetch: func() {
+		calls.Add(1)
+	}}
+
+	sch := New(cfg, s, client, setter)
+	if err := sch.Run(ctx); err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+	defer sch.Stop("test")
+
+	sch.FetchNow(ctx, "test")
+
+	deadline := time.After(2 * time.Second)
+	for calls.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("FetchNow() did not trigger a fetch while running")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+type mockPixivClientWithHook struct {
+	*mockPixivClient
+	onFetch func()
+}
+
+func (m *mockPixivClientWithHook) FetchRanking(ctx context.Context, mode string, page int, r18 bool) ([]pixiv.Image, int, error) {
+	if m.onFetch != nil {
+		m.onFetch()
+	}
+
+	return m.mockPixivClient.FetchRanking(ctx, mode, page, r18)
 }
 
 func TestIsRunning(t *testing.T) {

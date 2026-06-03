@@ -80,6 +80,7 @@ func (c *Controller) Start() error {
 
 	images, err := c.st.LoadMetadata()
 	if err != nil {
+		c.sch.Stop(componentName)
 		return fmt.Errorf("failed to load metadata: %w", err)
 	}
 
@@ -89,11 +90,13 @@ func (c *Controller) Start() error {
 
 		// Fetch initial wallpapers
 		if err = c.sch.FetchNowSync(c.ctx, componentName); err != nil {
+			c.sch.Stop(componentName)
 			return fmt.Errorf("failed initial fetch: %w", err)
 		}
 
 		// Apply wallpaper
 		if err = c.sch.ApplyCurrentOrNext(); err != nil {
+			c.sch.Stop(componentName)
 			return fmt.Errorf("failed to apply wallpaper after initial fetch: %w", err)
 		}
 
