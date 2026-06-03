@@ -61,7 +61,12 @@ func (f *Fetcher) Fetch(ctx context.Context) (*FetchResult, error) {
 		NextPage: nextPage,
 	}
 
-	filteredImages := f.filterImages(images)
+	blacklist, blErr := f.storage.LoadBlacklistSet()
+	if blErr != nil {
+		return nil, fmt.Errorf("failed to load blacklist: %w", blErr)
+	}
+
+	filteredImages := f.filterImages(images, blacklist)
 	result.Filtered = len(filteredImages)
 
 	log.Debug("Filtered images", "count", result.Filtered, "minWidth", f.cfg.Pixiv.MinWidth, "minHeight", f.cfg.Pixiv.MinHeight)
@@ -95,9 +100,12 @@ func (f *Fetcher) Fetch(ctx context.Context) (*FetchResult, error) {
 	return result, nil
 }
 
-func (f *Fetcher) filterImages(images []pixiv.Image) []pixiv.Image {
+func (f *Fetcher) filterImages(images []pixiv.Image, blacklist map[string]struct{}) []pixiv.Image {
 	var filtered []pixiv.Image
 	for _, img := range images {
+		if _, excluded := blacklist[img.ID]; excluded {
+			continue
+		}
 		if img.Width < f.cfg.Pixiv.MinWidth || img.Height < f.cfg.Pixiv.MinHeight {
 			continue
 		}
@@ -269,7 +277,12 @@ func (f *Fetcher) DryRun(ctx context.Context) (*FetchResult, error) {
 		NextPage: nextPage,
 	}
 
-	filteredImages := f.filterImages(images)
+	blacklist, err := f.storage.LoadBlacklistSet()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load blacklist: %w", err)
+	}
+
+	filteredImages := f.filterImages(images, blacklist)
 	result.Filtered = len(filteredImages)
 	result.Skipped = result.Filtered
 

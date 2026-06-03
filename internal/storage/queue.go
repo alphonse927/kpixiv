@@ -145,6 +145,23 @@ func (q *Queue) IsEmpty() bool {
 	return len(q.items) == 0
 }
 
+// Remove deletes all occurrences of an ID from the queue.
+func (q *Queue) Remove(item string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	filtered := q.items[:0]
+	for _, existing := range q.items {
+		if existing == item {
+			continue
+		}
+		filtered = append(filtered, existing)
+	}
+
+	q.items = filtered
+	return q.Save()
+}
+
 func (q *Queue) shuffleCopy(items []string) []string {
 	if len(items) <= 1 {
 		result := make([]string, len(items))

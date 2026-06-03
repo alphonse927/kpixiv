@@ -182,6 +182,11 @@ func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue, cname string) err
 	log := logger.WithComponent(cname)
 	log.Debug("Queue empty, loading available images from Ranking folder")
 
+	blacklist, err := sch.storage.LoadBlacklistSet()
+	if err != nil {
+		return fmt.Errorf("failed to load blacklist: %w", err)
+	}
+
 	entries, err := os.ReadDir(sch.storage.RankingDir())
 	if err != nil {
 		return fmt.Errorf("failed to read ranking directory: %w", err)
@@ -199,6 +204,9 @@ func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue, cname string) err
 		name := entry.Name()
 		ext := filepath.Ext(name)
 		id := strings.TrimSuffix(name, ext)
+		if _, excluded := blacklist[id]; excluded {
+			continue
+		}
 		valid = append(valid, id)
 	}
 
@@ -236,7 +244,7 @@ func isValidWallpaperFile(entry os.DirEntry) bool {
 	return true
 }
 
-// Stop stops scheduler goroutines and waits for completion.
+// Stop stops the scheduler goroutines and waits for completion.
 func (sch *Scheduler) Stop(cname string) {
 	sch.mu.Lock()
 	if !sch.running {
@@ -253,36 +261,56 @@ func (sch *Scheduler) Stop(cname string) {
 	sch.wg.Wait()
 }
 
-// SetNextWallpaper applies the next wallpaper from queue and updates history.
+// SetNextWallpaper applies the next wallpaper from the queue and updates history.
 func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 	log := logger.WithComponent(cname)
+	blacklist, err := sch.storage.LoadBlacklistSet()
+	if err != nil {
+		return fmt.Errorf("failed to load blacklist: %w", err)
+	}
 
-	if q.IsEmpty() {
-		if err := sch.refillQueueFromRanking(q, cname); err != nil {
-			return err
+	attempts := 0
+	maxAttempts := 5
+	for attempts < maxAttempts {
+		attempts++
+
+		if q.IsEmpty() {
+			if err = sch.refillQueueFromRanking(q, cname); err != nil {
+				return err
+			}
+
+			if q.IsEmpty() {
+				return ErrImageNotFound
+			}
 		}
+
+		nextID, ok := q.Pop()
+		if !ok {
+			return fmt.Errorf("no wallpapers found in queue")
+		}
+
+		if _, excluded := blacklist[nextID]; excluded {
+			log.Debug("Skipping blacklisted wallpaper", "id", nextID)
+			continue
+		}
+
+		path, exists := sch.storage.GetImagePath(nextID)
+		if !exists {
+			log.Warn("Wallpaper not found in storage, skipping...", "id", nextID)
+			continue
+		}
+
+		if err = sch.setter.Set(path); err != nil {
+			return fmt.Errorf("failed to set wallpaper: %w", err)
+		}
+
+		if err = sch.storage.AddToHistoryWithLimit(nextID, sch.cfg.Wallpaper.HistoryLimit); err != nil {
+			return fmt.Errorf("failed to update history: %w", err)
+		}
+
+		log.Info("New wallpaper set", "path", path)
 	}
 
-	nextID, ok := q.Pop()
-	if !ok {
-		return fmt.Errorf("no wallpapers found in queue")
-	}
-
-	path, ok := sch.storage.GetImagePath(nextID)
-	if !ok {
-		log.Warn("Wallpaper not found in storage, skipping...", "id", nextID)
-		return ErrImageNotFound
-	}
-
-	if err := sch.setter.Set(path); err != nil {
-		return fmt.Errorf("failed to set wallpaper: %w", err)
-	}
-
-	if err := sch.storage.AddToHistoryWithLimit(nextID, sch.cfg.Wallpaper.HistoryLimit); err != nil {
-		return fmt.Errorf("failed to update history: %w", err)
-	}
-
-	log.Info("New wallpaper set", "path", path)
 	return nil
 }
 
@@ -307,33 +335,17 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 		return fmt.Errorf("failed to get current wallpaper: %w", cwErr)
 	}
 
+	blacklist, err := sch.storage.LoadBlacklistSet()
+	if err != nil {
+		return fmt.Errorf("failed to load blacklist: %w", err)
+	}
+
 	nextID, nwErr := sch.storage.GetNextWallpaper()
 	if nwErr != nil {
 		return fmt.Errorf("failed to get next wallpaper: %w", nwErr)
 	}
 
-	targetID := ""
-	if currentID != "" {
-		if _, ok := images[currentID]; ok {
-			targetID = currentID
-		}
-	}
-
-	if targetID == "" && nextID != "" {
-		if _, ok := images[nextID]; ok {
-			targetID = nextID
-		}
-	}
-
-	if targetID == "" {
-		for id, meta := range images {
-			if meta.Path != "" {
-				targetID = id
-				break
-			}
-		}
-	}
-
+	targetID := selectTargetWallpaperID(images, blacklist, currentID, nextID)
 	if targetID == "" {
 		return fmt.Errorf("no wallpapers available")
 	}
@@ -351,6 +363,38 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 
 	log.Info("Wallpaper set successfully", "path", path)
 	return nil
+}
+
+func selectTargetWallpaperID(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, currentID, nextID string) string {
+	for _, candidateID := range []string{currentID, nextID} {
+		if wallpaperAvailable(images, blacklist, candidateID) {
+			return candidateID
+		}
+	}
+
+	for id, meta := range images {
+		if _, excluded := blacklist[id]; excluded {
+			continue
+		}
+		if meta.Path != "" {
+			return id
+		}
+	}
+
+	return ""
+}
+
+func wallpaperAvailable(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, id string) bool {
+	if id == "" {
+		return false
+	}
+
+	if _, excluded := blacklist[id]; excluded {
+		return false
+	}
+
+	_, ok := images[id]
+	return ok
 }
 
 func (sch *Scheduler) rotateWallpaper(cname string) error {

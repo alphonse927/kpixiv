@@ -26,6 +26,8 @@ type Controller struct {
 	paused bool
 }
 
+const trayComponentName = "tray"
+
 // New builds a controller with storage, wallpaper setter, and scheduler dependencies.
 func New(cfg *config.Config, dryRun bool, reset bool) (*Controller, error) {
 	st, err := storage.New("", cfg.DownloadPath)
@@ -113,7 +115,7 @@ func (c *Controller) NextWallpaper() error {
 		return fmt.Errorf("failed to load queue: %w", err)
 	}
 
-	return c.sch.SetNextWallpaper(sq, "tray")
+	return c.sch.SetNextWallpaper(sq, trayComponentName)
 }
 
 // PauseRotation pauses scheduled rotation and fetch ticks.
@@ -156,6 +158,33 @@ func (c *Controller) OpenCurrentArtwork() error {
 
 	//nolint:gosec // xdg-open is intentionally used with a local filesystem path.
 	return exec.Command("xdg-open", path).Start()
+}
+
+// ExcludeCurrentWallpaper blacklists the current wallpaper and switches to another one.
+func (c *Controller) ExcludeCurrentWallpaper() error {
+	currentID, err := c.st.GetCurrentWallpaper()
+	if err != nil {
+		return err
+	}
+
+	if currentID == "" {
+		return fmt.Errorf("no current artwork")
+	}
+
+	if err = c.st.ExcludeWallpaper(currentID); err != nil {
+		return fmt.Errorf("failed to exclude current artwork: %w", err)
+	}
+
+	q := storage.NewQueue(c.st.StateDir())
+	if err = q.Load(); err != nil {
+		return fmt.Errorf("excluded current artwork, but failed to load queue: %w", err)
+	}
+
+	if err = q.Remove(currentID); err != nil {
+		return fmt.Errorf("excluded current artwork, but failed to update queue: %w", err)
+	}
+
+	return c.sch.SetNextWallpaper(q, trayComponentName)
 }
 
 // Shutdown cancels running work and stops the scheduler.

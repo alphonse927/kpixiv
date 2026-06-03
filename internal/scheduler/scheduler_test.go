@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -154,7 +155,48 @@ func TestSetNextNoWallpapers(t *testing.T) {
 }
 
 func TestSetNextWithWallpapers(t *testing.T) {
-	t.Skip("SetNext requires queue setup")
+	cfg := testConfig()
+	s := testStorage(t)
+	m := &mockPixivClient{}
+	setter := &mockSetter{}
+	q := storage.NewQueue(s.StateDir())
+
+	firstPath := filepath.Join(s.RankingDir(), "img1.jpg")
+	secondPath := filepath.Join(s.RankingDir(), "img2.jpg")
+	if err := os.WriteFile(firstPath, []byte("img1"), 0600); err != nil {
+		t.Fatalf("WriteFile(img1) returned error: %v", err)
+	}
+	if err := os.WriteFile(secondPath, []byte("img2"), 0600); err != nil {
+		t.Fatalf("WriteFile(img2) returned error: %v", err)
+	}
+
+	if err := s.SaveMetadata(map[string]*storage.ImageMeta{
+		"img1": {ID: "img1", Path: firstPath},
+		"img2": {ID: "img2", Path: secondPath},
+	}); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+
+	if err := q.AppendRandom([]string{"img1", "img2"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	if err := s.ExcludeWallpaper("img1"); err != nil {
+		t.Fatalf("ExcludeWallpaper() returned error: %v", err)
+	}
+
+	sch := New(cfg, s, m, setter)
+	if err := sch.SetNextWallpaper(q, "test"); err != nil {
+		t.Fatalf("SetNextWallpaper() returned error: %v", err)
+	}
+
+	if !setter.setCalled {
+		t.Fatal("SetNextWallpaper() should set a wallpaper")
+	}
+
+	if setter.lastPath != secondPath {
+		t.Fatalf("SetNextWallpaper() path: got %q, want %q", setter.lastPath, secondPath)
+	}
 }
 
 func TestSetNextAddsToHistory(t *testing.T) {
@@ -163,6 +205,46 @@ func TestSetNextAddsToHistory(t *testing.T) {
 
 func TestSetNextIsRandom(t *testing.T) {
 	t.Skip("SetNext requires queue setup")
+}
+
+func TestApplyCurrentOrNextSkipsBlacklistedCurrent(t *testing.T) {
+	cfg := testConfig()
+	s := testStorage(t)
+	m := &mockPixivClient{}
+	setter := &mockSetter{}
+
+	firstPath := filepath.Join(s.RankingDir(), "img1.jpg")
+	secondPath := filepath.Join(s.RankingDir(), "img2.jpg")
+	if err := os.WriteFile(firstPath, []byte("img1"), 0600); err != nil {
+		t.Fatalf("WriteFile(img1) returned error: %v", err)
+	}
+	if err := os.WriteFile(secondPath, []byte("img2"), 0600); err != nil {
+		t.Fatalf("WriteFile(img2) returned error: %v", err)
+	}
+
+	if err := s.SaveMetadata(map[string]*storage.ImageMeta{
+		"img1": {ID: "img1", Path: firstPath},
+		"img2": {ID: "img2", Path: secondPath},
+	}); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+
+	if err := s.SaveHistory(&storage.History{Current: "img1", Images: []string{"img1", "img2"}}); err != nil {
+		t.Fatalf("SaveHistory() returned error: %v", err)
+	}
+
+	if err := s.ExcludeWallpaper("img1"); err != nil {
+		t.Fatalf("ExcludeWallpaper() returned error: %v", err)
+	}
+
+	sch := New(cfg, s, m, setter)
+	if err := sch.ApplyCurrentOrNext(); err != nil {
+		t.Fatalf("ApplyCurrentOrNext() returned error: %v", err)
+	}
+
+	if setter.lastPath != secondPath {
+		t.Fatalf("ApplyCurrentOrNext() path: got %q, want %q", setter.lastPath, secondPath)
+	}
 }
 
 func TestIsRunning(t *testing.T) {

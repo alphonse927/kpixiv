@@ -385,6 +385,41 @@ func TestQueueConcurrentSafety(t *testing.T) {
 	}
 }
 
+func TestQueueRemove(t *testing.T) {
+	tmp := t.TempDir()
+	q := NewQueue(tmp)
+
+	if err := q.AppendRandom([]string{"A", "B", "C"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	if err := q.Remove("B"); err != nil {
+		t.Fatalf("Remove() returned error: %v", err)
+	}
+
+	items := q.GetAll()
+	if len(items) != 2 {
+		t.Fatalf("Remove() count: got %d, want 2", len(items))
+	}
+
+	for _, item := range items {
+		if item == "B" {
+			t.Fatal("Remove() should delete B from queue")
+		}
+	}
+
+	q2 := NewQueue(tmp)
+	if err := q2.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+
+	for _, item := range q2.GetAll() {
+		if item == "B" {
+			t.Fatal("Remove() should persist queue changes")
+		}
+	}
+}
+
 func TestQueueLoadCorruptedFile(t *testing.T) {
 	tmp := t.TempDir()
 	queuePath := filepath.Join(tmp, "queue.json")
