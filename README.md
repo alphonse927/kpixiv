@@ -7,7 +7,7 @@ A tray-centric Linux wallpaper application for fetching and rotating Pixiv wallp
 - Fetch wallpapers from Daily, Weekly, and Monthly rankings
 - Resolve original resolution images from Pixiv thumbnails
 - Download and store wallpapers locally with deduplication
-- Apply wallpapers directly to KDE Plasma desktop
+- Apply wallpapers directly to the KDE Plasma desktop
 - Tray-centric runtime with automatic wallpaper rotation
 - Dry-run mode for testing
 
@@ -50,18 +50,18 @@ wallpaper:
 
 ### Options
 
-| Option | Default | Description |
-|---|---|---|
-| `download_path` | `~/Pictures/KPixiv` | Where to store wallpapers |
-| `pixiv.ranking` | `daily` | Ranking type (daily/weekly/monthly) |
-| `pixiv.r18` | `false` | Include R18 content |
-| `pixiv.min_width` | `1280` | Minimum image width |
-| `pixiv.min_height` | `720` | Minimum image height |
-| `pixiv.landscape_only` | `true` | Only download landscape images |
-| `wallpaper.mode` | `fill` | Wallpaper scaling mode |
-| `wallpaper.keep_history` | `5` | Wallpapers to keep in history |
-| `wallpaper.set_interval` | `5` | Minutes between wallpaper changes |
-| `wallpaper.fetch_interval` | `30` | Minutes between fetching new images |
+| Option                     | Default             | Description                         |
+|----------------------------|---------------------|-------------------------------------|
+| `download_path`            | `~/Pictures/KPixiv` | Where to store wallpapers           |
+| `pixiv.ranking`            | `daily`             | Ranking type (daily/weekly/monthly) |
+| `pixiv.r18`                | `false`             | Include R18 content                 |
+| `pixiv.min_width`          | `1280`              | Minimum image width                 |
+| `pixiv.min_height`         | `720`               | Minimum image height                |
+| `pixiv.landscape_only`     | `true`              | Only download landscape images      |
+| `wallpaper.mode`           | `fill`              | Wallpaper scaling mode              |
+| `wallpaper.keep_history`   | `5`                 | Wallpapers to keep in history       |
+| `wallpaper.set_interval`   | `5`                 | Minutes between wallpaper changes   |
+| `wallpaper.fetch_interval` | `30`                | Minutes between fetching new images |
 
 ## Runtime Architecture
 
@@ -72,7 +72,7 @@ KPixiv runs as one process:
 - No split daemon/tray design
 - No IPC or local socket layer
 - Tray lifecycle is app lifecycle (`Quit` stops the whole process)
-- systemd still supervises startup and restart behavior
+- systemd still supervises a startup and restart behavior
 
 ## Usage
 

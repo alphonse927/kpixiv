@@ -31,6 +31,11 @@ type PaginationState struct {
 	Pages map[string]int `json:"pages"`
 }
 
+type Blacklist struct {
+	IDs       []string  `json:"ids"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Storage struct {
 	dataDir      string
 	downloadDir  string
@@ -125,6 +130,111 @@ func (s *Storage) HistoryPath() string {
 // PaginationPath returns the pagination JSON file path.
 func (s *Storage) PaginationPath() string {
 	return filepath.Join(s.stateDir, "pagination.json")
+}
+
+// BlacklistPath returns the blacklist JSON file path.
+func (s *Storage) BlacklistPath() string {
+	return filepath.Join(s.stateDir, "blacklist.json")
+}
+
+// LoadBlacklist reads the excluded wallpaper IDs from the disk.
+func (s *Storage) LoadBlacklist() (*Blacklist, error) {
+	path := s.BlacklistPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &Blacklist{IDs: []string{}, UpdatedAt: time.Now()}, nil
+		}
+		return nil, err
+	}
+
+	var blacklist Blacklist
+	if err = json.Unmarshal(data, &blacklist); err != nil {
+		return nil, err
+	}
+
+	if blacklist.IDs == nil {
+		blacklist.IDs = []string{}
+	}
+
+	return &blacklist, nil
+}
+
+// SaveBlacklist writes the excluded wallpaper IDs to the disk.
+func (s *Storage) SaveBlacklist(blacklist *Blacklist) error {
+	if blacklist.IDs == nil {
+		blacklist.IDs = []string{}
+	}
+
+	blacklist.UpdatedAt = time.Now()
+	data, err := json.MarshalIndent(blacklist, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.BlacklistPath(), data, 0600)
+}
+
+// LoadBlacklistSet reads the blacklist and returns it as a set.
+func (s *Storage) LoadBlacklistSet() (map[string]struct{}, error) {
+	blacklist, err := s.LoadBlacklist()
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make(map[string]struct{}, len(blacklist.IDs))
+	for _, id := range blacklist.IDs {
+		ids[id] = struct{}{}
+	}
+
+	return ids, nil
+}
+
+// ExcludeWallpaper persists an image ID in the blacklist and removes it from history.
+func (s *Storage) ExcludeWallpaper(imageID string) error {
+	blacklist, err := s.LoadBlacklist()
+	if err != nil {
+		return err
+	}
+
+	seen := make(map[string]struct{}, len(blacklist.IDs)+1)
+	updated := make([]string, 0, len(blacklist.IDs)+1)
+	for _, id := range blacklist.IDs {
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		updated = append(updated, id)
+	}
+
+	if _, exists := seen[imageID]; !exists {
+		updated = append(updated, imageID)
+	}
+
+	blacklist.IDs = updated
+	if err = s.SaveBlacklist(blacklist); err != nil {
+		return err
+	}
+
+	history, err := s.LoadHistory()
+	if err != nil {
+		return err
+	}
+
+	filtered := make([]string, 0, len(history.Images))
+	for _, id := range history.Images {
+		if id == imageID {
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+
+	history.Images = filtered
+	if history.Current == imageID {
+		history.Current = ""
+	}
+
+	return s.SaveHistory(history)
 }
 
 // LoadPaginationState reads persisted ranking pagination state.

@@ -13,6 +13,7 @@ type Controller interface {
 	PauseRotation()
 	ResumeRotation()
 	OpenCurrentArtwork() error
+	ExcludeCurrentWallpaper() error
 	Shutdown()
 }
 
@@ -40,6 +41,7 @@ func onReady(appCtx context.Context, controller Controller) {
 	rotate := systray.AddMenuItemCheckbox("Rotate Wallpaper", "Enable or pause wallpaper rotation", true)
 	systray.AddSeparator()
 	openCurrent := systray.AddMenuItem("Open Current Artwork", "Open currently active image")
+	excludeCurrent := systray.AddMenuItem("Exclude Current Wallpaper", "Blacklist the current wallpaper and switch away")
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit", "Quit kPixiv")
 
@@ -63,6 +65,10 @@ func onReady(appCtx context.Context, controller Controller) {
 			case <-openCurrent.ClickedCh:
 				if err := controller.OpenCurrentArtwork(); err != nil {
 					log.Warn("Failed to open current artwork", "error", err)
+				}
+			case <-excludeCurrent.ClickedCh:
+				if err := controller.ExcludeCurrentWallpaper(); err != nil {
+					log.Warn("Failed to exclude current artwork", "error", err)
 				}
 			case <-quit.ClickedCh:
 				controller.Shutdown()
