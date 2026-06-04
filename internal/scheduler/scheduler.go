@@ -32,6 +32,7 @@ type Scheduler struct {
 	fetchInterval time.Duration
 	stopCh        chan struct{}
 	pauseCh       chan bool
+	resetSetCh    chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
 	running       bool
@@ -48,6 +49,7 @@ func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpap
 		setInterval:   time.Duration(cfg.Wallpaper.SetInterval) * time.Minute,
 		fetchInterval: time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute,
 		stopCh:        make(chan struct{}),
+		resetSetCh:    make(chan struct{}, 1),
 	}
 
 	pageKey := fmt.Sprintf("%s:%t", cfg.Pixiv.Ranking, cfg.Pixiv.R18)
@@ -98,6 +100,8 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 			return
 		case pause := <-sch.pauseCh:
 			paused = pause
+		case <-sch.resetSetCh:
+			resetTicker(setTicker, sch.setInterval)
 		case <-setTicker.C:
 			if !paused {
 				log.Debug("Setting wallpaper")
@@ -115,6 +119,17 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 	}
 }
 
+func resetTicker(ticker *time.Ticker, interval time.Duration) {
+	for {
+		select {
+		case <-ticker.C:
+		default:
+			ticker.Reset(interval)
+			return
+		}
+	}
+}
+
 // Pause pauses scheduled wallpaper rotation.
 func (sch *Scheduler) Pause() {
 	select {
@@ -127,6 +142,21 @@ func (sch *Scheduler) Pause() {
 func (sch *Scheduler) Resume() {
 	select {
 	case sch.pauseCh <- false:
+	default:
+	}
+}
+
+// ResetRotationTimer restarts the wallpaper rotation countdown from now.
+func (sch *Scheduler) ResetRotationTimer() {
+	sch.mu.Lock()
+	running := sch.running
+	sch.mu.Unlock()
+	if !running {
+		return
+	}
+
+	select {
+	case sch.resetSetCh <- struct{}{}:
 	default:
 	}
 }
