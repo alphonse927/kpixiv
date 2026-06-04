@@ -23,11 +23,15 @@ func TestMain(m *testing.M) {
 type mockSetter struct {
 	setCalled bool
 	lastPath  string
+	onSet     func(string)
 }
 
 func (m *mockSetter) Set(path string) error {
 	m.setCalled = true
 	m.lastPath = path
+	if m.onSet != nil {
+		m.onSet(path)
+	}
 	return nil
 }
 
@@ -305,6 +309,62 @@ func TestFetchNowTriggersFetchWhileRunning(t *testing.T) {
 		default:
 			time.Sleep(10 * time.Millisecond)
 		}
+	}
+}
+
+func TestResetRotationTimerDelaysNextScheduledChange(t *testing.T) {
+	cfg := testConfig()
+	s := testStorage(t)
+	setCalls := make(chan time.Time, 4)
+	setter := &mockSetter{onSet: func(string) {
+		setCalls <- time.Now()
+	}}
+	m := &mockPixivClient{}
+	q := storage.NewQueue(s.StateDir())
+
+	for _, id := range []string{"img1", "img2", "img3"} {
+		path := filepath.Join(s.RankingDir(), id+".jpg")
+		if err := os.WriteFile(path, []byte(id), 0600); err != nil {
+			t.Fatalf("WriteFile(%s) returned error: %v", id, err)
+		}
+	}
+
+	if err := s.SaveMetadata(map[string]*storage.ImageMeta{
+		"img1": {ID: "img1", Path: filepath.Join(s.RankingDir(), "img1.jpg")},
+		"img2": {ID: "img2", Path: filepath.Join(s.RankingDir(), "img2.jpg")},
+		"img3": {ID: "img3", Path: filepath.Join(s.RankingDir(), "img3.jpg")},
+	}); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+
+	if err := q.AppendRandom([]string{"img1", "img2", "img3"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	sch := New(cfg, s, m, setter)
+	sch.setInterval = 200 * time.Millisecond
+	sch.fetchInterval = time.Hour
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := sch.Run(ctx); err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+	defer sch.Stop("test")
+
+	time.Sleep(120 * time.Millisecond)
+
+	if err := sch.SetNextWallpaper(q, "test"); err != nil {
+		t.Fatalf("SetNextWallpaper() returned error: %v", err)
+	}
+	sch.ResetRotationTimer()
+
+	manualAt := <-setCalls
+	autoAt := <-setCalls
+
+	if delta := autoAt.Sub(manualAt); delta < 150*time.Millisecond {
+		t.Fatalf("scheduled wallpaper changed too soon after manual change: got %v, want at least %v", delta, 150*time.Millisecond)
 	}
 }
 

@@ -118,7 +118,12 @@ func (c *Controller) NextWallpaper() error {
 		return fmt.Errorf("failed to load queue: %w", err)
 	}
 
-	return c.sch.SetNextWallpaper(sq, trayComponentName)
+	if err := c.sch.SetNextWallpaper(sq, trayComponentName); err != nil {
+		return err
+	}
+
+	c.sch.ResetRotationTimer()
+	return nil
 }
 
 // PauseRotation pauses scheduled rotation and fetch ticks.
@@ -187,7 +192,12 @@ func (c *Controller) ExcludeCurrentWallpaper() error {
 		return fmt.Errorf("excluded current artwork, but failed to update queue: %w", err)
 	}
 
-	return c.sch.SetNextWallpaper(q, trayComponentName)
+	if err = c.sch.SetNextWallpaper(q, trayComponentName); err != nil {
+		return err
+	}
+
+	c.sch.ResetRotationTimer()
+	return nil
 }
 
 // Shutdown cancels running work and stops the scheduler.
