@@ -2,7 +2,7 @@ package tray
 
 import "embed"
 
-//go:embed assets/kpixiv.png assets/kpixiv-symbolic.svg
+//go:embed assets/*
 var assets embed.FS
 
 func loadIconPNG() []byte {

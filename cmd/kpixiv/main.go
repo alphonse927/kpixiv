@@ -59,7 +59,7 @@ var fetchCmd = &cobra.Command{
 			return fmt.Errorf("failed to initialize storage: %w", err)
 		}
 
-		pixivClient, err := pixiv.NewClient()
+		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
 			return fmt.Errorf("failed to initialize pixiv client: %w", err)
 		}
