@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -54,11 +55,15 @@ type OriginalURLResolver interface {
 type Client struct {
 	rankingClient HTTPClient
 	imageClient   HTTPClient
+	authClient    HTTPClient
 	resolver      OriginalURLResolver
+	stateDir      string
+	auth          AuthState
+	mu            sync.Mutex
 }
 
 // NewClient constructs a Pixiv client for ranking and image downloads.
-func NewClient() (*Client, error) {
+func NewClient(stateDir string) (*Client, error) {
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create cookie jar: %w", err)
@@ -114,11 +119,19 @@ func NewClient() (*Client, error) {
 		return nil, fmt.Errorf("failed to create resolver: %w", rErr)
 	}
 
-	return &Client{
+	client := &Client{
 		rankingClient: rankingClient,
 		imageClient:   imageClient,
+		authClient:    imageClient,
 		resolver:      r,
-	}, nil
+		stateDir:      stateDir,
+	}
+
+	if err = client.loadAuthState(); err != nil {
+		return nil, err
+	}
+
+	return client, nil
 }
 
 type RankingResponse struct {

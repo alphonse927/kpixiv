@@ -2,9 +2,12 @@ package storage
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -43,6 +46,8 @@ type Storage struct {
 	homeDir      string
 	stateDir     string
 }
+
+var invalidFilenameChars = regexp.MustCompile(`[^A-Za-z0-9._ -]+`)
 
 // New initializes storage directories and returns a storage handle.
 func New(homeDir, downloadPath string) (*Storage, error) {
@@ -110,6 +115,29 @@ func (s *Storage) StateDir() string {
 // DownloadDir returns the configured wallpaper download directory.
 func (s *Storage) DownloadDir() string {
 	return s.downloadDir
+}
+
+// CopyImageToDownloadDir copies a known image into the configured download directory.
+func (s *Storage) CopyImageToDownloadDir(id string) (string, error) {
+	sourcePath, ok := s.GetImagePath(id)
+	if !ok {
+		return "", fmt.Errorf("artwork %s not found on disk", id)
+	}
+
+	meta, _ := s.lookupImageMeta(id)
+	filename := s.downloadFilename(id, sourcePath, meta)
+	destPath := filepath.Join(s.downloadDir, filename)
+
+	// Validating if the same file
+	if filepath.Clean(sourcePath) == filepath.Clean(destPath) {
+		return destPath, nil
+	}
+
+	if err := copyFileAtomic(sourcePath, destPath); err != nil {
+		return "", err
+	}
+
+	return destPath, nil
 }
 
 // RankingDir returns the ranking image directory.
@@ -304,6 +332,80 @@ func (s *Storage) SetRankingPage(key string, page int) error {
 	return s.SavePaginationState(state)
 }
 
+// BookmarkPath returns the bookmark JSON file path.
+func (s *Storage) BookmarkPath() string {
+	return filepath.Join(s.stateDir, "bookmarks.json")
+}
+
+// LoadBookmarks reads bookmarked artwork IDs from the disk.
+func (s *Storage) LoadBookmarks() (map[string]struct{}, error) {
+	path := s.BookmarkPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]struct{}), nil
+		}
+		return nil, err
+	}
+
+	var ids []string
+	if err = json.Unmarshal(data, &ids); err != nil {
+		return nil, err
+	}
+
+	bookmarks := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		bookmarks[id] = struct{}{}
+	}
+
+	return bookmarks, nil
+}
+
+// SaveBookmarks writes bookmarked artwork IDs to the disk.
+func (s *Storage) SaveBookmarks(ids []string) error {
+	if ids == nil {
+		ids = []string{}
+	}
+
+	data, err := json.MarshalIndent(ids, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.BookmarkPath(), data, 0600)
+}
+
+// IsArtworkBookmarked checks whether an artwork ID is in the bookmark set.
+func (s *Storage) IsArtworkBookmarked(id string) (bool, error) {
+	bookmarks, err := s.LoadBookmarks()
+	if err != nil {
+		return false, err
+	}
+
+	_, ok := bookmarks[id]
+	return ok, nil
+}
+
+// AddBookmark persists an artwork ID as bookmarked locally.
+func (s *Storage) AddBookmark(id string) error {
+	bookmarks, err := s.LoadBookmarks()
+	if err != nil {
+		return err
+	}
+
+	if _, exists := bookmarks[id]; exists {
+		return nil
+	}
+
+	ids := make([]string, 0, len(bookmarks)+1)
+	for bid := range bookmarks {
+		ids = append(ids, bid)
+	}
+	ids = append(ids, id)
+
+	return s.SaveBookmarks(ids)
+}
+
 // LoadMetadata reads image metadata from disk.
 func (s *Storage) LoadMetadata() (map[string]*ImageMeta, error) {
 	path := s.MetadataPath()
@@ -347,6 +449,16 @@ func (s *Storage) GetImagePath(id string) (string, bool) {
 
 	// Falling back to the ranking directory
 	return s.findImageInRankingDir(id)
+}
+
+func (s *Storage) lookupImageMeta(id string) (*ImageMeta, bool) {
+	images, err := s.LoadMetadata()
+	if err != nil {
+		return nil, false
+	}
+
+	meta, ok := images[id]
+	return meta, ok
 }
 
 // LoadHistory reads wallpaper history from disk.
@@ -483,6 +595,69 @@ func (s *Storage) findImageInRankingDir(id string) (string, bool) {
 	}
 
 	return foundPath, true
+}
+
+func (s *Storage) downloadFilename(id, sourcePath string, meta *ImageMeta) string {
+	ext := filepath.Ext(sourcePath)
+	if ext == "" {
+		ext = ".jpg"
+	}
+
+	if meta == nil || strings.TrimSpace(meta.Title) == "" {
+		return id + ext
+	}
+
+	title := invalidFilenameChars.ReplaceAllString(strings.TrimSpace(meta.Title), " ")
+	title = strings.Join(strings.Fields(title), " ")
+	if title == "" {
+		return id + ext
+	}
+
+	return fmt.Sprintf("%s - %s%s", id, title, ext)
+}
+
+func copyFileAtomic(sourcePath, destPath string) error {
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open source artwork: %w", err)
+	}
+	defer func() { _ = source.Close() }()
+
+	if err = os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
+		return fmt.Errorf("failed to create download directory: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(destPath), ".copy-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary download file: %w", err)
+	}
+
+	tmpPath := tmpFile.Name()
+	defer func() {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	if _, err = io.Copy(tmpFile, source); err != nil {
+		return fmt.Errorf("failed to copy artwork: %w", err)
+	}
+
+	if err = tmpFile.Sync(); err != nil {
+		return fmt.Errorf("failed to flush copied artwork: %w", err)
+	}
+
+	if err = tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close copied artwork: %w", err)
+	}
+
+	if err = os.Rename(tmpPath, destPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return fmt.Errorf("failed to finalize copied artwork: %w", err)
+	}
+
+	return nil
 }
 
 // CleanupImagesOlderThanDays removes old images and syncs metadata/history.
