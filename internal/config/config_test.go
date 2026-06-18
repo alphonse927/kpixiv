@@ -100,15 +100,11 @@ func TestValidate(t *testing.T) {
 		},
 	}
 
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() with valid config: got error %v, want nil", err)
-	}
+	cfg.Validate()
 
 	originalMinWidth := cfg.Pixiv.MinWidth
 	cfg.Pixiv.MinWidth = 0
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() with MinWidth=0: should clamp, got error %v", err)
-	}
+	cfg.Validate()
 	if cfg.Pixiv.MinWidth != DefaultMinWidth {
 		t.Errorf("Validate() clamped MinWidth: got %d, want %d", cfg.Pixiv.MinWidth, DefaultMinWidth)
 	}
@@ -116,26 +112,20 @@ func TestValidate(t *testing.T) {
 
 	originalMinHeight := cfg.Pixiv.MinHeight
 	cfg.Pixiv.MinHeight = 0
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() with MinHeight=0: should clamp, got error %v", err)
-	}
+	cfg.Validate()
 	if cfg.Pixiv.MinHeight != DefaultMinHeight {
 		t.Errorf("Validate() clamped MinHeight: got %d, want %d", cfg.Pixiv.MinHeight, DefaultMinHeight)
 	}
 	cfg.Pixiv.MinHeight = originalMinHeight
 
 	cfg.Wallpaper.CleanupDays = 0
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() with CleanupDays=0: should clamp, got error %v", err)
-	}
+	cfg.Validate()
 	if cfg.Wallpaper.CleanupDays != DefaultCleanupDays {
 		t.Errorf("Validate() clamped CleanupDays: got %d, want %d", cfg.Wallpaper.CleanupDays, DefaultCleanupDays)
 	}
 
 	cfg.Wallpaper.HistoryLimit = 0
-	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() with HistoryLimit=0: should clamp, got error %v", err)
-	}
+	cfg.Validate()
 	if cfg.Wallpaper.HistoryLimit != DefaultHistoryLimit {
 		t.Errorf("Validate() clamped HistoryLimit: got %d, want %d", cfg.Wallpaper.HistoryLimit, DefaultHistoryLimit)
 	}

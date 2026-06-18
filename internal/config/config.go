@@ -8,6 +8,8 @@ import (
 )
 
 type Config struct {
+	ConfigPath string `yaml:"-"` // set during Load, not serialized
+
 	DownloadPath string          `yaml:"download_path"`
 	Pixiv        PixivConfig     `yaml:"pixiv"`
 	Wallpaper    WallpaperConfig `yaml:"wallpaper"`
@@ -77,7 +79,8 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg := Default()
-			if saveErr := Save(path, cfg); saveErr != nil {
+			cfg.ConfigPath = path
+			if saveErr := Save(cfg.ConfigPath, cfg); saveErr != nil {
 				return nil, saveErr
 			}
 			return cfg, nil
@@ -90,6 +93,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.ConfigPath = path
 	return &cfg, nil
 }
 
@@ -109,7 +113,7 @@ func Save(path string, cfg *Config) error {
 }
 
 // Validate normalizes and enforces minimum configuration values.
-func (c *Config) Validate() error {
+func (c *Config) Validate() {
 	if c.DownloadPath == "" {
 		c.DownloadPath = resolveDefaultDownloadPath()
 	}
@@ -131,7 +135,6 @@ func (c *Config) Validate() error {
 	if c.Wallpaper.CleanupDays < 1 {
 		c.Wallpaper.CleanupDays = DefaultCleanupDays
 	}
-	return nil
 }
 
 func resolveDefaultDownloadPath() string {

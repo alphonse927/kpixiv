@@ -33,6 +33,7 @@ type Scheduler struct {
 	stopCh        chan struct{}
 	pauseCh       chan bool
 	resetSetCh    chan struct{}
+	resetFetchCh  chan struct{}
 	wg            sync.WaitGroup
 	mu            sync.Mutex
 	running       bool
@@ -50,6 +51,7 @@ func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpap
 		fetchInterval: time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute,
 		stopCh:        make(chan struct{}),
 		resetSetCh:    make(chan struct{}, 1),
+		resetFetchCh:  make(chan struct{}, 1),
 	}
 
 	pageKey := fmt.Sprintf("%s:%t", cfg.Pixiv.Ranking, cfg.Pixiv.R18)
@@ -102,6 +104,8 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 			paused = pause
 		case <-sch.resetSetCh:
 			resetTicker(setTicker, sch.setInterval)
+		case <-sch.resetFetchCh:
+			resetTicker(fetchTicker, sch.fetchInterval)
 		case <-setTicker.C:
 			if !paused {
 				log.Debug("Setting wallpaper")
@@ -269,6 +273,30 @@ func isValidWallpaperFile(entry os.DirEntry) bool {
 	}
 
 	return true
+}
+
+// ApplyConfig updates the scheduler's config and resets both tickers so new
+// intervals take effect without stopping the scheduler goroutine.
+func (sch *Scheduler) ApplyConfig(cfg *config.Config) {
+	sch.mu.Lock()
+	sch.cfg = cfg
+	sch.setInterval = time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
+	sch.fetchInterval = time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute
+	running := sch.running
+	sch.mu.Unlock()
+
+	if !running {
+		return
+	}
+
+	select {
+	case sch.resetSetCh <- struct{}{}:
+	default:
+	}
+	select {
+	case sch.resetFetchCh <- struct{}{}:
+	default:
+	}
 }
 
 // Stop stops the scheduler goroutines and waits for completion.
