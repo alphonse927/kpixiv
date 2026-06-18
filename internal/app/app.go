@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-	"strings"
 	"sync"
 
 	"github.com/alphonse927/kpixiv/internal/config"
+	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
@@ -264,14 +264,9 @@ func (c *Controller) LoginToPixiv() error {
 		return err
 	}
 
-	state, err := c.pixiv.FinishLogin(c.ctx, flow.CodeVerifier, code)
+	_, err = c.pixiv.FinishLogin(c.ctx, flow.CodeVerifier, code)
 	if err != nil {
 		return err
-	}
-
-	userName := strings.TrimSpace(state.UserName)
-	if userName == "" {
-		userName = state.UserID
 	}
 
 	return nil
@@ -364,6 +359,25 @@ func (c *Controller) IsArtworkBookmarked() bool {
 func (c *Controller) Shutdown() {
 	c.cancel()
 	c.sch.Stop(componentName)
+}
+
+// ApplyConfig applies a new config to the scheduler without restarting it.
+func (c *Controller) ApplyConfig(cfg *config.Config) {
+	c.cfg = cfg
+	if c.sch != nil {
+		c.sch.ApplyConfig(cfg)
+	}
+}
+
+// ShowSettingsWindow opens the settings window without blocking the tray.
+func (c *Controller) ShowSettingsWindow() error {
+	logger.WithComponent(componentName).Debug("Opening settings window")
+
+	gui.ShowSettings(c.cfg, func() {
+		c.ApplyConfig(c.cfg)
+	})
+
+	return nil
 }
 
 func openExternal(target string) error {

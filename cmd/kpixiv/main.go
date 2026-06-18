@@ -12,6 +12,7 @@ import (
 	"github.com/alphonse927/kpixiv/internal/app"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/fetcher"
+	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
@@ -41,9 +42,7 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 
-		if err = cfg.Validate(); err != nil {
-			return fmt.Errorf("invalid config: %w", err)
-		}
+		cfg.Validate()
 
 		logger.Init(verbose)
 		return nil
@@ -149,8 +148,19 @@ var daemonCmd = &cobra.Command{
 			cancel()
 		}()
 
-		log.Info("Starting tray-enabled kPixiv")
-		tray.Run(ctx, controller)
+		quitCh := make(chan struct{})
+		go func() {
+			tray.Run(ctx, controller)
+			close(quitCh)
+		}()
+
+		log.Info("Starting kPixiv")
+		gui.Run(cfg, func() {
+			if controller != nil {
+				controller.ApplyConfig(cfg)
+			}
+		}, ctx, quitCh)
+
 		log.Info("kPixiv stopped")
 		return nil
 	},
@@ -210,7 +220,7 @@ var statusCmd = &cobra.Command{
 	},
 }
 
-func main() {
+func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "Path to config file (default: ~/.config/kpixiv/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show actions without applying or downloading")
@@ -220,7 +230,9 @@ func main() {
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(statusCmd)
+}
 
+func main() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

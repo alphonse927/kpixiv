@@ -23,6 +23,7 @@ type Controller interface {
 	OpenCurrentArtwork() error
 	OpenCurrentArtworkInPixiv() error
 	ExcludeCurrentWallpaper() error
+	ShowSettingsWindow() error
 	Shutdown()
 }
 
@@ -33,6 +34,7 @@ func Run(appCtx context.Context, controller Controller) {
 	})
 }
 
+//nolint:cyclop,funlen // straightforward select handler with many menu cases
 func onReady(appCtx context.Context, controller Controller) {
 	log := logger.WithComponent("tray")
 	systray.SetTitle("kPixiv")
@@ -63,6 +65,7 @@ func onReady(appCtx context.Context, controller Controller) {
 	excludeCurrent := systray.AddMenuItem("Exclude Current Wallpaper", "Blacklist the current wallpaper and switch away")
 
 	systray.AddSeparator()
+	settings := systray.AddMenuItem("Settings", "Open settings window")
 	quit := systray.AddMenuItem("Quit", "Quit kPixiv")
 
 	updateBookmarkItem := func() {
@@ -151,6 +154,10 @@ func onReady(appCtx context.Context, controller Controller) {
 					log.Warn("Failed to exclude current artwork", "error", err)
 				}
 				updateBookmarkItem()
+			case <-settings.ClickedCh:
+				if err := controller.ShowSettingsWindow(); err != nil {
+					log.Warn("Failed to open settings", "error", err)
+				}
 			case <-quit.ClickedCh:
 				controller.Shutdown()
 				systray.Quit()

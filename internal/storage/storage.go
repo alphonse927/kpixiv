@@ -621,7 +621,7 @@ func copyFileAtomic(sourcePath, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open source artwork: %w", err)
 	}
-	defer func() { _ = source.Close() }()
+	defer source.Close() //nolint:errcheck // deferred close on best-effort basis
 
 	if err = os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
 		return fmt.Errorf("failed to create download directory: %w", err)
@@ -633,10 +633,8 @@ func copyFileAtomic(sourcePath, destPath string) error {
 	}
 
 	tmpPath := tmpFile.Name()
-	defer func() {
-		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath)
-	}()
+	defer tmpFile.Close()    //nolint:errcheck // deferred close on best-effort basis
+	defer os.Remove(tmpPath) //nolint:errcheck // deferred cleanup on best-effort basis
 
 	if _, err = io.Copy(tmpFile, source); err != nil {
 		return fmt.Errorf("failed to copy artwork: %w", err)

@@ -2,7 +2,7 @@ package pixiv
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/md5" //nolint:gosec // required to match Pixiv Android app X-Client-Hash
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -22,10 +22,10 @@ import (
 
 const (
 	pixivLoginURL        = "https://app-api.pixiv.net/web/v1/login"
-	pixivAuthTokenURL    = "https://oauth.secure.pixiv.net/auth/token"
+	pixivAuthTokenURL    = "https://oauth.secure.pixiv.net/auth/token" //nolint:gosec // Pixiv API endpoint URL, not a secret
 	pixivAuthRedirectURI = "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
 	pixivAuthClientID    = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
-	pixivAuthSecret      = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
+	pixivAuthSecret      = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj" //nolint:gosec // public Pixiv Android client secret
 	pixivAuthUserAgent   = "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)"
 	pixivClientHashSalt  = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
 )
@@ -181,10 +181,10 @@ func (c *Client) BookmarkIllust(ctx context.Context, illustID string) error {
 	if err != nil {
 		return fmt.Errorf("failed to bookmark artwork: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close() //nolint:errcheck // deferred close on best-effort basis
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		bodyText, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) //nolint:errcheck // limited read, error not actionable
 		return fmt.Errorf("bookmark request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyText)))
 	}
 
@@ -255,7 +255,7 @@ func (c *Client) exchangeToken(ctx context.Context, form url.Values) (*authToken
 	if err != nil {
 		return nil, fmt.Errorf("failed to talk to pixiv auth endpoint: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close() //nolint:errcheck // deferred close on best-effort basis
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -315,7 +315,7 @@ func (c *Client) saveAuthStateLocked() error {
 		return fmt.Errorf("failed to create pixiv session directory: %w", err)
 	}
 
-	data, err := json.MarshalIndent(c.auth, "", "  ")
+	data, err := json.MarshalIndent(c.auth, "", "  ") //nolint:gosec // access_token field name matches secret pattern but is intentional
 	if err != nil {
 		return fmt.Errorf("failed to encode pixiv session: %w", err)
 	}
@@ -367,7 +367,7 @@ func codeChallenge(verifier string) string {
 
 func applyPixivAppHeaders(req *http.Request) {
 	clientTime := time.Now().UTC().Format(time.RFC3339)
-	hash := md5.Sum([]byte(clientTime + pixivClientHashSalt))
+	hash := md5.Sum([]byte(clientTime + pixivClientHashSalt)) //nolint:gosec // required to match Pixiv Android app X-Client-Hash
 
 	req.Header.Set("User-Agent", pixivAuthUserAgent)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")

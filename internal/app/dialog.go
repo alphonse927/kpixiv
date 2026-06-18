@@ -9,7 +9,7 @@ import (
 
 func promptForInput(title, prompt string) (string, error) {
 	if _, err := exec.LookPath("kdialog"); err == nil {
-		cmd := exec.Command("kdialog", "--title", title, "--inputbox", prompt)
+		cmd := exec.Command("kdialog", "--title", title, "--inputbox", prompt) //nolint:gosec // user input to desktop dialog
 		var stdout bytes.Buffer
 		cmd.Stdout = &stdout
 		if runErr := cmd.Run(); runErr != nil {
@@ -19,7 +19,7 @@ func promptForInput(title, prompt string) (string, error) {
 	}
 
 	if _, err := exec.LookPath("zenity"); err == nil {
-		cmd := exec.Command("zenity", "--entry", "--title", title, "--text", prompt)
+		cmd := exec.Command("zenity", "--entry", "--title", title, "--text", prompt) //nolint:gosec // user input to desktop dialog
 		var stdout bytes.Buffer
 		cmd.Stdout = &stdout
 		if runErr := cmd.Run(); runErr != nil {
@@ -33,11 +33,11 @@ func promptForInput(title, prompt string) (string, error) {
 
 func showInfoDialog(title, message string) error {
 	if _, err := exec.LookPath("kdialog"); err == nil {
-		return exec.Command("kdialog", "--title", title, "--msgbox", message).Run()
+		return exec.Command("kdialog", "--title", title, "--msgbox", message).Run() //nolint:gosec // user input to desktop dialog
 	}
 
 	if _, err := exec.LookPath("zenity"); err == nil {
-		return exec.Command("zenity", "--info", "--title", title, "--text", message).Run()
+		return exec.Command("zenity", "--info", "--title", title, "--text", message).Run() //nolint:gosec // user input to desktop dialog
 	}
 
 	return fmt.Errorf("no desktop dialog tool found; install kdialog or zenity")
