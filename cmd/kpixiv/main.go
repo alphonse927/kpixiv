@@ -204,16 +204,31 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Config file: %s\n", cfgPath)
 		fmt.Printf("Download directory: %s\n", st.DownloadDir())
 		fmt.Printf("Data directory: %s\n", st.DataDir())
+		fmt.Printf("Ranking feed: %s\n", cfg.Pixiv.Ranking)
 		fmt.Printf("Set interval: %d minutes\n", cfg.Wallpaper.SetInterval)
 		fmt.Printf("Fetch interval: %d minutes\n", cfg.Wallpaper.FetchInterval)
+		fmt.Printf("Min image size: %dx%d\n", cfg.Pixiv.MinWidth, cfg.Pixiv.MinHeight)
+		fmt.Printf("R-18: %t\n", cfg.Pixiv.R18)
+		fmt.Printf("Landscape only: %t\n", cfg.Pixiv.LandscapeOnly)
 		fmt.Printf("History limit: %d\n", cfg.Wallpaper.HistoryLimit)
 		fmt.Printf("Cleanup images older than: %d days\n", cfg.Wallpaper.CleanupDays)
+		fmt.Printf("Lock screen: %t\n", cfg.KDE.SetLockScreen)
 		fmt.Printf("\n=== Wallpaper History ===\n")
 		fmt.Printf("Total wallpapers: %d\n", totalWallpapers)
 		fmt.Printf("Current: %s\n", history.Current)
+		if len(history.Images) > 0 {
+			fmt.Printf("Previous: %s\n", history.Images[len(history.Images)-1])
+		} else {
+			fmt.Printf("Previous: none\n")
+		}
 		fmt.Printf("Last updated: %s\n", history.UpdatedAt.Format(time.DateTime))
 		fmt.Printf("\n=== Storage ===\n")
 		fmt.Printf("Downloaded images: %d\n", len(metadata))
+
+		q := storage.NewQueue(st.StateDir())
+		if err := q.Load(); err == nil {
+			fmt.Printf("In queue: %d\n", q.Len())
+		}
 
 		log.Debug("Status displayed")
 		return nil
