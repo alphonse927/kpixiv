@@ -5,8 +5,10 @@ import (
 	"image/color"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/mobile"
@@ -16,10 +18,10 @@ import (
 
 	"github.com/alphonse927/kpixiv/internal/assets"
 	"github.com/alphonse927/kpixiv/internal/config"
+	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
-// numericalEntry only accepts digits and rejects non-numeric paste.
 type numericalEntry struct {
 	widget.Entry
 }
@@ -52,8 +54,6 @@ func (e *numericalEntry) Keyboard() mobile.KeyboardType {
 	return mobile.NumberKeyboard
 }
 
-// tintedBG tints the background while preserving the system light/dark variant
-// for all other elements (inputs, text, buttons).
 type tintedBG struct {
 	fyne.Theme
 }
@@ -69,11 +69,16 @@ func (t *tintedBG) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) co
 }
 
 type settingsUI struct {
-	w       fyne.Window
-	log     *slog.Logger
-	onApply OnApply
+	w    fyne.Window
+	log  *slog.Logger
+	ctrl AppController
 
-	cfg           *config.Config
+	navButtons    []*widget.Button
+	content       *fyne.Container
+	pages         []fyne.CanvasObject
+	currentPage   int
+	statusRefresh chan struct{}
+
 	downloadPath  *widget.Entry
 	setInterval   *numericalEntry
 	fetchInterval *numericalEntry
@@ -87,13 +92,23 @@ type settingsUI struct {
 	bookmarksEnabled      *widget.Check
 	bookmarksSyncInterval *numericalEntry
 	bookmarksAutoCleanup  *widget.Check
+
+	statusWallpaper *widget.Label
+	statusCached    *widget.Label
+	statusLastRot   *widget.Label
+	statusNextRot   *widget.Label
+	statusThumbnail *canvas.Image
+	lastWallpaperID string
+
+	accountStatus    *widget.Label
+	accountLoginBtn  *widget.Button
+	accountLogoutBtn *widget.Button
 }
 
-func newSettingsUI(a fyne.App, cfg *config.Config, log *slog.Logger, onApply OnApply) *settingsUI {
+func newSettingsUI(a fyne.App, ctrl AppController, log *slog.Logger) *settingsUI {
 	ui := &settingsUI{
-		log:     log,
-		onApply: onApply,
-		cfg:     cfg,
+		log:  log,
+		ctrl: ctrl,
 	}
 	ui.build(a)
 	return ui
@@ -101,7 +116,8 @@ func newSettingsUI(a fyne.App, cfg *config.Config, log *slog.Logger, onApply OnA
 
 func (ui *settingsUI) build(a fyne.App) {
 	w := a.NewWindow("kPixiv – Settings")
-	w.Resize(fyne.NewSize(560, 600))
+	w.Resize(fyne.NewSize(640, 520))
+	w.SetFixedSize(false)
 	w.CenterOnScreen()
 	w.SetIcon(fyne.NewStaticResource("kpixiv", assets.IconPNG))
 	ui.w = w
@@ -112,166 +128,216 @@ func (ui *settingsUI) build(a fyne.App) {
 }
 
 func (ui *settingsUI) createWidgets() {
+	cfg := ui.ctrl.Config()
+
 	ui.downloadPath = widget.NewEntry()
-	ui.downloadPath.SetText(ui.cfg.DownloadPath)
+	ui.downloadPath.SetText(cfg.DownloadPath)
 	ui.downloadPath.PlaceHolder = "~/Pictures/KPixiv"
 
 	ui.setInterval = newNumericalEntry()
-	ui.setInterval.SetText(strconv.Itoa(ui.cfg.Wallpaper.SetInterval))
+	ui.setInterval.SetText(strconv.Itoa(cfg.Wallpaper.SetInterval))
 
 	ui.fetchInterval = newNumericalEntry()
-	ui.fetchInterval.SetText(strconv.Itoa(ui.cfg.Wallpaper.FetchInterval))
+	ui.fetchInterval.SetText(strconv.Itoa(cfg.Wallpaper.FetchInterval))
 
 	ui.historyLimit = newNumericalEntry()
-	ui.historyLimit.SetText(strconv.Itoa(ui.cfg.Wallpaper.HistoryLimit))
+	ui.historyLimit.SetText(strconv.Itoa(cfg.Wallpaper.HistoryLimit))
 
 	ui.cleanupDays = newNumericalEntry()
-	ui.cleanupDays.SetText(strconv.Itoa(ui.cfg.Wallpaper.CleanupDays))
+	ui.cleanupDays.SetText(strconv.Itoa(cfg.Wallpaper.CleanupDays))
 
 	ui.ranking = widget.NewSelect([]string{"daily", "weekly", "monthly"}, nil)
-	ui.ranking.SetSelected(ui.cfg.Pixiv.Ranking.String())
+	ui.ranking.SetSelected(cfg.Pixiv.Ranking.String())
 
 	ui.minWidth = newNumericalEntry()
-	ui.minWidth.SetText(strconv.Itoa(ui.cfg.Pixiv.MinWidth))
+	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
 
 	ui.minHeight = newNumericalEntry()
-	ui.minHeight.SetText(strconv.Itoa(ui.cfg.Pixiv.MinHeight))
+	ui.minHeight.SetText(strconv.Itoa(cfg.Pixiv.MinHeight))
 
 	ui.lockScreen = widget.NewCheck("Set Lock Screen", nil)
-	ui.lockScreen.SetChecked(ui.cfg.KDE.SetLockScreen)
+	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
 
-	ui.bookmarksEnabled = widget.NewCheck("Enable Bookmark Sync", nil)
-	ui.bookmarksEnabled.SetChecked(ui.cfg.Bookmarks.Enabled)
+	ui.bookmarksEnabled = widget.NewCheck("Enable Bookmark Sync", func(enabled bool) {
+		if enabled {
+			ui.bookmarksSyncInterval.Enable()
+			ui.bookmarksAutoCleanup.Enable()
+		} else {
+			ui.bookmarksSyncInterval.Disable()
+			ui.bookmarksAutoCleanup.Disable()
+		}
+	})
+	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
 
 	ui.bookmarksSyncInterval = newNumericalEntry()
-	ui.bookmarksSyncInterval.SetText(strconv.Itoa(ui.cfg.Bookmarks.SyncInterval))
+	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
 
 	ui.bookmarksAutoCleanup = widget.NewCheck("Remove unbookmarked images", nil)
-	ui.bookmarksAutoCleanup.SetChecked(ui.cfg.Bookmarks.AutoCleanup)
+	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
+
+	if !cfg.Bookmarks.Enabled {
+		ui.bookmarksSyncInterval.Disable()
+		ui.bookmarksAutoCleanup.Disable()
+	}
+
+	ui.statusWallpaper = widget.NewLabel("")
+	ui.statusWallpaper.Wrapping = fyne.TextWrapWord
+	ui.statusCached = widget.NewLabel("")
+	ui.statusLastRot = widget.NewLabel("")
+	ui.statusNextRot = widget.NewLabel("")
+
+	ui.statusThumbnail = canvas.NewImageFromFile("")
+	ui.statusThumbnail.FillMode = canvas.ImageFillContain
+	ui.statusThumbnail.SetMinSize(fyne.NewSize(140, 0))
+
+	ui.accountStatus = widget.NewLabel("")
+	ui.accountLoginBtn = widget.NewButton("Login to Pixiv", func() {
+		go func() {
+			if err := ui.ctrl.LoginToPixiv(); err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, ui.w)
+				})
+			}
+			fyne.Do(func() {
+				ui.rebuildAccountPage()
+			})
+		}()
+	})
+	ui.accountLogoutBtn = widget.NewButton("Logout", func() {
+		if err := ui.ctrl.LogoutFromPixiv(); err != nil {
+			dialog.ShowError(err, ui.w)
+			return
+		}
+		ui.rebuildAccountPage()
+	})
 }
 
 func (ui *settingsUI) buildLayout() fyne.CanvasObject {
-	w := ui.w
+	sidebar := container.NewVBox()
 
-	browse := widget.NewButton("Browse...", func() {
-		dialog.NewFolderOpen(func(uri fyne.ListableURI, err error) {
-			if err == nil && uri != nil {
-				ui.downloadPath.SetText(uri.Path())
-			}
-		}, w).Show()
-	})
-
-	apply := func() { ui.applySettings() }
-
-	bold := fyne.TextStyle{Bold: true}
-	section := func(title string) fyne.CanvasObject {
-		return widget.NewLabelWithStyle(title, fyne.TextAlignLeading, bold)
+	navDefs := []struct {
+		label string
+		build func() fyne.CanvasObject
+	}{
+		{"🏠 Home", ui.buildHomePage},
+		{"⚙️ Settings", ui.buildSettingsPage},
+		{"👤 Account", ui.buildAccountPage},
+		{"ℹ️ About", ui.buildAboutPage},
 	}
 
-	desc := func(text string) fyne.CanvasObject {
-		return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{})
+	ui.navButtons = make([]*widget.Button, len(navDefs))
+	ui.pages = make([]fyne.CanvasObject, len(navDefs))
+
+	for i, def := range navDefs {
+		idx := i
+
+		ui.pages[i] = def.build()
+
+		btn := widget.NewButton(def.label, func() {
+			ui.selectPage(idx)
+		})
+
+		ui.navButtons[i] = btn
+		sidebar.Add(btn)
 	}
 
-	sideBySide := func(left, right fyne.CanvasObject) fyne.CanvasObject {
-		return container.NewGridWithColumns(2, left, right)
+	sidebar.Add(layout.NewSpacer())
+
+	sidebarBox := container.NewPadded(sidebar)
+
+	ui.content = container.NewStack()
+
+	for _, page := range ui.pages {
+		ui.content.Add(page)
 	}
 
-	field := func(label string, input fyne.CanvasObject) fyne.CanvasObject {
-		return container.NewVBox(
-			widget.NewLabel(label),
-			input,
-		)
+	for i := 1; i < len(ui.pages); i++ {
+		ui.pages[i].Hide()
 	}
 
-	intervals := sideBySide(
-		container.NewVBox(
-			field("Wallpaper Change (min)", ui.setInterval),
-			desc("How often to switch wallpapers"),
-		),
-		container.NewVBox(
-			field("Download New Images (min)", ui.fetchInterval),
-			desc("How often to download new wallpapers"),
-		),
-	)
+	ui.currentPage = 0
+	ui.highlightNav(0)
 
-	dims := sideBySide(
-		field("Min Width", ui.minWidth),
-		field("Min Height", ui.minHeight),
-	)
-
-	other := sideBySide(
-		container.NewVBox(
-			field("Wallpaper History", ui.historyLimit),
-			desc("Number of previous wallpapers to remember"),
-		),
-		container.NewVBox(
-			field("Image Retention", ui.cleanupDays),
-			desc("Remove downloaded images older than this"),
+	bottomBar := container.NewPadded(
+		container.NewHBox(
+			layout.NewSpacer(),
+			widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), ui.hide),
+			widget.NewButton("Apply", func() {
+				ui.applySettings()
+				ui.log.Info("Settings applied")
+			}),
+			widget.NewButtonWithIcon("Save & Close", theme.ConfirmIcon(), func() {
+				ui.applySettings()
+				ui.log.Info("Settings saved and closed")
+				ui.hide()
+			}),
 		),
 	)
 
-	buttons := container.NewHBox(
-		layout.NewSpacer(),
-		widget.NewButton("Cancel", ui.hide),
-		widget.NewButton("Apply", apply),
-		widget.NewButton("Save & Close", func() {
-			apply()
-			ui.log.Info("Settings saved and closed")
-			w.Hide()
-		}),
+	layout.NewVBoxLayout()
+
+	mainContent := container.New(
+		NewFixedWidthLayout(125),
+		sidebarBox,
+		container.NewPadded(ui.content),
 	)
 
-	return container.NewVBox(
-		container.NewPadded(
-			container.NewVBox(
-				section("Intervals"),
-				intervals,
-
-				widget.NewSeparator(),
-				section("Ranking"),
-				desc("Which Pixiv ranking feed to pull wallpapers from"),
-				ui.ranking,
-
-				widget.NewSeparator(),
-				section("Dimensions"),
-				desc("Minimum image size to download (smaller images are filtered out)"),
-				dims,
-
-				widget.NewSeparator(),
-				section("Storage"),
-				desc("Download Directory"),
-				container.NewBorder(nil, nil, nil, browse, ui.downloadPath),
-				other,
-
-				widget.NewSeparator(),
-				ui.lockScreen,
-				desc("Also apply the current wallpaper to the KDE lock screen"),
-
-				widget.NewSeparator(),
-				section("Bookmarks"),
-				ui.bookmarksEnabled,
-				desc("Sync bookmarked images from your Pixiv account"),
-				field("Sync Interval (min)", ui.bookmarksSyncInterval),
-				desc("Minimum 60 minutes"),
-				ui.bookmarksAutoCleanup,
-				desc("Delete local images that are no longer bookmarked on Pixiv"),
-			),
-		),
-		container.NewPadded(buttons),
+	return container.NewBorder(
+		nil,
+		bottomBar,
+		nil,
+		nil,
+		mainContent,
 	)
+}
+
+func (ui *settingsUI) selectPage(idx int) {
+	if ui.currentPage == idx {
+		return
+	}
+
+	ui.pages[ui.currentPage].Hide()
+	ui.pages[idx].Show()
+	ui.currentPage = idx
+
+	ui.highlightNav(idx)
+}
+
+func (ui *settingsUI) highlightNav(idx int) {
+	for i, btn := range ui.navButtons {
+		if i == idx {
+			btn.Importance = widget.HighImportance
+		} else {
+			btn.Importance = widget.MediumImportance
+		}
+		btn.Refresh()
+	}
+}
+
+func (ui *settingsUI) rebuildAccountPage() {
+	old := ui.pages[2]
+	ui.pages[2] = ui.buildAccountPage()
+	ui.content.Remove(old)
+	ui.content.Add(ui.pages[2])
+	if ui.currentPage != 2 {
+		ui.pages[2].Hide()
+	}
 }
 
 func (ui *settingsUI) show() {
+	ui.refreshStatus()
 	ui.w.Show()
+	ui.startStatusRefresh()
 }
 
 func (ui *settingsUI) hide() {
+	ui.stopStatusRefresh()
 	ui.log.Debug("Settings window closed")
 	ui.w.Hide()
 }
 
-func (ui *settingsUI) update(cfg *config.Config) {
-	ui.cfg = cfg
+func (ui *settingsUI) update() {
+	cfg := ui.ctrl.Config()
 	ui.downloadPath.SetText(cfg.DownloadPath)
 	ui.setInterval.SetText(strconv.Itoa(cfg.Wallpaper.SetInterval))
 	ui.fetchInterval.SetText(strconv.Itoa(cfg.Wallpaper.FetchInterval))
@@ -285,10 +351,18 @@ func (ui *settingsUI) update(cfg *config.Config) {
 	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
 	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
 	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
+
+	if cfg.Bookmarks.Enabled {
+		ui.bookmarksSyncInterval.Enable()
+		ui.bookmarksAutoCleanup.Enable()
+	} else {
+		ui.bookmarksSyncInterval.Disable()
+		ui.bookmarksAutoCleanup.Disable()
+	}
 }
 
 func (ui *settingsUI) applySettings() {
-	cfg := ui.cfg
+	cfg := ui.ctrl.Config()
 	cfg.DownloadPath = ui.downloadPath.Text
 
 	if v, err := strconv.Atoi(ui.setInterval.Text); err == nil {
@@ -348,7 +422,122 @@ func (ui *settingsUI) applySettings() {
 	}
 
 	ui.log.Info("Settings applied")
-	if ui.onApply != nil {
-		ui.onApply()
+	ui.ctrl.ApplyConfig(cfg)
+}
+
+func (ui *settingsUI) startStatusRefresh() {
+	if ui.statusRefresh != nil {
+		return
+	}
+	ui.statusRefresh = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				fyne.Do(ui.refreshStatus)
+			case <-ui.statusRefresh:
+				return
+			}
+		}
+	}()
+}
+
+func (ui *settingsUI) stopStatusRefresh() {
+	if ui.statusRefresh != nil {
+		close(ui.statusRefresh)
+		ui.statusRefresh = nil
+	}
+}
+
+func (ui *settingsUI) refreshStatus() {
+	meta, _ := ui.ctrl.CurrentWallpaper() //nolint:errcheck
+
+	if meta != nil && meta.ID != "" && meta.ID != ui.lastWallpaperID {
+		ui.lastWallpaperID = meta.ID
+		ui.statusThumbnail.File = meta.Path
+		ui.statusThumbnail.Refresh()
+	}
+
+	if meta != nil && meta.ID != "" && meta.Title != "" {
+		ui.statusWallpaper.SetText(ui.formatWallpaperInfo(meta))
+		ui.statusThumbnail.Show()
+	} else {
+		ui.statusWallpaper.SetText("No wallpaper set")
+		ui.statusThumbnail.Hide()
+	}
+
+	ui.statusCached.SetText(ui.formatCachedCount())
+	ui.statusLastRot.SetText(ui.formatLastRotation())
+	ui.statusNextRot.SetText(ui.formatNextRotation())
+}
+
+func (ui *settingsUI) formatWallpaperInfo(meta *storage.ImageMeta) string {
+	res := ""
+	if meta.Width > 0 && meta.Height > 0 {
+		res = strconv.Itoa(meta.Width) + " × " + strconv.Itoa(meta.Height)
+	}
+
+	src := formatSource(meta.Source, meta.Rank)
+	return meta.Title + "\n" + meta.Artist + "\n" + res + "\n" + src
+}
+
+func (ui *settingsUI) formatCachedCount() string {
+	return "Cached wallpapers: " + strconv.Itoa(ui.ctrl.CachedCount())
+}
+
+func (ui *settingsUI) formatLastRotation() string {
+	t := ui.ctrl.LastRotation()
+	if t.IsZero() {
+		return "Last rotation: Never"
+	}
+	return "Last rotation: " + t.Format("Jan 02, 15:04")
+}
+
+func (ui *settingsUI) formatNextRotation() string {
+	lastRot := ui.ctrl.LastRotation()
+	if lastRot.IsZero() {
+		return "Next change: No rotation scheduled"
+	}
+	cfg := ui.ctrl.Config()
+	interval := time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
+	next := lastRot.Add(interval)
+	remaining := time.Until(next)
+	if remaining <= 0 {
+		return "Next change: Any moment now"
+	}
+	mins := int(remaining.Minutes())
+	secs := int(remaining.Seconds()) % 60
+	if mins > 0 {
+		return "Next change: in " + strconv.Itoa(mins) + "m " + strconv.Itoa(secs) + "s"
+	}
+	return "Next change: in " + strconv.Itoa(secs) + "s"
+}
+
+func formatSource(source string, rank int) string {
+	switch source {
+	case "daily":
+		if rank > 0 {
+			return "Daily Ranking (#" + strconv.Itoa(rank) + ")"
+		}
+		return "Daily Ranking"
+	case "weekly":
+		if rank > 0 {
+			return "Weekly Ranking (#" + strconv.Itoa(rank) + ")"
+		}
+		return "Weekly Ranking"
+	case "monthly":
+		if rank > 0 {
+			return "Monthly Ranking (#" + strconv.Itoa(rank) + ")"
+		}
+		return "Monthly Ranking"
+	case "favorites":
+		return "Bookmarks"
+	default:
+		if source != "" {
+			return source
+		}
+		return "Unknown"
 	}
 }

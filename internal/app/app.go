@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/gui"
@@ -381,10 +382,78 @@ func (c *Controller) Shutdown() {
 
 // ApplyConfig applies a new config to the scheduler without restarting it.
 func (c *Controller) ApplyConfig(cfg *config.Config) {
+	c.mu.Lock()
 	c.cfg = cfg
+	c.mu.Unlock()
 	if c.sch != nil {
 		c.sch.ApplyConfig(cfg)
 	}
+}
+
+// Config returns the current application configuration.
+func (c *Controller) Config() *config.Config {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg
+}
+
+// FetchNow triggers an immediate wallpaper fetch in the background.
+func (c *Controller) FetchNow() error {
+	if c.pixiv == nil {
+		return fmt.Errorf("pixiv client not available")
+	}
+	c.sch.FetchNow(c.ctx, componentName)
+	return nil
+}
+
+// SchedulerRunning reports whether the scheduler is active.
+func (c *Controller) SchedulerRunning() bool {
+	if c.sch == nil {
+		return false
+	}
+	return c.sch.IsRunning()
+}
+
+// CurrentWallpaper returns metadata about the current wallpaper.
+// Returns nil metdata (no error) when no wallpaper has been set yet.
+func (c *Controller) CurrentWallpaper() (*storage.ImageMeta, error) {
+	currentID, cwErr := c.st.GetCurrentWallpaper()
+	if cwErr != nil {
+		return nil, cwErr
+	}
+	if currentID == "" {
+		return nil, nil //nolint:nilnil // no wallpaper set yet, not an error
+	}
+
+	metaMap, ldErr := c.st.LoadMetadata()
+	if ldErr != nil {
+		return nil, ldErr
+	}
+
+	meta, ok := metaMap[currentID]
+	if !ok {
+		return nil, nil //nolint:nilnil // wallpaper ID not found in metadata
+	}
+
+	return meta, nil
+}
+
+// CachedCount returns the number of images in the metadata store.
+func (c *Controller) CachedCount() int {
+	meta, err := c.st.LoadMetadata()
+	if err != nil {
+		return 0
+	}
+	return len(meta)
+}
+
+// LastRotation returns the timestamp of the last wallpaper rotation.
+func (c *Controller) LastRotation() time.Time {
+	history, err := c.st.LoadHistory()
+	if err != nil {
+		return time.Time{}
+	}
+	return history.UpdatedAt
 }
 
 // SyncBookmarks triggers an immediate bookmark sync.
@@ -404,9 +473,7 @@ func (c *Controller) SyncBookmarks() error {
 func (c *Controller) ShowSettingsWindow() error {
 	logger.WithComponent(componentName).Debug("Opening settings window")
 
-	gui.ShowSettings(c.cfg, func() {
-		c.ApplyConfig(c.cfg)
-	})
+	gui.ShowSettings(c)
 
 	return nil
 }
