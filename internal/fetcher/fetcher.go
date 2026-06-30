@@ -154,6 +154,7 @@ func (f *Fetcher) checkAndSaveExisting(destPath, altPath string, img *pixiv.Imag
 			Title:        img.Title,
 			Artist:       img.Artist,
 			ArtistID:     img.ArtistID,
+			Source:       "ranking",
 			DownloadedAt: time.Now(),
 		}
 		return true
@@ -168,6 +169,7 @@ func (f *Fetcher) checkAndSaveExisting(destPath, altPath string, img *pixiv.Imag
 			Title:        img.Title,
 			Artist:       img.Artist,
 			ArtistID:     img.ArtistID,
+			Source:       "ranking",
 			DownloadedAt: time.Now(),
 		}
 		return true
@@ -202,6 +204,7 @@ func (f *Fetcher) downloadAndSave(ctx context.Context, pending []pixiv.Image, me
 			Artist:       img.Artist,
 			ArtistID:     img.ArtistID,
 			Rank:         img.Rank,
+			Source:       "ranking",
 			DownloadedAt: time.Now(),
 		}
 		downloadedIDs = append(downloadedIDs, img.ID)

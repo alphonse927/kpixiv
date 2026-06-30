@@ -37,6 +37,12 @@ func TestTransformThumbnailToOriginalBase(t *testing.T) {
 			expectError:  true,
 		},
 		{
+			name:         "bookmark API format with webp suffix",
+			thumbnailURL: "https://i.pximg.net/c/600x1200_90_webp/img-master/img/2026/06/17/11/34/00/146094844_p0_master1200.jpg",
+			expected:     "https://i.pximg.net/img-original/img/2026/06/17/11/34/00/146094844_p0",
+			expectError:  false,
+		},
+		{
 			name:         "already original URL",
 			thumbnailURL: "https://i.pximg.net/img-original/img/2020/02/19/00/00/39/79583564_p0.jpg",
 			expected:     "",

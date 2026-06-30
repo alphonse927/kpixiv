@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/alphonse927/kpixiv/internal/slices"
 )
 
 type Queue struct {
@@ -75,23 +77,9 @@ func (q *Queue) AppendRandom(items []string) error {
 	defer q.mu.Unlock()
 
 	combined := make([]string, 0, len(q.items)+len(items))
-	seen := make(map[string]struct{}, len(q.items)+len(items))
-
-	for _, item := range q.items {
-		if _, exists := seen[item]; exists {
-			continue
-		}
-		seen[item] = struct{}{}
-		combined = append(combined, item)
-	}
-
-	for _, item := range items {
-		if _, exists := seen[item]; exists {
-			continue
-		}
-		seen[item] = struct{}{}
-		combined = append(combined, item)
-	}
+	combined = append(combined, q.items...)
+	combined = append(combined, items...)
+	combined = slices.Unique(combined)
 
 	q.items = q.shuffleCopy(combined)
 

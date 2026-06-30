@@ -38,12 +38,25 @@ func kdeScreenLockerConfigPath() string {
 	return filepath.Join(".config", "kscreenlockerrc")
 }
 
+// EnsureConfigExists creates the kscreenlockerrc config file with minimal defaults if it does not exist.
+func (u *KDELockScreenUpdater) EnsureConfigExists() error {
+	if _, err := os.Stat(u.configPath); err == nil {
+		return nil
+	}
+
+	return u.writeConfig("file:///dev/null")
+}
+
 // UpdateImage writes the lock screen image URI to kscreenlockerrc.
 func (u *KDELockScreenUpdater) UpdateImage(imageURI string) error {
 	if !strings.HasPrefix(imageURI, "file://") {
 		return fmt.Errorf("invalid image URI: %s", imageURI)
 	}
 
+	return u.writeConfig(imageURI)
+}
+
+func (u *KDELockScreenUpdater) writeConfig(imageURI string) error {
 	content, err := os.ReadFile(u.configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to read %s: %w", u.configPath, err)

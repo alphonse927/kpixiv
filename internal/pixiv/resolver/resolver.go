@@ -93,7 +93,7 @@ func transformThumbnailToOriginalBase(thumbnailURL string) (string, error) {
 		return "", fmt.Errorf("thumbnail URL does not contain /img-master/: %s", thumbnailURL)
 	}
 
-	re := regexp.MustCompile(`/c/\d+x\d+`)
+	re := regexp.MustCompile(`/c/[^/]+`)
 	transformedPath := re.ReplaceAllString(path, "")
 
 	transformedPath = strings.Replace(transformedPath, "/img-master/", "/img-original/", 1)

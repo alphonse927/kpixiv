@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"fmt"
 	"image/color"
 	"log/slog"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/alphonse927/kpixiv/internal/assets"
 	"github.com/alphonse927/kpixiv/internal/config"
+	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 // numericalEntry only accepts digits and rejects non-numeric paste.
@@ -81,6 +83,10 @@ type settingsUI struct {
 	minWidth      *numericalEntry
 	minHeight     *numericalEntry
 	lockScreen    *widget.Check
+
+	bookmarksEnabled      *widget.Check
+	bookmarksSyncInterval *numericalEntry
+	bookmarksAutoCleanup  *widget.Check
 }
 
 func newSettingsUI(a fyne.App, cfg *config.Config, log *slog.Logger, onApply OnApply) *settingsUI {
@@ -133,9 +139,17 @@ func (ui *settingsUI) createWidgets() {
 
 	ui.lockScreen = widget.NewCheck("Set Lock Screen", nil)
 	ui.lockScreen.SetChecked(ui.cfg.KDE.SetLockScreen)
+
+	ui.bookmarksEnabled = widget.NewCheck("Enable Bookmark Sync", nil)
+	ui.bookmarksEnabled.SetChecked(ui.cfg.Bookmarks.Enabled)
+
+	ui.bookmarksSyncInterval = newNumericalEntry()
+	ui.bookmarksSyncInterval.SetText(strconv.Itoa(ui.cfg.Bookmarks.SyncInterval))
+
+	ui.bookmarksAutoCleanup = widget.NewCheck("Remove unbookmarked images", nil)
+	ui.bookmarksAutoCleanup.SetChecked(ui.cfg.Bookmarks.AutoCleanup)
 }
 
-//nolint:funlen // widget construction and layout is inherently verbose
 func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 	w := ui.w
 
@@ -147,52 +161,7 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 		}, w).Show()
 	})
 
-	apply := func() {
-		cfg := ui.cfg
-
-		cfg.DownloadPath = ui.downloadPath.Text
-
-		if v, err := strconv.Atoi(ui.setInterval.Text); err == nil {
-			cfg.Wallpaper.SetInterval = v
-		}
-		if v, err := strconv.Atoi(ui.fetchInterval.Text); err == nil {
-			cfg.Wallpaper.FetchInterval = v
-		}
-		if v, err := strconv.Atoi(ui.historyLimit.Text); err == nil {
-			cfg.Wallpaper.HistoryLimit = v
-		}
-		if v, err := strconv.Atoi(ui.cleanupDays.Text); err == nil {
-			cfg.Wallpaper.CleanupDays = v
-		}
-		if v, err := strconv.Atoi(ui.minWidth.Text); err == nil {
-			cfg.Pixiv.MinWidth = v
-		}
-		if v, err := strconv.Atoi(ui.minHeight.Text); err == nil {
-			cfg.Pixiv.MinHeight = v
-		}
-
-		switch ui.ranking.Selected {
-		case "weekly":
-			cfg.Pixiv.Ranking = config.RankingWeeklyMode
-		case "monthly":
-			cfg.Pixiv.Ranking = config.RankingMonthlyMode
-		default:
-			cfg.Pixiv.Ranking = config.RankingDailyMode
-		}
-
-		cfg.KDE.SetLockScreen = ui.lockScreen.Checked
-		cfg.Validate()
-
-		if err := config.Save(cfg.ConfigPath, cfg); err != nil {
-			dialog.ShowError(err, w)
-			return
-		}
-
-		ui.log.Info("Settings applied")
-		if ui.onApply != nil {
-			ui.onApply()
-		}
-	}
+	apply := func() { ui.applySettings() }
 
 	bold := fyne.TextStyle{Bold: true}
 	section := func(title string) fyne.CanvasObject {
@@ -277,6 +246,15 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 				widget.NewSeparator(),
 				ui.lockScreen,
 				desc("Also apply the current wallpaper to the KDE lock screen"),
+
+				widget.NewSeparator(),
+				section("Bookmarks"),
+				ui.bookmarksEnabled,
+				desc("Sync bookmarked images from your Pixiv account"),
+				field("Sync Interval (min)", ui.bookmarksSyncInterval),
+				desc("Minimum 60 minutes"),
+				ui.bookmarksAutoCleanup,
+				desc("Delete local images that are no longer bookmarked on Pixiv"),
 			),
 		),
 		container.NewPadded(buttons),
@@ -303,4 +281,74 @@ func (ui *settingsUI) update(cfg *config.Config) {
 	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
 	ui.minHeight.SetText(strconv.Itoa(cfg.Pixiv.MinHeight))
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
+
+	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
+	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
+	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
+}
+
+func (ui *settingsUI) applySettings() {
+	cfg := ui.cfg
+	cfg.DownloadPath = ui.downloadPath.Text
+
+	if v, err := strconv.Atoi(ui.setInterval.Text); err == nil {
+		cfg.Wallpaper.SetInterval = v
+	}
+
+	if v, err := strconv.Atoi(ui.fetchInterval.Text); err == nil {
+		cfg.Wallpaper.FetchInterval = v
+	}
+
+	if v, err := strconv.Atoi(ui.historyLimit.Text); err == nil {
+		cfg.Wallpaper.HistoryLimit = v
+	}
+
+	if v, err := strconv.Atoi(ui.cleanupDays.Text); err == nil {
+		cfg.Wallpaper.CleanupDays = v
+	}
+
+	if v, err := strconv.Atoi(ui.minWidth.Text); err == nil {
+		cfg.Pixiv.MinWidth = v
+	}
+
+	if v, err := strconv.Atoi(ui.minHeight.Text); err == nil {
+		cfg.Pixiv.MinHeight = v
+	}
+
+	switch ui.ranking.Selected {
+	case "weekly":
+		cfg.Pixiv.Ranking = config.RankingWeeklyMode
+	case "monthly":
+		cfg.Pixiv.Ranking = config.RankingMonthlyMode
+	default:
+		cfg.Pixiv.Ranking = config.RankingDailyMode
+	}
+
+	cfg.KDE.SetLockScreen = ui.lockScreen.Checked
+
+	if ui.lockScreen.Checked {
+		updater := wallpaper.NewKDELockScreenUpdater()
+		if err := updater.EnsureConfigExists(); err != nil {
+			dialog.ShowError(fmt.Errorf("failed to prepare lock screen config: %w", err), ui.w)
+			return
+		}
+	}
+
+	cfg.Bookmarks.Enabled = ui.bookmarksEnabled.Checked
+	cfg.Bookmarks.AutoCleanup = ui.bookmarksAutoCleanup.Checked
+	if v, err := strconv.Atoi(ui.bookmarksSyncInterval.Text); err == nil {
+		cfg.Bookmarks.SyncInterval = v
+	}
+
+	cfg.Validate()
+
+	if err := config.Save(cfg.ConfigPath, cfg); err != nil {
+		dialog.ShowError(err, ui.w)
+		return
+	}
+
+	ui.log.Info("Settings applied")
+	if ui.onApply != nil {
+		ui.onApply()
+	}
 }

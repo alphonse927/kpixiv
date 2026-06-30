@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alphonse927/kpixiv/internal/bookmarks"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -23,35 +24,37 @@ const componentName = "scheduler"
 var ErrImageNotFound = fmt.Errorf("image not found")
 
 type Scheduler struct {
-	cfg           *config.Config
-	storage       *storage.Storage
-	pixiv         pixiv.ImageClient
-	setter        wallpaper.Setter
-	page          int
-	setInterval   time.Duration
-	fetchInterval time.Duration
-	stopCh        chan struct{}
-	pauseCh       chan bool
-	resetSetCh    chan struct{}
-	resetFetchCh  chan struct{}
-	wg            sync.WaitGroup
-	mu            sync.Mutex
-	running       bool
+	cfg                  *config.Config
+	storage              *storage.Storage
+	pixiv                pixiv.ImageClient
+	setter               wallpaper.Setter
+	page                 int
+	setInterval          time.Duration
+	fetchInterval        time.Duration
+	bookmarkSyncInterval time.Duration
+	stopCh               chan struct{}
+	pauseCh              chan bool
+	resetSetCh           chan struct{}
+	resetFetchCh         chan struct{}
+	wg                   sync.WaitGroup
+	mu                   sync.Mutex
+	running              bool
 }
 
 // New creates a scheduler for wallpaper rotation and periodic fetching.
 func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpaper.Setter) *Scheduler {
 	sch := &Scheduler{
-		cfg:           cfg,
-		storage:       st,
-		pixiv:         p,
-		setter:        s,
-		page:          1,
-		setInterval:   time.Duration(cfg.Wallpaper.SetInterval) * time.Minute,
-		fetchInterval: time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute,
-		stopCh:        make(chan struct{}),
-		resetSetCh:    make(chan struct{}, 1),
-		resetFetchCh:  make(chan struct{}, 1),
+		cfg:                  cfg,
+		storage:              st,
+		pixiv:                p,
+		setter:               s,
+		page:                 1,
+		setInterval:          time.Duration(cfg.Wallpaper.SetInterval) * time.Minute,
+		fetchInterval:        time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute,
+		bookmarkSyncInterval: time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute,
+		stopCh:               make(chan struct{}),
+		resetSetCh:           make(chan struct{}, 1),
+		resetFetchCh:         make(chan struct{}, 1),
 	}
 
 	pageKey := fmt.Sprintf("%s:%t", cfg.Pixiv.Ranking, cfg.Pixiv.R18)
@@ -93,6 +96,9 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 	fetchTicker := time.NewTicker(sch.fetchInterval)
 	defer fetchTicker.Stop()
 
+	bookmarkChan, cleanup := sch.newBookmarkTicker()
+	defer cleanup()
+
 	paused := false
 
 	for {
@@ -117,10 +123,24 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 			if err := sch.fetchImages(ctx, cname); err != nil {
 				log.Warn("Fetch tick failed", "error", err)
 			}
+		case <-bookmarkChan:
+			if !paused {
+				if err := sch.syncBookmarks(ctx, cname); err != nil {
+					log.Warn("Bookmark sync tick failed", "error", err)
+				}
+			}
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+func (sch *Scheduler) newBookmarkTicker() (<-chan time.Time, func()) {
+	if !sch.cfg.Bookmarks.Enabled {
+		return nil, func() {}
+	}
+	ticker := time.NewTicker(sch.bookmarkSyncInterval)
+	return ticker.C, ticker.Stop
 }
 
 func resetTicker(ticker *time.Ticker, interval time.Duration) {
@@ -209,6 +229,45 @@ func (sch *Scheduler) fetchImages(ctx context.Context, cname string) error {
 	return nil
 }
 
+// SyncBookmarksNow triggers an immediate bookmark sync in the background.
+func (sch *Scheduler) SyncBookmarksNow(ctx context.Context, cname string) {
+	go func() {
+		if err := sch.syncBookmarks(ctx, cname); err != nil {
+			logger.WithComponent("scheduler").Debug("Background bookmark sync failed", "error", err)
+		}
+	}()
+}
+
+// SyncBookmarksNowSync performs a blocking bookmark sync.
+func (sch *Scheduler) SyncBookmarksNowSync(ctx context.Context, cname string) error {
+	return sch.syncBookmarks(ctx, cname)
+}
+
+func (sch *Scheduler) syncBookmarks(ctx context.Context, cname string) error {
+	log := logger.WithComponent(cname)
+
+	pixivClient, ok := sch.pixiv.(*pixiv.Client)
+	if !ok || pixivClient == nil || !pixivClient.LoggedIn() {
+		log.Debug("Skipping bookmark sync: not logged in")
+		return nil
+	}
+
+	if !sch.cfg.Bookmarks.Enabled {
+		log.Debug("Skipping bookmark sync: disabled in config")
+		return nil
+	}
+
+	syncer := bookmarks.NewSyncer(sch.cfg, sch.storage, pixivClient)
+	result, err := syncer.Sync(ctx)
+	if err != nil {
+		log.Error("Bookmark sync failed", "error", err)
+		return err
+	}
+
+	log.Debug("Bookmark sync complete", "downloaded", result.Downloaded, "deleted", result.Deleted)
+	return nil
+}
+
 func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue, cname string) error {
 	log := logger.WithComponent(cname)
 	log.Debug("Queue empty, loading available images from Ranking folder")
@@ -282,6 +341,7 @@ func (sch *Scheduler) ApplyConfig(cfg *config.Config) {
 	sch.cfg = cfg
 	sch.setInterval = time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
 	sch.fetchInterval = time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute
+	sch.bookmarkSyncInterval = time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute
 	running := sch.running
 	sch.mu.Unlock()
 

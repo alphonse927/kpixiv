@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/alphonse927/kpixiv/internal/app"
+	"github.com/alphonse927/kpixiv/internal/bookmarks"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/gui"
@@ -235,6 +237,157 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+var bookmarksCmd = &cobra.Command{
+	Use:   "bookmarks",
+	Short: "Manage Pixiv bookmarks",
+}
+
+var bookmarksSyncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync bookmarked images from Pixiv",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		st, err := storage.New("", cfg.DownloadPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize storage: %w", err)
+		}
+
+		pixivClient, err := pixiv.NewClient(st.StateDir())
+		if err != nil {
+			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+		}
+
+		if !pixivClient.LoggedIn() {
+			return fmt.Errorf("you must be logged in to sync your bookmarks")
+		}
+
+		ctx := context.Background()
+		syncer := bookmarks.NewSyncer(cfg, st, pixivClient)
+		result, err := syncer.Sync(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to sync bookmarks: %w", err)
+		}
+
+		fmt.Println("Bookmark sync complete!")
+		fmt.Printf("Total: %d, Downloaded: %d, Deleted: %d, Skipped: %d, Failed: %d\n", result.Total, result.Downloaded, result.Deleted, result.Skipped, result.Failed)
+		return nil
+	},
+}
+
+var bookmarksListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List locally bookmarked images",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		st, err := storage.New("", cfg.DownloadPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize storage: %w", err)
+		}
+
+		bookmarkIDs, err := st.LoadBookmarks()
+		if err != nil {
+			return fmt.Errorf("failed to load bookmarks: %w", err)
+		}
+
+		metadata, err := st.LoadMetadata()
+		if err != nil {
+			return fmt.Errorf("failed to load metadata: %w", err)
+		}
+
+		if len(bookmarkIDs) == 0 {
+			fmt.Println("No bookmarks found.")
+			return nil
+		}
+
+		fmt.Println("=== Bookmarked Images ===")
+		for id := range bookmarkIDs {
+			if meta, ok := metadata[id]; ok {
+				fmt.Printf("  %s - %s by %s [%dx%d]\n", id, meta.Title, meta.Artist, meta.Width, meta.Height)
+			} else {
+				fmt.Printf("  %s (not downloaded)\n", id)
+			}
+		}
+		fmt.Printf("\nTotal bookmarks: %d\n", len(bookmarkIDs))
+		return nil
+	},
+}
+
+var bookmarksAddCmd = &cobra.Command{
+	Use:   "add <illust_id>",
+	Short: "Bookmark an artwork on Pixiv",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		illustID := strings.TrimSpace(args[0])
+		if illustID == "" {
+			return fmt.Errorf("illust ID is required")
+		}
+
+		st, err := storage.New("", cfg.DownloadPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize storage: %w", err)
+		}
+
+		pixivClient, err := pixiv.NewClient(st.StateDir())
+		if err != nil {
+			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+		}
+
+		if !pixivClient.LoggedIn() {
+			return fmt.Errorf("you must be logged in to bookmark artwork")
+		}
+
+		ctx := context.Background()
+		if err := pixivClient.BookmarkIllust(ctx, illustID); err != nil {
+			return fmt.Errorf("failed to bookmark on pixiv: %w", err)
+		}
+
+		if err := st.AddBookmark(illustID); err != nil {
+			return fmt.Errorf("failed to save local bookmark: %w", err)
+		}
+
+		fmt.Printf("Artwork %s bookmarked successfully\n", illustID)
+		return nil
+	},
+}
+
+var bookmarksAddCurrentCmd = &cobra.Command{
+	Use:   "add-current",
+	Short: "Bookmark the current wallpaper on Pixiv",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		st, err := storage.New("", cfg.DownloadPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize storage: %w", err)
+		}
+
+		currentID, err := st.GetCurrentWallpaper()
+		if err != nil {
+			return fmt.Errorf("failed to get current wallpaper: %w", err)
+		}
+		if currentID == "" {
+			return fmt.Errorf("no current wallpaper")
+		}
+
+		pixivClient, err := pixiv.NewClient(st.StateDir())
+		if err != nil {
+			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+		}
+
+		if !pixivClient.LoggedIn() {
+			return fmt.Errorf("you must be logged in to bookmark artwork")
+		}
+
+		ctx := context.Background()
+		if err := pixivClient.BookmarkIllust(ctx, currentID); err != nil {
+			return fmt.Errorf("failed to bookmark on pixiv: %w", err)
+		}
+
+		if err := st.AddBookmark(currentID); err != nil {
+			return fmt.Errorf("failed to save local bookmark: %w", err)
+		}
+
+		fmt.Printf("Current artwork %s bookmarked successfully\n", currentID)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&cfgPath, "config", "c", "", "Path to config file (default: ~/.config/kpixiv/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
@@ -245,6 +398,12 @@ func init() {
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(bookmarksCmd)
+
+	bookmarksCmd.AddCommand(bookmarksSyncCmd)
+	bookmarksCmd.AddCommand(bookmarksListCmd)
+	bookmarksCmd.AddCommand(bookmarksAddCmd)
+	bookmarksCmd.AddCommand(bookmarksAddCurrentCmd)
 }
 
 func main() {
