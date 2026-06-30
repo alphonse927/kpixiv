@@ -274,8 +274,6 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 		),
 	)
 
-	layout.NewVBoxLayout()
-
 	mainContent := container.New(
 		NewFixedWidthLayout(125),
 		sidebarBox,
