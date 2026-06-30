@@ -185,11 +185,11 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 
 	intervals := sideBySide(
 		container.NewVBox(
-			field("Set Interval (min)", ui.setInterval),
+			field("Wallpaper Change (min)", ui.setInterval),
 			desc("How often to switch wallpapers"),
 		),
 		container.NewVBox(
-			field("Fetch Interval (min)", ui.fetchInterval),
+			field("Download New Images (min)", ui.fetchInterval),
 			desc("How often to download new wallpapers"),
 		),
 	)
@@ -201,11 +201,11 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 
 	other := sideBySide(
 		container.NewVBox(
-			field("History Limit", ui.historyLimit),
-			desc("How many wallpapers to keep in rotation history"),
+			field("Wallpaper History", ui.historyLimit),
+			desc("Number of previous wallpapers to remember"),
 		),
 		container.NewVBox(
-			field("Cleanup Days", ui.cleanupDays),
+			field("Image Retention", ui.cleanupDays),
 			desc("Remove downloaded images older than this"),
 		),
 	)
