@@ -157,11 +157,7 @@ var daemonCmd = &cobra.Command{
 		}()
 
 		log.Info("Starting kPixiv")
-		gui.Run(cfg, func() {
-			if controller != nil {
-				controller.ApplyConfig(cfg)
-			}
-		}, ctx, quitCh)
+		gui.Run(controller, ctx, quitCh)
 
 		log.Info("kPixiv stopped")
 		return nil

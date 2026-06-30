@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -9,25 +10,35 @@ import (
 
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/storage"
 )
 
-// OnApply is called after settings are saved to disk.
-type OnApply func()
+type AppController interface {
+	Config() *config.Config
+	ApplyConfig(cfg *config.Config)
+	NextWallpaper() error
+	FetchNow() error
+	PixivLoggedIn() bool
+	PixivUserName() string
+	LoginToPixiv() error
+	LogoutFromPixiv() error
+	SchedulerRunning() bool
+	CurrentWallpaper() (*storage.ImageMeta, error)
+	CachedCount() int
+	LastRotation() time.Time
+}
 
 var (
 	guiApp    fyne.App
 	settingsW *settingsUI
 )
 
-// Run creates the Fyne app and settings window, then runs the
-// event loop on the calling goroutine (must be the main goroutine).
-// Blocks until quitCh is closed or ctx is cancelled.
-func Run(cfg *config.Config, onApply OnApply, ctx context.Context, quitCh <-chan struct{}) {
+func Run(ctrl AppController, ctx context.Context, quitCh <-chan struct{}) {
 	a := app.NewWithID("kpixiv")
 	a.Settings().SetTheme(&tintedBG{theme.DefaultTheme()})
 	guiApp = a
 
-	settingsW = newSettingsUI(a, cfg, logger.WithComponent("settings"), onApply)
+	settingsW = newSettingsUI(a, ctrl, logger.WithComponent("settings"))
 
 	go func() {
 		select {
@@ -40,15 +51,13 @@ func Run(cfg *config.Config, onApply OnApply, ctx context.Context, quitCh <-chan
 	a.Run()
 }
 
-// ShowSettings updates the settings window with the current config
-// and shows it. Safe to call from any goroutine — dispatches via fyne.Do.
-func ShowSettings(cfg *config.Config, onApply OnApply) {
+func ShowSettings(ctrl AppController) {
 	if guiApp == nil {
 		return
 	}
 	fyne.Do(func() {
-		settingsW.update(cfg)
-		settingsW.onApply = onApply
+		settingsW.ctrl = ctrl
+		settingsW.update()
 		settingsW.show()
 	})
 }
