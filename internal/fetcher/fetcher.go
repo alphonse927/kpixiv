@@ -28,6 +28,7 @@ type Fetcher struct {
 	storage *storage.Storage
 	client  pixiv.ImageClient
 	page    int
+	mode    string
 }
 
 // NewFetcher creates a fetcher bound to config, storage, and pixiv client.
@@ -37,6 +38,7 @@ func NewFetcher(cfg *config.Config, st *storage.Storage, client pixiv.ImageClien
 		storage: st,
 		client:  client,
 		page:    1,
+		mode:    cfg.Pixiv.Ranking.String(),
 	}
 }
 
@@ -126,22 +128,40 @@ func (f *Fetcher) prepareDownloads(filteredImages []pixiv.Image) ([]pixiv.Image,
 
 	var pending []pixiv.Image
 	for _, img := range filteredImages {
-		if existing, ok := metadata[img.ID]; ok {
-			if _, err := os.Stat(existing.Path); err == nil {
-				continue
-			}
+		if f.metadataAlreadyExists(&img, metadata) {
+			continue
 		}
 
 		destPath := filepath.Join(rankingDir, img.ID+".jpg")
 		altPath := filepath.Join(rankingDir, img.ID+".png")
-
 		if f.checkAndSaveExisting(destPath, altPath, &img, metadata) {
 			continue
 		}
 
 		pending = append(pending, img)
 	}
+
 	return pending, metadata, nil
+}
+
+func (f *Fetcher) metadataAlreadyExists(img *pixiv.Image, metadata map[string]*storage.ImageMeta) bool {
+	existing, ok := metadata[img.ID]
+	if !ok {
+		return false
+	}
+
+	if _, err := os.Stat(existing.Path); err != nil {
+		return false
+	}
+
+	if existing.Source == f.mode {
+		return true
+	}
+
+	existing.Source = f.mode
+	existing.Rank = img.Rank
+	existing.DownloadedAt = time.Now()
+	return true
 }
 
 func (f *Fetcher) checkAndSaveExisting(destPath, altPath string, img *pixiv.Image, metadata map[string]*storage.ImageMeta) bool {
@@ -154,9 +174,11 @@ func (f *Fetcher) checkAndSaveExisting(destPath, altPath string, img *pixiv.Imag
 			Title:        img.Title,
 			Artist:       img.Artist,
 			ArtistID:     img.ArtistID,
-			Source:       "ranking",
+			Rank:         img.Rank,
+			Source:       f.mode,
 			DownloadedAt: time.Now(),
 		}
+
 		return true
 	}
 
@@ -169,11 +191,14 @@ func (f *Fetcher) checkAndSaveExisting(destPath, altPath string, img *pixiv.Imag
 			Title:        img.Title,
 			Artist:       img.Artist,
 			ArtistID:     img.ArtistID,
-			Source:       "ranking",
+			Rank:         img.Rank,
+			Source:       f.mode,
 			DownloadedAt: time.Now(),
 		}
+
 		return true
 	}
+
 	return false
 }
 
@@ -204,7 +229,7 @@ func (f *Fetcher) downloadAndSave(ctx context.Context, pending []pixiv.Image, me
 			Artist:       img.Artist,
 			ArtistID:     img.ArtistID,
 			Rank:         img.Rank,
-			Source:       "ranking",
+			Source:       f.mode,
 			DownloadedAt: time.Now(),
 		}
 		downloadedIDs = append(downloadedIDs, img.ID)
