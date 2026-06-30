@@ -212,7 +212,7 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Min image size: %dx%d\n", cfg.Pixiv.MinWidth, cfg.Pixiv.MinHeight)
 		fmt.Printf("R-18: %t\n", cfg.Pixiv.R18)
 		fmt.Printf("Landscape only: %t\n", cfg.Pixiv.LandscapeOnly)
-		fmt.Printf("History limit: %d\n", cfg.Wallpaper.HistoryLimit)
+		fmt.Printf("Wallpaper history: %d\n", cfg.Wallpaper.HistoryLimit)
 		fmt.Printf("Cleanup images older than: %d days\n", cfg.Wallpaper.CleanupDays)
 		fmt.Printf("Lock screen: %t\n", cfg.KDE.SetLockScreen)
 		fmt.Printf("\n=== Wallpaper History ===\n")
