@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/alphonse927/kpixiv/internal/slices"
 )
 
 type ImageMeta struct {
@@ -21,6 +23,7 @@ type ImageMeta struct {
 	Width        int       `json:"width"`
 	Height       int       `json:"height"`
 	Rank         int       `json:"rank"`
+	Source       string    `json:"source"`
 	DownloadedAt time.Time `json:"downloaded_at"`
 }
 
@@ -31,7 +34,9 @@ type History struct {
 }
 
 type PaginationState struct {
-	Pages map[string]int `json:"pages"`
+	Pages            map[string]int `json:"pages"`
+	LastBookmarkPage string         `json:"last_bookmark_page,omitempty"`
+	BookmarkComplete bool           `json:"bookmark_complete,omitempty"`
 }
 
 type Blacklist struct {
@@ -67,6 +72,11 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 
 	rankingDir := filepath.Join(dataDir, "Ranking")
 	if err := os.MkdirAll(rankingDir, 0750); err != nil {
+		return nil, err
+	}
+
+	favoritesDir := filepath.Join(dataDir, "Favorites")
+	if err := os.MkdirAll(favoritesDir, 0750); err != nil {
 		return nil, err
 	}
 
@@ -143,6 +153,16 @@ func (s *Storage) CopyImageToDownloadDir(id string) (string, error) {
 // RankingDir returns the ranking image directory.
 func (s *Storage) RankingDir() string {
 	return filepath.Join(s.dataDir, "Ranking")
+}
+
+// FavoritesDir returns the favorite image directory.
+func (s *Storage) FavoritesDir() string {
+	return filepath.Join(s.dataDir, "Favorites")
+}
+
+// FavoritesMetadataPath returns the favorite metadata JSON path (same as the main metadata).
+func (s *Storage) FavoritesMetadataPath() string {
+	return s.MetadataPath()
 }
 
 // MetadataPath returns the metadata JSON file path.
@@ -225,21 +245,7 @@ func (s *Storage) ExcludeWallpaper(imageID string) error {
 		return err
 	}
 
-	seen := make(map[string]struct{}, len(blacklist.IDs)+1)
-	updated := make([]string, 0, len(blacklist.IDs)+1)
-	for _, id := range blacklist.IDs {
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		updated = append(updated, id)
-	}
-
-	if _, exists := seen[imageID]; !exists {
-		updated = append(updated, imageID)
-	}
-
-	blacklist.IDs = updated
+	blacklist.IDs = slices.Unique(append(blacklist.IDs, imageID))
 	if err = s.SaveBlacklist(blacklist); err != nil {
 		return err
 	}
@@ -332,6 +338,28 @@ func (s *Storage) SetRankingPage(key string, page int) error {
 	return s.SavePaginationState(state)
 }
 
+// GetBookmarkPagination returns the bookmark sync cursor state.
+func (s *Storage) GetBookmarkPagination() (lastPageURL string, complete bool, err error) {
+	state, err := s.LoadPaginationState()
+	if err != nil {
+		return "", false, err
+	}
+
+	return state.LastBookmarkPage, state.BookmarkComplete, nil
+}
+
+// SetBookmarkPagination persists the bookmark sync cursor state.
+func (s *Storage) SetBookmarkPagination(lastPageURL string, complete bool) error {
+	state, err := s.LoadPaginationState()
+	if err != nil {
+		return err
+	}
+
+	state.LastBookmarkPage = lastPageURL
+	state.BookmarkComplete = complete
+	return s.SavePaginationState(state)
+}
+
 // BookmarkPath returns the bookmark JSON file path.
 func (s *Storage) BookmarkPath() string {
 	return filepath.Join(s.stateDir, "bookmarks.json")
@@ -339,35 +367,27 @@ func (s *Storage) BookmarkPath() string {
 
 // LoadBookmarks reads bookmarked artwork IDs from the disk.
 func (s *Storage) LoadBookmarks() (map[string]struct{}, error) {
-	path := s.BookmarkPath()
-	data, err := os.ReadFile(path)
+	bd, err := s.loadBookmarkData()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return make(map[string]struct{}), nil
-		}
 		return nil, err
 	}
 
-	var ids []string
-	if err = json.Unmarshal(data, &ids); err != nil {
-		return nil, err
-	}
-
-	bookmarks := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
+	bookmarks := make(map[string]struct{}, len(bd.IDs))
+	for _, id := range bd.IDs {
 		bookmarks[id] = struct{}{}
 	}
 
 	return bookmarks, nil
 }
 
-// SaveBookmarks writes bookmarked artwork IDs to the disk.
+// SaveBookmarks writes the bookmark file.
 func (s *Storage) SaveBookmarks(ids []string) error {
 	if ids == nil {
 		ids = []string{}
 	}
 
-	data, err := json.MarshalIndent(ids, "", "  ")
+	bd := NewBookmarkData(ids)
+	data, err := json.MarshalIndent(bd, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -401,12 +421,70 @@ func (s *Storage) AddBookmark(id string) error {
 	for bid := range bookmarks {
 		ids = append(ids, bid)
 	}
-	ids = append(ids, id)
 
-	return s.SaveBookmarks(ids)
+	ids = append(ids, id)
+	bd := NewBookmarkData(ids)
+
+	data, err := json.MarshalIndent(bd, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.BookmarkPath(), data, 0600)
 }
 
-// LoadMetadata reads image metadata from disk.
+// AddBookmarks bulk-imports multiple IDs into the bookmark file (no duplicates).
+func (s *Storage) AddBookmarks(ids []string) error {
+	bd, err := s.loadBookmarkData()
+	if err != nil {
+		return err
+	}
+
+	originalCount := len(bd.IDs)
+	all := make([]string, 0, len(bd.IDs)+len(ids))
+	all = append(all, bd.IDs...)
+	all = append(all, ids...)
+	bd.IDs = slices.Unique(all)
+
+	now := time.Now()
+	bd.LastUpdate = now
+	if len(bd.IDs) > originalCount {
+		bd.LastBookmark = now
+	}
+
+	data, err := json.MarshalIndent(bd, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(s.BookmarkPath(), data, 0600)
+}
+
+func (s *Storage) loadBookmarkData() (*BookmarkData, error) {
+	path := s.BookmarkPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return new(NewBookmarkData([]string{})), nil
+		}
+		return nil, err
+	}
+
+	var bd BookmarkData
+	if err = json.Unmarshal(data, &bd); err == nil && bd.IDs != nil {
+		return &bd, nil
+	}
+
+	var ids []string
+	if err = json.Unmarshal(data, &ids); err != nil {
+		return nil, err
+	}
+
+	bd = NewBookmarkData(ids)
+	return &bd, nil
+}
+
+// LoadMetadata reads image metadata from the disk.
 func (s *Storage) LoadMetadata() (map[string]*ImageMeta, error) {
 	path := s.MetadataPath()
 	data, rfErr := os.ReadFile(path)
@@ -702,6 +780,10 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 	removedCount := 0
 
 	for id, meta := range images {
+		if meta.Source == "favorites" {
+			continue
+		}
+
 		if !removeAll && !meta.DownloadedAt.Before(cutoff) {
 			continue
 		}

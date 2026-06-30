@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"sync"
 
@@ -193,8 +194,10 @@ func (c *Controller) OpenCurrentArtworkInPixiv() error {
 	return exec.Command("xdg-open", url).Start()
 }
 
-// ExcludeCurrentWallpaper blacklists the current wallpaper and switches to another one.
+// ExcludeCurrentWallpaper blacklists the current wallpaper, deletes the file, and switches to another one.
 func (c *Controller) ExcludeCurrentWallpaper() error {
+	log := logger.WithComponent("app")
+
 	currentID, err := c.st.GetCurrentWallpaper()
 	if err != nil {
 		return err
@@ -202,6 +205,25 @@ func (c *Controller) ExcludeCurrentWallpaper() error {
 
 	if currentID == "" {
 		return fmt.Errorf("no current artwork")
+	}
+
+	metadata, err := c.st.LoadMetadata()
+	if err != nil {
+		return fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	if meta, ok := metadata[currentID]; ok {
+		if rErr := os.Remove(meta.Path); rErr != nil && !os.IsNotExist(rErr) {
+			log.Warn("Failed to delete excluded wallpaper file", "id", currentID, "path", meta.Path, "error", rErr)
+		} else {
+			log.Debug("Deleted excluded wallpaper file", "id", currentID, "path", meta.Path)
+		}
+
+		delete(metadata, currentID)
+
+		if sErr := c.st.SaveMetadata(metadata); sErr != nil {
+			log.Warn("Failed to save metadata after exclusion", "error", sErr)
+		}
 	}
 
 	if err = c.st.ExcludeWallpaper(currentID); err != nil {
@@ -287,10 +309,6 @@ func (c *Controller) LogoutFromPixiv() error {
 
 // CopyCurrentArtwork copies the current artwork into the configured download directory.
 func (c *Controller) CopyCurrentArtwork() error {
-	if !c.PixivLoggedIn() {
-		return fmt.Errorf("pixiv login required")
-	}
-
 	currentID, err := c.st.GetCurrentWallpaper()
 	if err != nil {
 		return err
@@ -367,6 +385,19 @@ func (c *Controller) ApplyConfig(cfg *config.Config) {
 	if c.sch != nil {
 		c.sch.ApplyConfig(cfg)
 	}
+}
+
+// SyncBookmarks triggers an immediate bookmark sync.
+func (c *Controller) SyncBookmarks() error {
+	if !c.PixivLoggedIn() {
+		return fmt.Errorf("pixiv login required")
+	}
+
+	if !c.cfg.Bookmarks.Enabled {
+		return fmt.Errorf("bookmark sync is disabled in config")
+	}
+
+	return c.sch.SyncBookmarksNowSync(c.ctx, componentName)
 }
 
 // ShowSettingsWindow opens the settings window without blocking the tray.

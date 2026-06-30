@@ -12,8 +12,15 @@ type Config struct {
 
 	DownloadPath string          `yaml:"download_path"`
 	Pixiv        PixivConfig     `yaml:"pixiv"`
+	Bookmarks    BookmarksConfig `yaml:"bookmarks"`
 	Wallpaper    WallpaperConfig `yaml:"wallpaper"`
 	KDE          KDEConfig       `yaml:"kde"`
+}
+
+type BookmarksConfig struct {
+	Enabled      bool `yaml:"enabled"`
+	SyncInterval int  `yaml:"sync_interval"`
+	AutoCleanup  bool `yaml:"auto_cleanup"`
 }
 
 type KDEConfig struct {
@@ -29,14 +36,17 @@ type PixivConfig struct {
 }
 
 const (
-	DefaultDownloadPath  = "Pictures/KPixiv"
-	DefaultPixivRanking  = 0
-	DefaultMinWidth      = 1280
-	DefaultMinHeight     = 720
-	DefaultHistoryLimit  = 10
-	DefaultSetInterval   = 5
-	DefaultFetchInterval = 30
-	DefaultCleanupDays   = 7
+	DefaultDownloadPath     = "Pictures/KPixiv"
+	DefaultPixivRanking     = 0
+	DefaultMinWidth         = 1280
+	DefaultMinHeight        = 720
+	DefaultHistoryLimit     = 10
+	DefaultSetInterval      = 5
+	DefaultFetchInterval    = 30
+	DefaultCleanupDays      = 7
+	DefaultBookmarksSync    = 60
+	DefaultBookmarksEnabled = false
+	DefaultBookmarksCleanup = true
 )
 
 // Default returns the default application configuration.
@@ -58,6 +68,11 @@ func Default() *Config {
 			SetInterval:   DefaultSetInterval,
 			FetchInterval: DefaultFetchInterval,
 			CleanupDays:   DefaultCleanupDays,
+		},
+		Bookmarks: BookmarksConfig{
+			Enabled:      DefaultBookmarksEnabled,
+			SyncInterval: DefaultBookmarksSync,
+			AutoCleanup:  DefaultBookmarksCleanup,
 		},
 		KDE: KDEConfig{
 			SetLockScreen: false,
@@ -134,6 +149,9 @@ func (c *Config) Validate() {
 	}
 	if c.Wallpaper.CleanupDays < 1 {
 		c.Wallpaper.CleanupDays = DefaultCleanupDays
+	}
+	if c.Bookmarks.SyncInterval < 60 {
+		c.Bookmarks.SyncInterval = DefaultBookmarksSync
 	}
 }
 

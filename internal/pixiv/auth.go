@@ -77,6 +77,13 @@ func (c *Client) AuthUserName() string {
 	return c.auth.UserName
 }
 
+// AuthUserID returns the logged-in user's Pixiv user ID.
+func (c *Client) AuthUserID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.auth.UserID
+}
+
 // Logout clears the persisted Pixiv session.
 func (c *Client) Logout() error {
 	c.mu.Lock()
@@ -195,7 +202,7 @@ func (c *Client) ensureAccessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	if c.auth.RefreshToken == "" {
 		c.mu.Unlock()
-		return "", fmt.Errorf("pixiv login required")
+		return "", fmt.Errorf("login required")
 	}
 
 	if c.auth.AccessToken != "" && time.Until(c.auth.ExpiresAt) > 30*time.Second {

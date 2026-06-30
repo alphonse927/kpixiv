@@ -245,6 +245,107 @@ func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int,
 	return images, nextPage, nil
 }
 
+type bookmarkIllustsResponse struct {
+	Illusts []bookmarkIllust `json:"illusts"`
+	NextURL string           `json:"next_url"`
+}
+
+type bookmarkIllust struct {
+	ID        int64             `json:"id"`
+	Title     string            `json:"title"`
+	User      bookmarkUser      `json:"user"`
+	Width     int               `json:"width"`
+	Height    int               `json:"height"`
+	ImageURLs bookmarkImageURLs `json:"image_urls"`
+	Visible   bool              `json:"visible"`
+}
+
+type bookmarkUser struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+type bookmarkImageURLs struct {
+	Large  string `json:"large"`
+	Medium string `json:"medium"`
+}
+
+// FetchBookmarks fetches bookmarked images for a user and returns parsed images.
+// Pass an empty string for "nextURL" to fetch the first page.
+// Returns the nextURL for the subsequent page (empty string when done).
+func (c *Client) FetchBookmarks(ctx context.Context, userID string, nextURL string) ([]Image, string, error) {
+	accessToken, err := c.ensureAccessToken(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+
+	log := logger.WithComponent("pixiv")
+
+	targetURL := nextURL
+	if targetURL == "" {
+		targetURL = fmt.Sprintf("https://app-api.pixiv.net/v1/user/bookmarks/illust?user_id=%s&restrict=public", url.QueryEscape(userID))
+	}
+	log.Debug("Fetching bookmarks", "url", targetURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	applyPixivAppHeaders(req)
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	resp, err := c.authClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to fetch bookmarks: %w", err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024)) //nolint:errcheck
+		return nil, "", fmt.Errorf("bookmarks request failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read bookmarks response: %w", err)
+	}
+
+	var data bookmarkIllustsResponse
+	if err = json.Unmarshal(body, &data); err != nil {
+		return nil, "", fmt.Errorf("failed to decode bookmarks response: %w", err)
+	}
+
+	images := make([]Image, 0, len(data.Illusts))
+	for _, bi := range data.Illusts {
+		if !bi.Visible {
+			log.Debug("Skipping invisible/deleted images", "id", bi.ID)
+			continue
+		}
+
+		imgURL := bi.ImageURLs.Large
+		if imgURL == "" {
+			imgURL = bi.ImageURLs.Medium
+		}
+
+		img := Image{
+			ID:        fmt.Sprintf("%d", bi.ID),
+			URL:       imgURL,
+			Width:     bi.Width,
+			Height:    bi.Height,
+			Title:     bi.Title,
+			Artist:    bi.User.Name,
+			ArtistID:  fmt.Sprintf("%d", bi.User.ID),
+			Timestamp: time.Now(),
+		}
+		images = append(images, img)
+	}
+
+	next := data.NextURL
+	log.Debug("Fetched bookmarks", "count", len(images), "skipped", len(data.Illusts)-len(images), "hasNext", next != "")
+	return images, next, nil
+}
+
 func parseNextPage(next any) int {
 	switch v := next.(type) {
 	case float64:
