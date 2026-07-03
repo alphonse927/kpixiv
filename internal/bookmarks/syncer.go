@@ -246,6 +246,10 @@ func (s *Syncer) downloadAndSave(ctx context.Context, pending []pixiv.Image, fav
 			DownloadedAt: time.Now(),
 		}
 		downloaded++
+
+		if err := s.storage.GenerateThumbnail(finalPath, img.ID); err != nil {
+			log.Warn("Failed to generate thumbnail", "id", img.ID, "error", err)
+		}
 	}
 
 	if err := s.storage.SaveMetadata(metadata); err != nil {

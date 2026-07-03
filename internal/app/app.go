@@ -119,7 +119,22 @@ func (c *Controller) Start() error {
 		logger.WithComponent(componentName).Warn("Could not apply wallpaper on startup", "error", err)
 	}
 
+	go c.generateMissingThumbnails(images)
+
 	return nil
+}
+
+func (c *Controller) generateMissingThumbnails(images map[string]*storage.ImageMeta) {
+	log := logger.WithComponent(componentName)
+	for id, meta := range images {
+		if meta.Path == "" {
+			continue
+		}
+
+		if err := c.st.GenerateThumbnail(meta.Path, id); err != nil {
+			log.Warn("Failed to generate thumbnail", "id", id, "error", err)
+		}
+	}
 }
 
 // NextWallpaper applies the next wallpaper from the persisted queue.
@@ -477,6 +492,10 @@ func (c *Controller) ShowSettingsWindow() error {
 	gui.ShowSettings(c)
 
 	return nil
+}
+
+func (c *Controller) ThumbnailPath(id string) string {
+	return c.st.ThumbnailPath(id)
 }
 
 func (c *Controller) ServiceEnabled() (bool, error) {

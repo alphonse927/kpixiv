@@ -233,6 +233,10 @@ func (f *Fetcher) downloadAndSave(ctx context.Context, pending []pixiv.Image, me
 			DownloadedAt: time.Now(),
 		}
 		downloadedIDs = append(downloadedIDs, img.ID)
+
+		if err := f.storage.GenerateThumbnail(finalPath, img.ID); err != nil {
+			log.Warn("Failed to generate thumbnail", "id", img.ID, "error", err)
+		}
 	}
 
 	if err := f.storage.SaveMetadata(metadata); err != nil {
