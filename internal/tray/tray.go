@@ -2,6 +2,7 @@ package tray
 
 import (
 	"context"
+	"time"
 
 	"fyne.io/systray"
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -102,6 +103,8 @@ func onReady(appCtx context.Context, controller Controller) {
 	updateAuthItems()
 
 	go func() {
+		bookmarkTicker := time.NewTicker(3 * time.Second)
+		defer bookmarkTicker.Stop()
 		for {
 			select {
 			case <-next.ClickedCh:
@@ -159,6 +162,8 @@ func onReady(appCtx context.Context, controller Controller) {
 				controller.Shutdown()
 				systray.Quit()
 				return
+			case <-bookmarkTicker.C:
+				updateBookmarkItem()
 			case <-appCtx.Done():
 				systray.Quit()
 				return
