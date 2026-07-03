@@ -26,6 +26,9 @@ type AppController interface {
 	CurrentWallpaper() (*storage.ImageMeta, error)
 	CachedCount() int
 	LastRotation() time.Time
+	ServiceEnabled() (bool, error)
+	EnableService() error
+	DisableService() error
 }
 
 var (

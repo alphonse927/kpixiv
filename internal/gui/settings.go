@@ -100,6 +100,10 @@ type settingsUI struct {
 	statusThumbnail *canvas.Image
 	lastWallpaperID string
 
+	autostartCheck     *widget.Check
+	autostartStatus    *widget.Label
+	autostartOrigState bool
+
 	accountStatus    *widget.Label
 	accountLoginBtn  *widget.Button
 	accountLogoutBtn *widget.Button
@@ -190,6 +194,11 @@ func (ui *settingsUI) createWidgets() {
 	ui.statusThumbnail.FillMode = canvas.ImageFillContain
 	ui.statusThumbnail.SetMinSize(fyne.NewSize(140, 0))
 
+	ui.autostartCheck = widget.NewCheck("Start KPixiv automatically when I log in", nil)
+	ui.autostartCheck.Disable()
+	ui.autostartStatus = widget.NewLabel("")
+	ui.autostartStatus.Hide()
+
 	ui.accountStatus = widget.NewLabel("")
 	ui.accountLoginBtn = widget.NewButton("Login to Pixiv", func() {
 		go func() {
@@ -262,10 +271,7 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 		container.NewHBox(
 			layout.NewSpacer(),
 			widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), ui.hide),
-			widget.NewButton("Apply", func() {
-				ui.applySettings()
-				ui.log.Info("Settings applied")
-			}),
+			widget.NewButton("Apply", ui.applySettings),
 			widget.NewButtonWithIcon("Save & Close", theme.ConfirmIcon(), func() {
 				ui.applySettings()
 				ui.log.Info("Settings saved and closed")
@@ -326,6 +332,7 @@ func (ui *settingsUI) show() {
 	ui.refreshStatus()
 	ui.w.Show()
 	ui.startStatusRefresh()
+	go ui.refreshAutostartState()
 }
 
 func (ui *settingsUI) hide() {
@@ -419,8 +426,24 @@ func (ui *settingsUI) applySettings() {
 		return
 	}
 
-	ui.log.Info("Settings applied")
 	ui.ctrl.ApplyConfig(cfg)
+
+	if ui.autostartCheck.Checked != ui.autostartOrigState {
+		var err error
+		if ui.autostartCheck.Checked {
+			err = ui.ctrl.EnableService()
+		} else {
+			err = ui.ctrl.DisableService()
+		}
+		if err != nil {
+			ui.autostartCheck.SetChecked(ui.autostartOrigState)
+			dialog.ShowError(err, ui.w)
+			return
+		}
+		ui.autostartOrigState = ui.autostartCheck.Checked
+	}
+
+	ui.log.Info("Settings applied")
 }
 
 func (ui *settingsUI) startStatusRefresh() {
@@ -469,6 +492,23 @@ func (ui *settingsUI) refreshStatus() {
 	ui.statusCached.SetText(ui.formatCachedCount())
 	ui.statusLastRot.SetText(ui.formatLastRotation())
 	ui.statusNextRot.SetText(ui.formatNextRotation())
+}
+
+func (ui *settingsUI) refreshAutostartState() {
+	enabled, err := ui.ctrl.ServiceEnabled()
+	fyne.Do(func() {
+		if err != nil {
+			ui.autostartCheck.Disable()
+			ui.autostartCheck.SetChecked(false)
+			ui.autostartStatus.SetText("Unable to access the systemd user service.")
+			ui.autostartStatus.Show()
+			return
+		}
+		ui.autostartCheck.Enable()
+		ui.autostartCheck.SetChecked(enabled)
+		ui.autostartOrigState = enabled
+		ui.autostartStatus.Hide()
+	})
 }
 
 func (ui *settingsUI) formatWallpaperInfo(meta *storage.ImageMeta) string {
