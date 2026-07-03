@@ -12,6 +12,7 @@ import (
 	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
+	"github.com/alphonse927/kpixiv/internal/platform"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
@@ -476,6 +477,18 @@ func (c *Controller) ShowSettingsWindow() error {
 	gui.ShowSettings(c)
 
 	return nil
+}
+
+func (c *Controller) ServiceEnabled() (bool, error) {
+	return platform.IsServiceEnabled("kpixiv.service")
+}
+
+func (c *Controller) EnableService() error {
+	return platform.EnableService("kpixiv.service")
+}
+
+func (c *Controller) DisableService() error {
+	return platform.DisableService("kpixiv.service")
 }
 
 func openExternal(target string) error {

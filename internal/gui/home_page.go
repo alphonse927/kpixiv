@@ -35,6 +35,13 @@ func (ui *settingsUI) buildHomePage() fyne.CanvasObject {
 				ui.statusLastRot,
 			),
 		),
+		container.NewPadded(
+			container.NewVBox(
+				section("System Integration"),
+				ui.autostartCheck,
+				ui.autostartStatus,
+			),
+		),
 	)
 
 	return container.NewScroll(container.NewPadded(content))
