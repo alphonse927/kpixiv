@@ -29,6 +29,7 @@ type AppController interface {
 	ServiceEnabled() (bool, error)
 	EnableService() error
 	DisableService() error
+	ThumbnailPath(id string) string
 }
 
 var (

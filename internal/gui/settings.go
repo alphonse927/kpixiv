@@ -457,7 +457,7 @@ func (ui *settingsUI) startStatusRefresh() {
 	}
 	ui.statusRefresh = make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(time.Second)
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -482,7 +482,8 @@ func (ui *settingsUI) refreshStatus() {
 
 	if meta != nil && meta.ID != "" && meta.ID != ui.lastWallpaperID {
 		ui.lastWallpaperID = meta.ID
-		ui.statusThumbnail.File = meta.Path
+		thumbPath := ui.ctrl.ThumbnailPath(meta.ID)
+		ui.statusThumbnail.File = thumbPath
 		ui.statusThumbnail.Refresh()
 	}
 

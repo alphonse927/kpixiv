@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/jpeg"
+	_ "image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -77,6 +80,11 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 
 	favoritesDir := filepath.Join(dataDir, "Favorites")
 	if err := os.MkdirAll(favoritesDir, 0750); err != nil {
+		return nil, err
+	}
+
+	thumbnailsDir := filepath.Join(dataDir, "Thumbnails")
+	if err := os.MkdirAll(thumbnailsDir, 0750); err != nil {
 		return nil, err
 	}
 
@@ -158,6 +166,72 @@ func (s *Storage) RankingDir() string {
 // FavoritesDir returns the favorite image directory.
 func (s *Storage) FavoritesDir() string {
 	return filepath.Join(s.dataDir, "Favorites")
+}
+
+// ThumbnailDir returns the thumbnail image directory.
+func (s *Storage) ThumbnailDir() string {
+	return filepath.Join(s.dataDir, "Thumbnails")
+}
+
+// ThumbnailPath returns the expected thumbnail path for a given image ID.
+func (s *Storage) ThumbnailPath(id string) string {
+	return filepath.Join(s.ThumbnailDir(), id+".jpg")
+}
+
+// GenerateThumbnail scales a source image to 140px wide and saves it as a JPEG
+// thumbnail. Skips if the thumbnail already exists.
+func (s *Storage) GenerateThumbnail(srcPath, id string) error {
+	dstPath := s.ThumbnailPath(id)
+	if _, err := os.Stat(dstPath); err == nil {
+		return nil
+	}
+
+	f, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+
+	defer f.Close() //nolint:errcheck // read-only file
+
+	src, _, err := image.Decode(f)
+	if err != nil {
+		return fmt.Errorf("decode: %w", err)
+	}
+
+	thumb := scaleImage(src, 140)
+	out, err := os.Create(dstPath)
+	if err != nil {
+		return fmt.Errorf("create thumbnail: %w", err)
+	}
+
+	defer out.Close() //nolint:errcheck // flushed before close
+
+	if err = jpeg.Encode(out, thumb, &jpeg.Options{Quality: 75}); err != nil {
+		return fmt.Errorf("encode thumbnail: %w", err)
+	}
+
+	return nil
+}
+
+func scaleImage(src image.Image, maxWidth int) image.Image {
+	bounds := src.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
+	if w <= maxWidth {
+		return src
+	}
+
+	newH := h * maxWidth / w
+	dst := image.NewRGBA(image.Rect(0, 0, maxWidth, newH))
+	for y := range newH {
+		for x := range maxWidth {
+			srcX := x * w / maxWidth
+			srcY := y * h / newH
+			dst.Set(x, y, src.At(srcX, srcY))
+		}
+	}
+
+	return dst
 }
 
 // FavoritesMetadataPath returns the favorite metadata JSON path (same as the main metadata).
