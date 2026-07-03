@@ -7,6 +7,7 @@ import (
 )
 
 func IsServiceEnabled(service string) (bool, error) {
+	//nolint:gosec // service name is controlled by the application, not user input
 	cmd := exec.Command("systemctl", "--user", "is-enabled", service)
 	out, err := cmd.Output()
 	output := strings.TrimSpace(string(out))
@@ -22,6 +23,7 @@ func IsServiceEnabled(service string) (bool, error) {
 }
 
 func EnableService(service string) error {
+	//nolint:gosec // service name is controlled by the application, not user input
 	cmd := exec.Command("systemctl", "--user", "enable", service)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cannot enable service: %s: %w", strings.TrimSpace(string(out)), err)
@@ -30,6 +32,7 @@ func EnableService(service string) error {
 }
 
 func DisableService(service string) error {
+	//nolint:gosec // service name is controlled by the application, not user input
 	cmd := exec.Command("systemctl", "--user", "disable", service)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cannot disable service: %s: %w", strings.TrimSpace(string(out)), err)
