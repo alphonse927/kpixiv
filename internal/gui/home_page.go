@@ -42,6 +42,7 @@ func (ui *settingsUI) buildHomePage() fyne.CanvasObject {
 				ui.autostartStatus,
 			),
 		),
+		container.NewPadded(widget.NewButton("View Logs...", ui.showLogViewer)),
 	)
 
 	return container.NewScroll(container.NewPadded(content))
