@@ -428,22 +428,27 @@ func (ui *settingsUI) applySettings() {
 
 	ui.ctrl.ApplyConfig(cfg)
 
-	if ui.autostartCheck.Checked != ui.autostartOrigState {
-		var err error
-		if ui.autostartCheck.Checked {
-			err = ui.ctrl.EnableService()
-		} else {
-			err = ui.ctrl.DisableService()
-		}
-		if err != nil {
-			ui.autostartCheck.SetChecked(ui.autostartOrigState)
-			dialog.ShowError(err, ui.w)
-			return
-		}
-		ui.autostartOrigState = ui.autostartCheck.Checked
-	}
+	ui.applyAutostart()
 
 	ui.log.Info("Settings applied")
+}
+
+func (ui *settingsUI) applyAutostart() {
+	if ui.autostartCheck.Checked == ui.autostartOrigState {
+		return
+	}
+	var err error
+	if ui.autostartCheck.Checked {
+		err = ui.ctrl.EnableService()
+	} else {
+		err = ui.ctrl.DisableService()
+	}
+	if err != nil {
+		ui.autostartCheck.SetChecked(ui.autostartOrigState)
+		dialog.ShowError(err, ui.w)
+		return
+	}
+	ui.autostartOrigState = ui.autostartCheck.Checked
 }
 
 func (ui *settingsUI) startStatusRefresh() {
