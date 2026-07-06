@@ -107,6 +107,9 @@ type settingsUI struct {
 	accountStatus    *widget.Label
 	accountLoginBtn  *widget.Button
 	accountLogoutBtn *widget.Button
+	loginInProgress  bool
+	loginURL         string
+	loginEntry       *widget.Entry
 }
 
 func newSettingsUI(a fyne.App, ctrl AppController, log *slog.Logger) *settingsUI {
@@ -200,14 +203,23 @@ func (ui *settingsUI) createWidgets() {
 	ui.autostartStatus.Hide()
 
 	ui.accountStatus = widget.NewLabel("")
+	ui.loginEntry = widget.NewEntry()
+	ui.loginEntry.PlaceHolder = "Paste the callback URL here"
 	ui.accountLoginBtn = widget.NewButton("Login to Pixiv", func() {
+		ui.loginInProgress = true
+		ui.rebuildAccountPage()
 		go func() {
-			if err := ui.ctrl.LoginToPixiv(); err != nil {
+			url, err := ui.ctrl.BeginLogin()
+			if err != nil {
 				fyne.Do(func() {
 					dialog.ShowError(err, ui.w)
+					ui.loginInProgress = false
+					ui.rebuildAccountPage()
 				})
+				return
 			}
 			fyne.Do(func() {
+				ui.loginURL = url
 				ui.rebuildAccountPage()
 			})
 		}()

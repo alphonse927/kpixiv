@@ -28,6 +28,8 @@ type AppController interface {
 	PixivLoggedIn() bool
 	PixivUserName() string
 	LoginToPixiv() error
+	BeginLogin() (string, error)
+	FinishLogin(callbackCode string) error
 	LogoutFromPixiv() error
 	SchedulerRunning() bool
 	CurrentWallpaper() (*storage.ImageMeta, error)
