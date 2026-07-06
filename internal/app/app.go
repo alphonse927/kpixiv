@@ -21,14 +21,15 @@ import (
 const componentName = "app"
 
 type Controller struct {
-	cfg    *config.Config
-	st     *storage.Storage
-	sch    *scheduler.Scheduler
-	pixiv  *pixiv.Client
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.Mutex
-	paused bool
+	cfg          *config.Config
+	st           *storage.Storage
+	sch          *scheduler.Scheduler
+	pixiv        *pixiv.Client
+	ctx          context.Context
+	cancel       context.CancelFunc
+	mu           sync.Mutex
+	paused       bool
+	pendingLogin *pixiv.LoginFlow
 }
 
 const trayComponentName = "tray"
@@ -278,18 +279,44 @@ func (c *Controller) PixivUserName() string {
 	return c.pixiv.AuthUserName()
 }
 
-// LoginToPixiv starts the Pixiv account login flow from the tray.
-func (c *Controller) LoginToPixiv() error {
+// BeginLogin starts the Pixiv account login flow and returns the authorization URL.
+func (c *Controller) BeginLogin() (string, error) {
 	if c.pixiv == nil {
-		return fmt.Errorf("pixiv account actions are unavailable in dry-run mode")
+		return "", fmt.Errorf("pixiv account actions are unavailable in dry-run mode")
 	}
 
 	flow, err := c.pixiv.BeginLogin()
 	if err != nil {
+		return "", err
+	}
+
+	c.pendingLogin = flow
+	return flow.URL, nil
+}
+
+// FinishLogin completes the login flow with the callback code from Pixiv.
+func (c *Controller) FinishLogin(callbackCode string) error {
+	if c.pendingLogin == nil {
+		return fmt.Errorf("no login flow in progress")
+	}
+
+	_, err := c.pixiv.FinishLogin(c.ctx, c.pendingLogin.CodeVerifier, callbackCode)
+	c.pendingLogin = nil
+	if err != nil {
 		return err
 	}
 
-	if err = openExternal(flow.URL); err != nil {
+	return nil
+}
+
+// LoginToPixiv starts the Pixiv account login flow using desktop dialogs (kdialog/zenity).
+func (c *Controller) LoginToPixiv() error {
+	url, err := c.BeginLogin()
+	if err != nil {
+		return err
+	}
+
+	if err = openExternal(url); err != nil {
 		return fmt.Errorf("failed to open pixiv login page: %w", err)
 	}
 
@@ -303,12 +330,7 @@ func (c *Controller) LoginToPixiv() error {
 		return err
 	}
 
-	_, err = c.pixiv.FinishLogin(c.ctx, flow.CodeVerifier, code)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return c.FinishLogin(code)
 }
 
 // LogoutFromPixiv removes the stored Pixiv session.

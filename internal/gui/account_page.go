@@ -1,8 +1,11 @@
 package gui
 
 import (
+	"os/exec"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -32,9 +35,6 @@ func (ui *settingsUI) buildAccountPage() fyne.CanvasObject {
 
 func (ui *settingsUI) buildAccountAuthSection() fyne.CanvasObject {
 	bold := fyne.TextStyle{Bold: true}
-	label := func(text string) fyne.CanvasObject {
-		return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{})
-	}
 
 	loggedIn := ui.ctrl.PixivLoggedIn()
 
@@ -54,10 +54,57 @@ func (ui *settingsUI) buildAccountAuthSection() fyne.CanvasObject {
 		)
 	}
 
+	if ui.loginInProgress {
+		return ui.buildLoginForm()
+	}
+
 	return container.NewVBox(
 		widget.NewLabelWithStyle("Status", fyne.TextAlignLeading, bold),
-		label("Not connected"),
+		widget.NewLabel("Not connected"),
 		container.NewHBox(ui.accountLoginBtn),
+	)
+}
+
+func (ui *settingsUI) buildLoginForm() fyne.CanvasObject {
+	description := widget.NewLabel("To connect your Pixiv account:\n\n1. Click the link below to open the Pixiv login page in your browser\n2. Sign in to your Pixiv account\n3. Copy the final redirect URL from the address bar\n4. Paste it in the field below and click Submit")
+	description.Wrapping = fyne.TextWrapWord
+
+	openBtn := widget.NewButton("Open Pixiv Login Page", func() {
+		//nolint:gosec // URL is generated internally by the Pixiv client, not user input
+		exec.Command("xdg-open", ui.loginURL).Start()
+	})
+
+	ui.loginEntry.SetText("")
+
+	cancelBtn := widget.NewButton("Cancel", func() {
+		ui.loginInProgress = false
+		ui.rebuildAccountPage()
+	})
+
+	submitBtn := widget.NewButton("Submit", func() {
+		code := ui.loginEntry.Text
+		if code == "" {
+			return
+		}
+		go func() {
+			if err := ui.ctrl.FinishLogin(code); err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, ui.w)
+				})
+				return
+			}
+			fyne.Do(func() {
+				ui.loginInProgress = false
+				ui.rebuildAccountPage()
+			})
+		}()
+	})
+
+	return container.NewVBox(
+		description,
+		openBtn,
+		ui.loginEntry,
+		container.NewHBox(submitBtn, cancelBtn),
 	)
 }
 
