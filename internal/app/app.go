@@ -488,9 +488,14 @@ func (c *Controller) SyncBookmarks() error {
 // ShowSettingsWindow opens the settings window without blocking the tray.
 func (c *Controller) ShowSettingsWindow() error {
 	logger.WithComponent(componentName).Debug("Opening settings window")
+	gui.ShowSettings(c, gui.HomePage)
+	return nil
+}
 
-	gui.ShowSettings(c)
-
+// ShowAccountSettings opens the settings window at the Account tab.
+func (c *Controller) ShowAccountSettings() error {
+	logger.WithComponent(componentName).Debug("Opening settings window at account tab")
+	gui.ShowSettings(c, gui.AccountPage)
 	return nil
 }
 

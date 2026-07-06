@@ -24,6 +24,7 @@ type Controller interface {
 	OpenCurrentArtworkInPixiv() error
 	ExcludeCurrentWallpaper() error
 	ShowSettingsWindow() error
+	ShowAccountSettings() error
 	Shutdown()
 }
 
@@ -123,10 +124,9 @@ func onReady(appCtx context.Context, controller Controller) {
 					log.Debug("Rotation resumed")
 				}
 			case <-login.ClickedCh:
-				if err := controller.LoginToPixiv(); err != nil {
-					log.Warn("Failed to log in to Pixiv", "error", err)
+				if err := controller.ShowAccountSettings(); err != nil {
+					log.Warn("Failed to open account settings", "error", err)
 				}
-				updateAuthItems()
 			case <-logout.ClickedCh:
 				if err := controller.LogoutFromPixiv(); err != nil {
 					log.Warn("Failed to log out from Pixiv", "error", err)

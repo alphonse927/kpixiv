@@ -13,6 +13,13 @@ import (
 	"github.com/alphonse927/kpixiv/internal/storage"
 )
 
+const (
+	HomePage = iota
+	SettingsPage
+	AccountPage
+	AboutPage
+)
+
 type AppController interface {
 	Config() *config.Config
 	ApplyConfig(cfg *config.Config)
@@ -55,7 +62,7 @@ func Run(ctrl AppController, ctx context.Context, quitCh <-chan struct{}) {
 	a.Run()
 }
 
-func ShowSettings(ctrl AppController) {
+func ShowSettings(ctrl AppController, page int) {
 	if guiApp == nil {
 		return
 	}
@@ -63,5 +70,6 @@ func ShowSettings(ctrl AppController) {
 		settingsW.ctrl = ctrl
 		settingsW.update()
 		settingsW.show()
+		settingsW.selectPage(page)
 	})
 }
