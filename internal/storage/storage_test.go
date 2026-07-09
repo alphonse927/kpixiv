@@ -248,9 +248,14 @@ func TestSaveMetadataAddsImage(t *testing.T) {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
+	imgPath := filepath.Join(tmp, "some-image.jpg")
+	if err := os.WriteFile(imgPath, []byte("fake-image-data"), 0600); err != nil {
+		t.Fatalf("failed to create test image: %v", err)
+	}
+
 	meta := &ImageMeta{
 		ID:    "11111",
-		Path:  "/some/path.jpg",
+		Path:  imgPath,
 		Width: 1920,
 	}
 
@@ -274,8 +279,8 @@ func TestSaveMetadataAddsImage(t *testing.T) {
 	if !ok {
 		t.Error("GetImagePath() after AddImage: got false, want true")
 	}
-	if path != "/some/path.jpg" {
-		t.Errorf("GetImagePath() path: got %q, want %q", path, "/some/path.jpg")
+	if path != imgPath {
+		t.Errorf("GetImagePath() path: got %q, want %q", path, imgPath)
 	}
 
 	has, err = hasImage(s, "99999")

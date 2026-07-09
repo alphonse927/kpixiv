@@ -587,7 +587,7 @@ func (s *Storage) SaveMetadata(images map[string]*ImageMeta) error {
 	return os.WriteFile(s.MetadataPath(), data, 0600)
 }
 
-// GetImagePath returns an image path from metadata or ranking fallback.
+// GetImagePath returns an image path from metadata, ranking dir, or favorites dir.
 func (s *Storage) GetImagePath(id string) (string, bool) {
 	images, err := s.LoadMetadata()
 	if err != nil {
@@ -595,12 +595,18 @@ func (s *Storage) GetImagePath(id string) (string, bool) {
 	}
 
 	meta, exists := images[id]
-	if exists {
-		return meta.Path, true
+	if exists && meta.Path != "" {
+		if _, err := os.Stat(meta.Path); err == nil {
+			return meta.Path, true
+		}
 	}
 
-	// Falling back to the ranking directory
-	return s.findImageInRankingDir(id)
+	// Fall back to searching directories
+	if path, ok := s.findImageInRankingDir(id); ok {
+		return path, true
+	}
+
+	return s.findImageInFavoritesDir(id)
 }
 
 func (s *Storage) lookupImageMeta(id string) (*ImageMeta, bool) {
@@ -713,40 +719,22 @@ func (s *Storage) GetNextWallpaper() (string, error) {
 }
 
 func (s *Storage) findImageInRankingDir(id string) (string, bool) {
-	rankingDir := s.RankingDir()
+	return findImageInDir(s.RankingDir(), id)
+}
 
-	var foundPath string
-	err := filepath.Walk(rankingDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
+func (s *Storage) findImageInFavoritesDir(id string) (string, bool) {
+	return findImageInDir(s.FavoritesDir(), id)
+}
+
+func findImageInDir(dir, id string) (string, bool) {
+	for _, ext := range []string{".jpg", ".jpeg", ".png"} {
+		path := filepath.Join(dir, id+ext)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
 		}
-
-		if info == nil {
-			return nil
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		// Check if filename contains the image ID
-		filename := filepath.Base(path)
-		if filepath.Ext(filename) != "" {
-			nameWithoutExt := filename[:len(filename)-len(filepath.Ext(filename))]
-			if nameWithoutExt == id || filepath.Base(filepath.Dir(path)) == id {
-				foundPath = path
-				return filepath.SkipAll
-			}
-		}
-
-		return nil
-	})
-
-	if err != nil || foundPath == "" {
-		return "", false
 	}
 
-	return foundPath, true
+	return "", false
 }
 
 func (s *Storage) downloadFilename(id, sourcePath string, meta *ImageMeta) string {

@@ -268,21 +268,62 @@ func (sch *Scheduler) syncBookmarks(ctx context.Context, cname string) error {
 	return nil
 }
 
-func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue, cname string) error {
+func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) error {
 	log := logger.WithComponent(cname)
-	log.Debug("Queue empty, loading available images from Ranking folder")
+	queueSource := sch.cfg.Wallpaper.QueueSource
+	log.Debug("Queue empty, loading available images", "source", queueSource)
 
 	blacklist, err := sch.storage.LoadBlacklistSet()
 	if err != nil {
 		return fmt.Errorf("failed to load blacklist: %w", err)
 	}
 
-	entries, err := os.ReadDir(sch.storage.RankingDir())
-	if err != nil {
-		return fmt.Errorf("failed to read ranking directory: %w", err)
+	valid := make([]string, 0)
+	seen := make(map[string]bool)
+
+	switch queueSource {
+	case config.QueueSourceFavorites:
+		err = sch.collectImagesFromDir(sch.storage.FavoritesDir(), blacklist, seen, &valid)
+		if err != nil {
+			return fmt.Errorf("failed to read favorites directory: %w", err)
+		}
+	case config.QueueSourceRanking:
+		err = sch.collectImagesFromDir(sch.storage.RankingDir(), blacklist, seen, &valid)
+		if err != nil {
+			return fmt.Errorf("failed to read ranking directory: %w", err)
+		}
+	default:
+		err = sch.collectImagesFromDir(sch.storage.RankingDir(), blacklist, seen, &valid)
+		if err != nil {
+			return fmt.Errorf("failed to read ranking directory: %w", err)
+		}
+		err = sch.collectImagesFromDir(sch.storage.FavoritesDir(), blacklist, seen, &valid)
+		if err != nil {
+			return fmt.Errorf("failed to read favorites directory: %w", err)
+		}
 	}
 
-	valid := make([]string, 0)
+	if len(valid) == 0 {
+		return fmt.Errorf("no wallpapers found in storage")
+	}
+
+	if err = q.AppendRandom(valid); err != nil {
+		return fmt.Errorf("failed to append to queue: %w", err)
+	}
+
+	log.Debug("Loaded images into queue", "count", len(valid))
+	return nil
+}
+
+func (sch *Scheduler) collectImagesFromDir(dir string, blacklist map[string]struct{}, seen map[string]bool, valid *[]string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -294,21 +335,16 @@ func (sch *Scheduler) refillQueueFromRanking(q *storage.Queue, cname string) err
 		name := entry.Name()
 		ext := filepath.Ext(name)
 		id := strings.TrimSuffix(name, ext)
+		if seen[id] {
+			continue
+		}
 		if _, excluded := blacklist[id]; excluded {
 			continue
 		}
-		valid = append(valid, id)
+		seen[id] = true
+		*valid = append(*valid, id)
 	}
 
-	if len(valid) == 0 {
-		return fmt.Errorf("no wallpapers found in ranking folder")
-	}
-
-	if err = q.AppendRandom(valid); err != nil {
-		return fmt.Errorf("failed to append to queue: %w", err)
-	}
-
-	log.Debug("Loaded images into queue", "count", len(valid))
 	return nil
 }
 
@@ -391,7 +427,7 @@ func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 		attempts++
 
 		if q.IsEmpty() {
-			if err = sch.refillQueueFromRanking(q, cname); err != nil {
+			if err = sch.refillQueueFromStorage(q, cname); err != nil {
 				return err
 			}
 

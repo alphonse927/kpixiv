@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -233,6 +234,176 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+var queueCmd = &cobra.Command{
+	Use:   "queue",
+	Short: "Manage the wallpaper queue",
+}
+
+var queueFavoritesCmd = &cobra.Command{
+	Use:   "favorites",
+	Short: "Clear the queue and load images from the Favorites folder",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		st, err := storage.New("", cfg.DownloadPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize storage: %w", err)
+		}
+
+		q := storage.NewQueue(st.StateDir())
+		if err := q.Load(); err != nil {
+			return fmt.Errorf("failed to load queue: %w", err)
+		}
+
+		if err := q.Clear(); err != nil {
+			return fmt.Errorf("failed to clear queue: %w", err)
+		}
+
+		blacklist, err := st.LoadBlacklistSet()
+		if err != nil {
+			return fmt.Errorf("failed to load blacklist: %w", err)
+		}
+
+		ids := scanDirForImages(st.FavoritesDir(), blacklist)
+		if len(ids) == 0 {
+			fmt.Println("No images found in Favorites folder")
+			return nil
+		}
+
+		if err := q.AppendRandom(ids); err != nil {
+			return fmt.Errorf("failed to populate queue: %w", err)
+		}
+
+		fmt.Printf("Queue rebuilt: %d images loaded from Favorites\n", len(ids))
+		return nil
+	},
+}
+
+var queueRankingCmd = &cobra.Command{
+	Use:   "ranking",
+	Short: "Clear the queue and load images from the Ranking folder",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		st, err := storage.New("", cfg.DownloadPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize storage: %w", err)
+		}
+
+		q := storage.NewQueue(st.StateDir())
+		if err := q.Load(); err != nil {
+			return fmt.Errorf("failed to load queue: %w", err)
+		}
+
+		if err := q.Clear(); err != nil {
+			return fmt.Errorf("failed to clear queue: %w", err)
+		}
+
+		blacklist, err := st.LoadBlacklistSet()
+		if err != nil {
+			return fmt.Errorf("failed to load blacklist: %w", err)
+		}
+
+		ids := scanDirForImages(st.RankingDir(), blacklist)
+		if len(ids) == 0 {
+			fmt.Println("No images found in Ranking folder")
+			return nil
+		}
+
+		if err := q.AppendRandom(ids); err != nil {
+			return fmt.Errorf("failed to populate queue: %w", err)
+		}
+
+		fmt.Printf("Queue rebuilt: %d images loaded from Ranking\n", len(ids))
+		return nil
+	},
+}
+
+var queueAllCmd = &cobra.Command{
+	Use:   "all",
+	Short: "Clear the queue and load images from both Ranking and Favorites folders",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		st, err := storage.New("", cfg.DownloadPath)
+		if err != nil {
+			return fmt.Errorf("failed to initialize storage: %w", err)
+		}
+
+		q := storage.NewQueue(st.StateDir())
+		if err := q.Load(); err != nil {
+			return fmt.Errorf("failed to load queue: %w", err)
+		}
+
+		if err := q.Clear(); err != nil {
+			return fmt.Errorf("failed to clear queue: %w", err)
+		}
+
+		blacklist, err := st.LoadBlacklistSet()
+		if err != nil {
+			return fmt.Errorf("failed to load blacklist: %w", err)
+		}
+
+		rankingIDs := scanDirForImages(st.RankingDir(), blacklist)
+		favoritesIDs := scanDirForImages(st.FavoritesDir(), blacklist)
+
+		all := make([]string, 0, len(rankingIDs)+len(favoritesIDs))
+		seen := make(map[string]bool)
+		for _, id := range rankingIDs {
+			if !seen[id] {
+				all = append(all, id)
+				seen[id] = true
+			}
+		}
+		for _, id := range favoritesIDs {
+			if !seen[id] {
+				all = append(all, id)
+				seen[id] = true
+			}
+		}
+
+		if len(all) == 0 {
+			fmt.Println("No images found in Ranking or Favorites folders")
+			return nil
+		}
+
+		if err := q.AppendRandom(all); err != nil {
+			return fmt.Errorf("failed to populate queue: %w", err)
+		}
+
+		fmt.Printf("Queue rebuilt: %d images loaded from Ranking and Favorites\n", len(all))
+		return nil
+	},
+}
+
+func scanDirForImages(dir string, blacklist map[string]struct{}) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+
+	var ids []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil || info.Size() == 0 {
+			continue
+		}
+
+		id := strings.TrimSuffix(name, filepath.Ext(name))
+		if _, excluded := blacklist[id]; excluded {
+			continue
+		}
+
+		ids = append(ids, id)
+	}
+
+	return ids
+}
+
 var bookmarksCmd = &cobra.Command{
 	Use:   "bookmarks",
 	Short: "Manage Pixiv bookmarks",
@@ -394,7 +565,12 @@ func init() {
 	rootCmd.AddCommand(nextCmd)
 	rootCmd.AddCommand(daemonCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(queueCmd)
 	rootCmd.AddCommand(bookmarksCmd)
+
+	queueCmd.AddCommand(queueRankingCmd)
+	queueCmd.AddCommand(queueFavoritesCmd)
+	queueCmd.AddCommand(queueAllCmd)
 
 	bookmarksCmd.AddCommand(bookmarksSyncCmd)
 	bookmarksCmd.AddCommand(bookmarksListCmd)

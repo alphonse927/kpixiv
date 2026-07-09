@@ -64,6 +64,7 @@ func Default() *Config {
 		},
 		Wallpaper: WallpaperConfig{
 			Mode:          WallpaperFillMode,
+			QueueSource:   QueueSourceRanking,
 			HistoryLimit:  DefaultHistoryLimit,
 			SetInterval:   DefaultSetInterval,
 			FetchInterval: DefaultFetchInterval,
