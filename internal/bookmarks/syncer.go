@@ -88,9 +88,9 @@ func (s *Syncer) syncIncremental(ctx context.Context, remoteIDs map[string]struc
 		remoteIDs[img.ID] = struct{}{}
 	}
 
-	favoritesDir := s.storage.FavoritesDir()
+	bookmarksDir := s.storage.BookmarksDir()
 	pending, known, prevMeta := s.prepareDownloads(images)
-	downloaded := s.downloadAndSave(ctx, pending, favoritesDir, prevMeta)
+	downloaded := s.downloadAndSave(ctx, pending, bookmarksDir, prevMeta)
 
 	return &SyncResult{
 		Total:      len(images),
@@ -104,7 +104,7 @@ func (s *Syncer) syncFull(ctx context.Context, remoteIDs map[string]struct{}, la
 	log := logger.WithComponent("bookmarks")
 	log.Debug("Full bookmark sync", "resume", lastPageURL != "")
 
-	favoritesDir := s.storage.FavoritesDir()
+	bookmarksDir := s.storage.BookmarksDir()
 	result := &SyncResult{}
 	currentURL := lastPageURL
 
@@ -122,7 +122,7 @@ func (s *Syncer) syncFull(ctx context.Context, remoteIDs map[string]struct{}, la
 		result.Total += len(images)
 		result.Skipped += known
 
-		downloaded := s.downloadAndSave(ctx, pending, favoritesDir, prevMeta)
+		downloaded := s.downloadAndSave(ctx, pending, bookmarksDir, prevMeta)
 		result.Downloaded += downloaded
 		result.Failed += len(pending) - downloaded
 
@@ -164,15 +164,15 @@ func (s *Syncer) prepareDownloads(images []pixiv.Image) (pending []pixiv.Image, 
 		return images, 0, metadata
 	}
 
-	favoritesDir := s.storage.FavoritesDir()
+	bookmarksDir := s.storage.BookmarksDir()
 
 	var pend []pixiv.Image
 	knownCount := 0
 	for _, img := range images {
-		destPath := filepath.Join(favoritesDir, img.ID+".jpg")
-		altPath := filepath.Join(favoritesDir, img.ID+".png")
+		destPath := filepath.Join(bookmarksDir, img.ID+".jpg")
+		altPath := filepath.Join(bookmarksDir, img.ID+".png")
 
-		if meta, ok := metadata[img.ID]; ok && meta.Source == "favorites" {
+		if meta, ok := metadata[img.ID]; ok && meta.Source == "bookmarks" {
 			if _, err := os.Stat(meta.Path); err == nil {
 				knownCount++
 				continue
@@ -188,7 +188,7 @@ func (s *Syncer) prepareDownloads(images []pixiv.Image) (pending []pixiv.Image, 
 				Title:        img.Title,
 				Artist:       img.Artist,
 				ArtistID:     img.ArtistID,
-				Source:       "favorites",
+				Source:       "bookmarks",
 				DownloadedAt: time.Now(),
 			}
 			knownCount++
@@ -204,7 +204,7 @@ func (s *Syncer) prepareDownloads(images []pixiv.Image) (pending []pixiv.Image, 
 				Title:        img.Title,
 				Artist:       img.Artist,
 				ArtistID:     img.ArtistID,
-				Source:       "favorites",
+				Source:       "bookmarks",
 				DownloadedAt: time.Now(),
 			}
 			knownCount++
@@ -217,18 +217,18 @@ func (s *Syncer) prepareDownloads(images []pixiv.Image) (pending []pixiv.Image, 
 	return pend, knownCount, metadata
 }
 
-func (s *Syncer) downloadAndSave(ctx context.Context, pending []pixiv.Image, favoritesDir string, metadata map[string]*storage.ImageMeta) int {
+func (s *Syncer) downloadAndSave(ctx context.Context, pending []pixiv.Image, bookmarksDir string, metadata map[string]*storage.ImageMeta) int {
 	log := logger.WithComponent("bookmarks")
 
 	downloaded := 0
 	for _, img := range pending {
-		destPath := filepath.Join(favoritesDir, img.ID+".jpg")
+		destPath := filepath.Join(bookmarksDir, img.ID+".jpg")
 		if err := s.client.DownloadImage(ctx, &img, destPath); err != nil {
 			log.Warn("Failed to download bookmarked image", "id", img.ID, "error", err)
 			continue
 		}
 
-		finalPath, ok := downloadedImagePath(favoritesDir, img.ID)
+		finalPath, ok := downloadedImagePath(bookmarksDir, img.ID)
 		if !ok {
 			log.Warn("Download completed without a saved file", "id", img.ID)
 			continue
@@ -242,7 +242,7 @@ func (s *Syncer) downloadAndSave(ctx context.Context, pending []pixiv.Image, fav
 			Title:        img.Title,
 			Artist:       img.Artist,
 			ArtistID:     img.ArtistID,
-			Source:       "favorites",
+			Source:       "bookmarks",
 			DownloadedAt: time.Now(),
 		}
 		downloaded++
@@ -278,11 +278,11 @@ func (s *Syncer) cleanupRemoved(ctx context.Context, remoteIDs map[string]struct
 		return 0, err
 	}
 
-	favoritesDir := s.storage.FavoritesDir()
+	bookmarksDir := s.storage.BookmarksDir()
 	deleted := 0
 
 	for id, meta := range metadata {
-		if meta.Source != "favorites" {
+		if meta.Source != "bookmarks" {
 			continue
 		}
 		if _, stillBookmarked := remoteIDs[id]; stillBookmarked {
@@ -303,7 +303,7 @@ func (s *Syncer) cleanupRemoved(ctx context.Context, remoteIDs map[string]struct
 		deleted++
 	}
 
-	orphans, err := s.cleanupOrphanFiles(remoteIDs, favoritesDir, metadata)
+	orphans, err := s.cleanupOrphanFiles(remoteIDs, bookmarksDir, metadata)
 	if err != nil {
 		log.Warn("Failed to cleanup orphan files", "error", err)
 	}
@@ -312,8 +312,8 @@ func (s *Syncer) cleanupRemoved(ctx context.Context, remoteIDs map[string]struct
 	return deleted, nil
 }
 
-func (s *Syncer) cleanupOrphanFiles(remoteIDs map[string]struct{}, favoritesDir string, metadata map[string]*storage.ImageMeta) (int, error) {
-	entries, err := os.ReadDir(favoritesDir)
+func (s *Syncer) cleanupOrphanFiles(remoteIDs map[string]struct{}, bookmarksDir string, metadata map[string]*storage.ImageMeta) (int, error) {
+	entries, err := os.ReadDir(bookmarksDir)
 	if err != nil {
 		return 0, err
 	}
@@ -335,7 +335,7 @@ func (s *Syncer) cleanupOrphanFiles(remoteIDs map[string]struct{}, favoritesDir 
 			continue
 		}
 
-		path := filepath.Join(favoritesDir, name)
+		path := filepath.Join(bookmarksDir, name)
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			continue
 		}

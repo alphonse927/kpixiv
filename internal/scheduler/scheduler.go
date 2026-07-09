@@ -260,8 +260,8 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 	seen := make(map[string]bool)
 
 	switch queueSource {
-	case config.QueueSourceFavorites:
-		err = sch.collectImagesFromDir(sch.storage.FavoritesDir(), blacklist, seen, &valid)
+	case config.QueueSourceBookmarks:
+		err = sch.collectImagesFromDir(sch.storage.BookmarksDir(), blacklist, seen, &valid)
 		if err != nil {
 			return fmt.Errorf("failed to read favorites directory: %w", err)
 		}
@@ -275,7 +275,7 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 		if err != nil {
 			return fmt.Errorf("failed to read ranking directory: %w", err)
 		}
-		err = sch.collectImagesFromDir(sch.storage.FavoritesDir(), blacklist, seen, &valid)
+		err = sch.collectImagesFromDir(sch.storage.BookmarksDir(), blacklist, seen, &valid)
 		if err != nil {
 			return fmt.Errorf("failed to read favorites directory: %w", err)
 		}

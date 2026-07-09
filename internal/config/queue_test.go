@@ -10,7 +10,7 @@ func TestQueueSourceString(t *testing.T) {
 		expected string
 	}{
 		{QueueSourceRanking, QueueSourceStrRanking},
-		{QueueSourceFavorites, QueueSourceStrFavorites},
+		{QueueSourceBookmarks, QueueSourceStrBookmarks},
 		{QueueSourceAll, QueueSourceStrAll},
 		{QueueSource(99), QueueSourceStrRanking},
 	}

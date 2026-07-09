@@ -239,9 +239,10 @@ var queueCmd = &cobra.Command{
 	Short: "Manage the wallpaper queue",
 }
 
-var queueFavoritesCmd = &cobra.Command{
-	Use:   "favorites",
-	Short: "Clear the queue and load images from the Favorites folder",
+var queueBookmarksCmd = &cobra.Command{
+	Use:     "bookmarks",
+	Aliases: []string{"favorites"},
+	Short:   "Clear the queue and load images from the Bookmarks folder",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
@@ -262,9 +263,9 @@ var queueFavoritesCmd = &cobra.Command{
 			return fmt.Errorf("failed to load blacklist: %w", err)
 		}
 
-		ids := scanDirForImages(st.FavoritesDir(), blacklist)
+		ids := scanDirForImages(st.BookmarksDir(), blacklist)
 		if len(ids) == 0 {
-			fmt.Println("No images found in Favorites folder")
+			fmt.Println("No images found in Bookmarks folder")
 			return nil
 		}
 
@@ -276,7 +277,7 @@ var queueFavoritesCmd = &cobra.Command{
 			return fmt.Errorf("failed to populate queue: %w", err)
 		}
 
-		fmt.Printf("Queue rebuilt: %d images loaded from Favorites\n", len(ids))
+		fmt.Printf("Queue rebuilt: %d images loaded from Bookmarks\n", len(ids))
 		return nil
 	},
 }
@@ -321,7 +322,7 @@ var queueRankingCmd = &cobra.Command{
 
 var queueAllCmd = &cobra.Command{
 	Use:   "all",
-	Short: "Clear the queue and load images from both Ranking and Favorites folders",
+	Short: "Clear the queue and load images from both Ranking and Bookmarks folders",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
@@ -343,15 +344,15 @@ var queueAllCmd = &cobra.Command{
 		}
 
 		rankingIDs := scanDirForImages(st.RankingDir(), blacklist)
-		favoritesIDs := scanDirForImages(st.FavoritesDir(), blacklist)
+		bookmarksIDs := scanDirForImages(st.BookmarksDir(), blacklist)
 
-		if len(favoritesIDs) > 0 {
-			if err := st.AddBookmarks(favoritesIDs); err != nil {
+		if len(bookmarksIDs) > 0 {
+			if err := st.AddBookmarks(bookmarksIDs); err != nil {
 				return fmt.Errorf("failed to update bookmarks: %w", err)
 			}
 		}
 
-		all := make([]string, 0, len(rankingIDs)+len(favoritesIDs))
+		all := make([]string, 0, len(rankingIDs)+len(bookmarksIDs))
 		seen := make(map[string]bool)
 		for _, id := range rankingIDs {
 			if !seen[id] {
@@ -359,7 +360,7 @@ var queueAllCmd = &cobra.Command{
 				seen[id] = true
 			}
 		}
-		for _, id := range favoritesIDs {
+		for _, id := range bookmarksIDs {
 			if !seen[id] {
 				all = append(all, id)
 				seen[id] = true
@@ -367,7 +368,7 @@ var queueAllCmd = &cobra.Command{
 		}
 
 		if len(all) == 0 {
-			fmt.Println("No images found in Ranking or Favorites folders")
+			fmt.Println("No images found in Ranking or Bookmarks folders")
 			return nil
 		}
 
@@ -375,7 +376,7 @@ var queueAllCmd = &cobra.Command{
 			return fmt.Errorf("failed to populate queue: %w", err)
 		}
 
-		fmt.Printf("Queue rebuilt: %d images loaded from Ranking and Favorites\n", len(all))
+		fmt.Printf("Queue rebuilt: %d images loaded from Ranking and Bookmarks\n", len(all))
 		return nil
 	},
 }
@@ -579,7 +580,7 @@ func init() {
 	rootCmd.AddCommand(bookmarksCmd)
 
 	queueCmd.AddCommand(queueRankingCmd)
-	queueCmd.AddCommand(queueFavoritesCmd)
+	queueCmd.AddCommand(queueBookmarksCmd)
 	queueCmd.AddCommand(queueAllCmd)
 
 	bookmarksCmd.AddCommand(bookmarksSyncCmd)
