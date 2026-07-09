@@ -78,8 +78,8 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 		return nil, err
 	}
 
-	favoritesDir := filepath.Join(dataDir, "Favorites")
-	if err := os.MkdirAll(favoritesDir, 0750); err != nil {
+	bookmarksDir := filepath.Join(dataDir, "Bookmarks")
+	if err := os.MkdirAll(bookmarksDir, 0750); err != nil {
 		return nil, err
 	}
 
@@ -163,9 +163,9 @@ func (s *Storage) RankingDir() string {
 	return filepath.Join(s.dataDir, "Ranking")
 }
 
-// FavoritesDir returns the favorite image directory.
-func (s *Storage) FavoritesDir() string {
-	return filepath.Join(s.dataDir, "Favorites")
+// BookmarksDir returns the bookmark image directory.
+func (s *Storage) BookmarksDir() string {
+	return filepath.Join(s.dataDir, "Bookmarks")
 }
 
 // ThumbnailDir returns the thumbnail image directory.
@@ -514,17 +514,11 @@ func (s *Storage) AddBookmarks(ids []string) error {
 		return err
 	}
 
-	originalCount := len(bd.IDs)
 	all := make([]string, 0, len(bd.IDs)+len(ids))
 	all = append(all, bd.IDs...)
 	all = append(all, ids...)
 	bd.IDs = slices.Unique(all)
-
-	now := time.Now()
-	bd.LastUpdate = now
-	if len(bd.IDs) > originalCount {
-		bd.LastBookmark = now
-	}
+	bd.LastUpdate = time.Now()
 
 	data, err := json.MarshalIndent(bd, "", "  ")
 	if err != nil {
@@ -587,7 +581,7 @@ func (s *Storage) SaveMetadata(images map[string]*ImageMeta) error {
 	return os.WriteFile(s.MetadataPath(), data, 0600)
 }
 
-// GetImagePath returns an image path from metadata, ranking dir, or favorites dir.
+// GetImagePath returns an image path from metadata, ranking dir, or bookmarks dir.
 func (s *Storage) GetImagePath(id string) (string, bool) {
 	images, err := s.LoadMetadata()
 	if err != nil {
@@ -606,7 +600,7 @@ func (s *Storage) GetImagePath(id string) (string, bool) {
 		return path, true
 	}
 
-	return s.findImageInFavoritesDir(id)
+	return s.findImageInBookmarksDir(id)
 }
 
 func (s *Storage) lookupImageMeta(id string) (*ImageMeta, bool) {
@@ -722,8 +716,8 @@ func (s *Storage) findImageInRankingDir(id string) (string, bool) {
 	return findImageInDir(s.RankingDir(), id)
 }
 
-func (s *Storage) findImageInFavoritesDir(id string) (string, bool) {
-	return findImageInDir(s.FavoritesDir(), id)
+func (s *Storage) findImageInBookmarksDir(id string) (string, bool) {
+	return findImageInDir(s.BookmarksDir(), id)
 }
 
 func findImageInDir(dir, id string) (string, bool) {
@@ -842,7 +836,7 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 	removedCount := 0
 
 	for id, meta := range images {
-		if meta.Source == "favorites" {
+		if meta.Source == "bookmarks" {
 			continue
 		}
 

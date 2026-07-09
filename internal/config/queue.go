@@ -2,7 +2,7 @@ package config
 
 const (
 	QueueSourceStrRanking   = "ranking"
-	QueueSourceStrFavorites = "favorites"
+	QueueSourceStrBookmarks = "bookmarks"
 	QueueSourceStrAll       = "all"
 )
 
@@ -10,7 +10,7 @@ type QueueSource int
 
 const (
 	QueueSourceRanking QueueSource = iota
-	QueueSourceFavorites
+	QueueSourceBookmarks
 	QueueSourceAll
 )
 
@@ -19,8 +19,8 @@ func (q QueueSource) String() string {
 	switch q {
 	case QueueSourceRanking:
 		return QueueSourceStrRanking
-	case QueueSourceFavorites:
-		return QueueSourceStrFavorites
+	case QueueSourceBookmarks:
+		return QueueSourceStrBookmarks
 	case QueueSourceAll:
 		return QueueSourceStrAll
 	default:

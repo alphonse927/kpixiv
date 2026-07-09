@@ -26,7 +26,7 @@ const (
 	feedSourceDailyRanking   = "Daily Ranking"
 	feedSourceWeeklyRanking  = "Weekly Ranking"
 	feedSourceMonthlyRanking = "Monthly Ranking"
-	feedSourceFavorites      = "Favorites"
+	feedSourceBookmarks      = "Bookmarks"
 	feedSourceAll            = "All"
 )
 
@@ -182,7 +182,7 @@ func (ui *settingsUI) createWidgets() {
 		ui.rankingSub.Hide()
 	}
 
-	feedOptions := []string{feedSourceDailyRanking, feedSourceWeeklyRanking, feedSourceMonthlyRanking, feedSourceFavorites, feedSourceAll}
+	feedOptions := []string{feedSourceDailyRanking, feedSourceWeeklyRanking, feedSourceMonthlyRanking, feedSourceBookmarks, feedSourceAll}
 	ui.feedSource = widget.NewSelect(feedOptions, func(selected string) {
 		if selected == feedSourceAll {
 			ui.rankingSub.Show()
@@ -460,8 +460,8 @@ func (ui *settingsUI) applySettings() {
 	case feedSourceMonthlyRanking:
 		cfg.Pixiv.Ranking = config.RankingMonthlyMode
 		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
-	case feedSourceFavorites:
-		cfg.Wallpaper.QueueSource = config.QueueSourceFavorites
+	case feedSourceBookmarks:
+		cfg.Wallpaper.QueueSource = config.QueueSourceBookmarks
 	case feedSourceAll:
 		cfg.Wallpaper.QueueSource = config.QueueSourceAll
 		switch ui.rankingSub.Selected {
@@ -635,8 +635,8 @@ func (ui *settingsUI) formatNextRotation() string {
 
 func feedSourceDisplay(cfg *config.Config) string {
 	switch cfg.Wallpaper.QueueSource {
-	case config.QueueSourceFavorites:
-		return feedSourceFavorites
+	case config.QueueSourceBookmarks:
+		return feedSourceBookmarks
 	case config.QueueSourceAll:
 		return feedSourceAll
 	default:
@@ -668,7 +668,7 @@ func formatSource(source string, rank int) string {
 			return feedSourceMonthlyRanking + " (#" + strconv.Itoa(rank) + ")"
 		}
 		return feedSourceMonthlyRanking
-	case "favorites":
+	case "bookmarks":
 		return "Bookmarks"
 	default:
 		if source != "" {
