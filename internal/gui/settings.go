@@ -22,6 +22,20 @@ import (
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
+const (
+	feedSourceDailyRanking   = "Daily Ranking"
+	feedSourceWeeklyRanking  = "Weekly Ranking"
+	feedSourceMonthlyRanking = "Monthly Ranking"
+	feedSourceFavorites      = "Favorites"
+	feedSourceAll            = "All"
+)
+
+const (
+	rankingSubDaily   = "Daily"
+	rankingSubWeekly  = "Weekly"
+	rankingSubMonthly = "Monthly"
+)
+
 type numericalEntry struct {
 	widget.Entry
 }
@@ -84,7 +98,8 @@ type settingsUI struct {
 	fetchInterval *numericalEntry
 	historyLimit  *numericalEntry
 	cleanupDays   *numericalEntry
-	ranking       *widget.Select
+	feedSource    *widget.Select
+	rankingSub    *widget.Select
 	minWidth      *numericalEntry
 	minHeight     *numericalEntry
 	lockScreen    *widget.Check
@@ -153,8 +168,21 @@ func (ui *settingsUI) createWidgets() {
 	ui.cleanupDays = newNumericalEntry()
 	ui.cleanupDays.SetText(strconv.Itoa(cfg.Wallpaper.CleanupDays))
 
-	ui.ranking = widget.NewSelect([]string{"daily", "weekly", "monthly"}, nil)
-	ui.ranking.SetSelected(cfg.Pixiv.Ranking.String())
+	ui.rankingSub = widget.NewSelect([]string{rankingSubDaily, rankingSubWeekly, rankingSubMonthly}, nil)
+	ui.rankingSub.SetSelected(cfg.Pixiv.Ranking.String())
+	if cfg.Wallpaper.QueueSource != config.QueueSourceAll {
+		ui.rankingSub.Hide()
+	}
+
+	feedOptions := []string{feedSourceDailyRanking, feedSourceWeeklyRanking, feedSourceMonthlyRanking, feedSourceFavorites, feedSourceAll}
+	ui.feedSource = widget.NewSelect(feedOptions, func(selected string) {
+		if selected == feedSourceAll {
+			ui.rankingSub.Show()
+		} else {
+			ui.rankingSub.Hide()
+		}
+	})
+	ui.feedSource.SetSelected(feedSourceDisplay(cfg))
 
 	ui.minWidth = newNumericalEntry()
 	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
@@ -360,7 +388,13 @@ func (ui *settingsUI) update() {
 	ui.fetchInterval.SetText(strconv.Itoa(cfg.Wallpaper.FetchInterval))
 	ui.historyLimit.SetText(strconv.Itoa(cfg.Wallpaper.HistoryLimit))
 	ui.cleanupDays.SetText(strconv.Itoa(cfg.Wallpaper.CleanupDays))
-	ui.ranking.SetSelected(cfg.Pixiv.Ranking.String())
+	ui.feedSource.SetSelected(feedSourceDisplay(cfg))
+	ui.rankingSub.SetSelected(cfg.Pixiv.Ranking.String())
+	if cfg.Wallpaper.QueueSource == config.QueueSourceAll {
+		ui.rankingSub.Show()
+	} else {
+		ui.rankingSub.Hide()
+	}
 	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
 	ui.minHeight.SetText(strconv.Itoa(cfg.Pixiv.MinHeight))
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
@@ -406,13 +440,28 @@ func (ui *settingsUI) applySettings() {
 		cfg.Pixiv.MinHeight = v
 	}
 
-	switch ui.ranking.Selected {
-	case "weekly":
+	switch ui.feedSource.Selected {
+	case feedSourceWeeklyRanking:
 		cfg.Pixiv.Ranking = config.RankingWeeklyMode
-	case "monthly":
+		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
+	case feedSourceMonthlyRanking:
 		cfg.Pixiv.Ranking = config.RankingMonthlyMode
+		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
+	case feedSourceFavorites:
+		cfg.Wallpaper.QueueSource = config.QueueSourceFavorites
+	case feedSourceAll:
+		cfg.Wallpaper.QueueSource = config.QueueSourceAll
+		switch ui.rankingSub.Selected {
+		case rankingSubWeekly:
+			cfg.Pixiv.Ranking = config.RankingWeeklyMode
+		case rankingSubMonthly:
+			cfg.Pixiv.Ranking = config.RankingMonthlyMode
+		default:
+			cfg.Pixiv.Ranking = config.RankingDailyMode
+		}
 	default:
 		cfg.Pixiv.Ranking = config.RankingDailyMode
+		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
 	}
 
 	cfg.KDE.SetLockScreen = ui.lockScreen.Checked
@@ -571,23 +620,41 @@ func (ui *settingsUI) formatNextRotation() string {
 	return "Next change: in " + strconv.Itoa(secs) + "s"
 }
 
+func feedSourceDisplay(cfg *config.Config) string {
+	switch cfg.Wallpaper.QueueSource {
+	case config.QueueSourceFavorites:
+		return feedSourceFavorites
+	case config.QueueSourceAll:
+		return feedSourceAll
+	default:
+		switch cfg.Pixiv.Ranking {
+		case config.RankingWeeklyMode:
+			return feedSourceWeeklyRanking
+		case config.RankingMonthlyMode:
+			return feedSourceMonthlyRanking
+		default:
+			return feedSourceDailyRanking
+		}
+	}
+}
+
 func formatSource(source string, rank int) string {
 	switch source {
 	case "daily":
 		if rank > 0 {
-			return "Daily Ranking (#" + strconv.Itoa(rank) + ")"
+			return feedSourceDailyRanking + " (#" + strconv.Itoa(rank) + ")"
 		}
-		return "Daily Ranking"
+		return feedSourceDailyRanking
 	case "weekly":
 		if rank > 0 {
-			return "Weekly Ranking (#" + strconv.Itoa(rank) + ")"
+			return feedSourceWeeklyRanking + " (#" + strconv.Itoa(rank) + ")"
 		}
-		return "Weekly Ranking"
+		return feedSourceWeeklyRanking
 	case "monthly":
 		if rank > 0 {
-			return "Monthly Ranking (#" + strconv.Itoa(rank) + ")"
+			return feedSourceMonthlyRanking + " (#" + strconv.Itoa(rank) + ")"
 		}
-		return "Monthly Ranking"
+		return feedSourceMonthlyRanking
 	case "favorites":
 		return "Bookmarks"
 	default:

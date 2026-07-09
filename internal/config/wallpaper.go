@@ -24,6 +24,7 @@ func (w WallpaperMode) String() string {
 
 type WallpaperConfig struct {
 	Mode          WallpaperMode `yaml:"mode"`
+	QueueSource   QueueSource   `yaml:"queue_source"`
 	HistoryLimit  int           `yaml:"history_limit"`
 	SetInterval   int           `yaml:"set_interval"`
 	FetchInterval int           `yaml:"fetch_interval"`

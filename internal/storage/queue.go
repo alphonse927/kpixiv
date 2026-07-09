@@ -133,6 +133,15 @@ func (q *Queue) IsEmpty() bool {
 	return len(q.items) == 0
 }
 
+// Clear removes all items from the queue.
+func (q *Queue) Clear() error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	q.items = []string{}
+	return q.Save()
+}
+
 // Remove deletes all occurrences of an ID from the queue.
 func (q *Queue) Remove(item string) error {
 	q.mu.Lock()

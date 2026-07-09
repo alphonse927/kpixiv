@@ -63,7 +63,9 @@ func (ui *settingsUI) buildSettingsPage() fyne.CanvasObject {
 		container.NewPadded(
 			container.NewVBox(
 				section("Wallpaper Source"),
-				ui.ranking,
+				widget.NewLabel("Feed Source"),
+				ui.feedSource,
+				ui.rankingSub,
 			),
 		),
 		container.NewPadded(
