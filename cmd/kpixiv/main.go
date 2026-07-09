@@ -268,6 +268,10 @@ var queueFavoritesCmd = &cobra.Command{
 			return nil
 		}
 
+		if err := st.AddBookmarks(ids); err != nil {
+			return fmt.Errorf("failed to update bookmarks: %w", err)
+		}
+
 		if err := q.AppendRandom(ids); err != nil {
 			return fmt.Errorf("failed to populate queue: %w", err)
 		}
@@ -340,6 +344,12 @@ var queueAllCmd = &cobra.Command{
 
 		rankingIDs := scanDirForImages(st.RankingDir(), blacklist)
 		favoritesIDs := scanDirForImages(st.FavoritesDir(), blacklist)
+
+		if len(favoritesIDs) > 0 {
+			if err := st.AddBookmarks(favoritesIDs); err != nil {
+				return fmt.Errorf("failed to update bookmarks: %w", err)
+			}
+		}
 
 		all := make([]string, 0, len(rankingIDs)+len(favoritesIDs))
 		seen := make(map[string]bool)

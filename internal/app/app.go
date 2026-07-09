@@ -376,8 +376,14 @@ func (c *Controller) BookmarkCurrentArtwork() error {
 	if err != nil {
 		return err
 	}
+
 	if currentID == "" {
 		return fmt.Errorf("no current artwork")
+	}
+
+	if c.IsArtworkBookmarked() {
+		logger.WithComponent(componentName).Debug("artwork already bookmarked, skipping", "id", currentID)
+		return nil
 	}
 
 	logger.WithComponent(componentName).Debug("bookmarking current artwork on Pixiv", "id", currentID)
