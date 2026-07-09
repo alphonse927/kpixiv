@@ -93,16 +93,18 @@ type settingsUI struct {
 	currentPage   int
 	statusRefresh chan struct{}
 
-	downloadPath  *widget.Entry
-	setInterval   *numericalEntry
-	fetchInterval *numericalEntry
-	historyLimit  *numericalEntry
-	cleanupDays   *numericalEntry
-	feedSource    *widget.Select
-	rankingSub    *widget.Select
-	minWidth      *numericalEntry
-	minHeight     *numericalEntry
-	lockScreen    *widget.Check
+	downloadPath    *widget.Entry
+	setInterval     *numericalEntry
+	fetchInterval   *numericalEntry
+	historyLimit    *numericalEntry
+	cleanupDays     *numericalEntry
+	feedSource      *widget.Select
+	rankingSub      *widget.Select
+	rotationEnabled *widget.Check
+	fetchEnabled    *widget.Check
+	minWidth        *numericalEntry
+	minHeight       *numericalEntry
+	lockScreen      *widget.Check
 
 	bookmarksEnabled      *widget.Check
 	bookmarksSyncInterval *numericalEntry
@@ -167,6 +169,12 @@ func (ui *settingsUI) createWidgets() {
 
 	ui.cleanupDays = newNumericalEntry()
 	ui.cleanupDays.SetText(strconv.Itoa(cfg.Wallpaper.CleanupDays))
+
+	ui.rotationEnabled = widget.NewCheck("Enable Wallpaper Rotation", nil)
+	ui.rotationEnabled.SetChecked(cfg.Wallpaper.RotationEnabled)
+
+	ui.fetchEnabled = widget.NewCheck("Enable Ranking Fetch", nil)
+	ui.fetchEnabled.SetChecked(cfg.Wallpaper.FetchEnabled)
 
 	ui.rankingSub = widget.NewSelect([]string{rankingSubDaily, rankingSubWeekly, rankingSubMonthly}, nil)
 	ui.rankingSub.SetSelected(cfg.Pixiv.Ranking.String())
@@ -395,6 +403,8 @@ func (ui *settingsUI) update() {
 	} else {
 		ui.rankingSub.Hide()
 	}
+	ui.rotationEnabled.SetChecked(cfg.Wallpaper.RotationEnabled)
+	ui.fetchEnabled.SetChecked(cfg.Wallpaper.FetchEnabled)
 	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
 	ui.minHeight.SetText(strconv.Itoa(cfg.Pixiv.MinHeight))
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
@@ -431,6 +441,9 @@ func (ui *settingsUI) applySettings() {
 	if v, err := strconv.Atoi(ui.cleanupDays.Text); err == nil {
 		cfg.Wallpaper.CleanupDays = v
 	}
+
+	cfg.Wallpaper.RotationEnabled = ui.rotationEnabled.Checked
+	cfg.Wallpaper.FetchEnabled = ui.fetchEnabled.Checked
 
 	if v, err := strconv.Atoi(ui.minWidth.Text); err == nil {
 		cfg.Pixiv.MinWidth = v

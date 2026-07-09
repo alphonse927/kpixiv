@@ -28,7 +28,6 @@ type Controller struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.Mutex
-	paused       bool
 	pendingLogin *pixiv.LoginFlow
 }
 
@@ -153,26 +152,26 @@ func (c *Controller) NextWallpaper() error {
 	return nil
 }
 
-// PauseRotation pauses scheduled rotation and fetch ticks.
+// PauseRotation disables wallpaper rotation in the scheduler.
 func (c *Controller) PauseRotation() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.paused {
+	if !c.cfg.Wallpaper.RotationEnabled {
 		return
 	}
-	c.paused = true
-	c.sch.Pause()
+	c.cfg.Wallpaper.RotationEnabled = false
+	c.sch.ApplyConfig(c.cfg)
 }
 
-// ResumeRotation resumes scheduled rotation and fetch ticks.
+// ResumeRotation enables wallpaper rotation in the scheduler.
 func (c *Controller) ResumeRotation() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.paused {
+	if c.cfg.Wallpaper.RotationEnabled {
 		return
 	}
-	c.paused = false
-	c.sch.Resume()
+	c.cfg.Wallpaper.RotationEnabled = true
+	c.sch.ApplyConfig(c.cfg)
 }
 
 // OpenCurrentArtwork opens the currently active wallpaper in the system default app.

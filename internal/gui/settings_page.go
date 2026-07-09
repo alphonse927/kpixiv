@@ -33,9 +33,11 @@ func (ui *settingsUI) buildSettingsPage() fyne.CanvasObject {
 	intervals := sideBySide(
 		container.NewVBox(
 			field("Wallpaper Change (min)", ui.setInterval),
+			ui.rotationEnabled,
 		),
 		container.NewVBox(
 			field("Download New Images (min)", ui.fetchInterval),
+			ui.fetchEnabled,
 		),
 	)
 
