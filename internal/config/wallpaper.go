@@ -23,10 +23,12 @@ func (w WallpaperMode) String() string {
 }
 
 type WallpaperConfig struct {
-	Mode          WallpaperMode `yaml:"mode"`
-	QueueSource   QueueSource   `yaml:"queue_source"`
-	HistoryLimit  int           `yaml:"history_limit"`
-	SetInterval   int           `yaml:"set_interval"`
-	FetchInterval int           `yaml:"fetch_interval"`
-	CleanupDays   int           `yaml:"cleanup_days"`
+	Mode            WallpaperMode `yaml:"mode"`
+	QueueSource     QueueSource   `yaml:"queue_source"`
+	RotationEnabled bool          `yaml:"rotation_enabled"`
+	FetchEnabled    bool          `yaml:"fetch_enabled"`
+	HistoryLimit    int           `yaml:"history_limit"`
+	SetInterval     int           `yaml:"set_interval"`
+	FetchInterval   int           `yaml:"fetch_interval"`
+	CleanupDays     int           `yaml:"cleanup_days"`
 }

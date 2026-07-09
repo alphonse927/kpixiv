@@ -33,7 +33,6 @@ type Scheduler struct {
 	fetchInterval        time.Duration
 	bookmarkSyncInterval time.Duration
 	stopCh               chan struct{}
-	pauseCh              chan bool
 	resetSetCh           chan struct{}
 	resetFetchCh         chan struct{}
 	wg                   sync.WaitGroup
@@ -62,7 +61,6 @@ func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpap
 		sch.page = page
 	}
 
-	sch.pauseCh = make(chan bool, 1)
 	return sch
 }
 
@@ -99,35 +97,31 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 	bookmarkChan, cleanup := sch.newBookmarkTicker()
 	defer cleanup()
 
-	paused := false
-
 	for {
 		select {
 		case <-sch.stopCh:
 			logger.Info("Scheduler stopped")
 			return
-		case pause := <-sch.pauseCh:
-			paused = pause
 		case <-sch.resetSetCh:
 			resetTicker(setTicker, sch.setInterval)
 		case <-sch.resetFetchCh:
 			resetTicker(fetchTicker, sch.fetchInterval)
 		case <-setTicker.C:
-			if !paused {
+			if sch.cfg.Wallpaper.RotationEnabled {
 				log.Debug("Setting wallpaper")
 				if err := sch.rotateWallpaper(cname); err != nil {
 					log.Warn("Failed to set wallpaper", "error", err)
 				}
 			}
 		case <-fetchTicker.C:
-			if err := sch.fetchImages(ctx, cname); err != nil {
-				log.Warn("Fetch tick failed", "error", err)
+			if sch.cfg.Wallpaper.FetchEnabled {
+				if err := sch.fetchImages(ctx, cname); err != nil {
+					log.Warn("Fetch tick failed", "error", err)
+				}
 			}
 		case <-bookmarkChan:
-			if !paused {
-				if err := sch.syncBookmarks(ctx, cname); err != nil {
-					log.Warn("Bookmark sync tick failed", "error", err)
-				}
+			if err := sch.syncBookmarks(ctx, cname); err != nil {
+				log.Warn("Bookmark sync tick failed", "error", err)
 			}
 		case <-ctx.Done():
 			return
@@ -151,22 +145,6 @@ func resetTicker(ticker *time.Ticker, interval time.Duration) {
 			ticker.Reset(interval)
 			return
 		}
-	}
-}
-
-// Pause pauses scheduled wallpaper rotation.
-func (sch *Scheduler) Pause() {
-	select {
-	case sch.pauseCh <- true:
-	default:
-	}
-}
-
-// Resume resumes scheduled wallpaper rotation.
-func (sch *Scheduler) Resume() {
-	select {
-	case sch.pauseCh <- false:
-	default:
 	}
 }
 

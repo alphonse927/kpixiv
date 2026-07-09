@@ -73,8 +73,10 @@ func testConfig() *config.Config {
 			R18:       false,
 		},
 		Wallpaper: config.WallpaperConfig{
-			SetInterval:   60,
-			FetchInterval: 60,
+			SetInterval:     60,
+			FetchInterval:   60,
+			RotationEnabled: true,
+			FetchEnabled:    true,
 		},
 	}
 }
