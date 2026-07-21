@@ -70,10 +70,15 @@ func New(cfg *config.Config, dryRun bool, reset bool) (*Controller, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	sch := scheduler.New(cfg, st, client, setter)
+	if err = sch.RebuildQueue(); err != nil {
+		logger.WithComponent(componentName).Warn("Failed to rebuild queue after cleanup", "error", err)
+	}
+
 	return &Controller{
 		cfg:    cfg,
 		st:     st,
-		sch:    scheduler.New(cfg, st, client, setter),
+		sch:    sch,
 		setter: setter,
 		pixiv:  client,
 		ctx:    ctx,

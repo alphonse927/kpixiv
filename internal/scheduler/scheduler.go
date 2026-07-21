@@ -157,6 +157,7 @@ func (sch *Scheduler) ResetRotationTimer() {
 	if !running {
 		return
 	}
+
 	if err := sch.RebuildMonitorQueues(); err != nil {
 		logger.WithComponent("scheduler").Warn("Failed to rebuild monitor queues", "error", err)
 	}
@@ -439,6 +440,27 @@ func (sch *Scheduler) Stop(cname string) {
 
 	close(sch.stopCh)
 	sch.wg.Wait()
+}
+
+// RebuildQueue clears the queue and refills it from available images.
+func (sch *Scheduler) RebuildQueue() error {
+	log := logger.WithComponent(componentName)
+
+	q := storage.NewQueue(sch.storage.StateDir())
+	if err := q.Load(); err != nil {
+		return fmt.Errorf("failed to load queue: %w", err)
+	}
+
+	if err := q.Clear(); err != nil {
+		return fmt.Errorf("failed to clear queue: %w", err)
+	}
+
+	if err := sch.refillQueueFromStorage(q, componentName); err != nil {
+		log.Debug("Queue rebuild: no images available", "error", err)
+	}
+
+	log.Debug("Queue rebuilt", "count", q.Len())
+	return nil
 }
 
 // SetNextWallpaper applies the next wallpaper from the queue and updates history.
@@ -772,24 +794,29 @@ func (sch *Scheduler) RebuildMonitorQueues() error {
 	if !sch.cfg.Wallpaper.MultiMonitorEnabled {
 		return nil
 	}
+
 	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
 	if !ok {
 		return nil
 	}
+
 	screens, err := monitorSetter.Screens()
 	if err != nil {
 		return err
 	}
+
 	for _, screen := range screens {
 		q := storage.NewMonitorQueue(sch.storage.StateDir(), screen.ID)
-		if err := q.Load(); err != nil {
+		if err = q.Load(); err != nil {
 			return err
 		}
-		if err := q.SetOrientation(sch.monitorOrientation(screen.ID).String()); err != nil {
+
+		if err = q.SetOrientation(sch.monitorOrientation(screen.ID).String()); err != nil {
 			return err
 		}
+
 		if q.IsEmpty() {
-			if err := sch.refillQueueFromStorage(q, "scheduler"); err != nil {
+			if err = sch.refillQueueFromStorage(q, "scheduler"); err != nil {
 				return fmt.Errorf("screen %s: %w", screen.ID, err)
 			}
 		}
