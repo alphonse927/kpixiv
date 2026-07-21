@@ -731,29 +731,19 @@ func (s *Storage) GetCurrentWallpaper() (string, error) {
 	return history.Current, nil
 }
 
-// GetNextWallpaper returns the next wallpaper ID from history order.
+// GetNextWallpaper returns the next wallpaper ID from the queue.
 func (s *Storage) GetNextWallpaper() (string, error) {
-	history, err := s.LoadHistory()
-	if err != nil {
+	q := NewQueue(s.stateDir)
+	if err := q.Load(); err != nil {
 		return "", err
 	}
 
-	currentIdx := -1
-	for i, img := range history.Images {
-		if img == history.Current {
-			currentIdx = i
-			break
-		}
-	}
-
-	if currentIdx < 0 || currentIdx >= len(history.Images)-1 {
-		if len(history.Images) > 0 {
-			return history.Images[0], nil
-		}
+	nextID, ok := q.Peek()
+	if !ok {
 		return "", nil
 	}
 
-	return history.Images[currentIdx+1], nil
+	return nextID, nil
 }
 
 func (s *Storage) findImageInRankingDir(id string) (string, bool) {
@@ -862,6 +852,10 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (int, error) {
 		return 0, err
 	}
 
+	if err = s.cleanupQueue(removedIDs); err != nil {
+		return removedFromMetadata + removedFromRanking, err
+	}
+
 	return removedFromMetadata + removedFromRanking, nil
 }
 
@@ -959,4 +953,23 @@ func (s *Storage) cleanupHistory(removedIDs map[string]struct{}) error {
 	}
 
 	return s.SaveHistory(history)
+}
+
+func (s *Storage) cleanupQueue(removedIDs map[string]struct{}) error {
+	q := NewQueue(s.stateDir)
+	if err := q.Load(); err != nil {
+		return err
+	}
+
+	if q.IsEmpty() {
+		return nil
+	}
+
+	for id := range removedIDs {
+		if err := q.Remove(id); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
