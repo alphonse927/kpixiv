@@ -522,6 +522,15 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 	return nil
 }
 
+func (sch *Scheduler) rotateWallpaper(cname string) error {
+	q := storage.NewQueue(sch.storage.StateDir())
+	if err := q.Load(); err != nil {
+		return fmt.Errorf("failed to load queue: %w", err)
+	}
+
+	return sch.SetNextWallpaper(q, cname)
+}
+
 func selectTargetWallpaperID(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, currentID, nextID string) string {
 	for _, candidateID := range []string{currentID, nextID} {
 		if wallpaperAvailable(images, blacklist, candidateID) {
@@ -533,6 +542,7 @@ func selectTargetWallpaperID(images map[string]*storage.ImageMeta, blacklist map
 		if _, excluded := blacklist[id]; excluded {
 			continue
 		}
+
 		if meta.Path != "" {
 			return id
 		}
@@ -552,13 +562,4 @@ func wallpaperAvailable(images map[string]*storage.ImageMeta, blacklist map[stri
 
 	_, ok := images[id]
 	return ok
-}
-
-func (sch *Scheduler) rotateWallpaper(cname string) error {
-	q := storage.NewQueue(sch.storage.StateDir())
-	if err := q.Load(); err != nil {
-		return fmt.Errorf("failed to load queue: %w", err)
-	}
-
-	return sch.SetNextWallpaper(q, cname)
 }

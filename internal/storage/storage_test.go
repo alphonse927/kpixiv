@@ -530,80 +530,65 @@ func TestGetNextWallpaper(t *testing.T) {
 		t.Fatalf("GetNextWallpaper() returned error: %v", err)
 	}
 	if next != "" {
-		t.Errorf("GetNextWallpaper() with no history: got %q, want empty", next)
+		t.Errorf("GetNextWallpaper() with empty queue: got %q, want empty", next)
 	}
 
-	history := &History{
-		Current:   "BBBBB",
-		Images:    []string{"AAAAA", "BBBBB", "CCCCC", "DDDDD"},
-		UpdatedAt: time.Now(),
+	q := NewQueue(s.stateDir)
+	if err := q.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
 	}
-
-	if err = s.SaveHistory(history); err != nil {
-		t.Fatalf("SaveHistory() returned error: %v", err)
+	if err := q.AppendRandom([]string{"AAAAA"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
 	}
 
 	next, err = s.GetNextWallpaper()
 	if err != nil {
 		t.Fatalf("GetNextWallpaper() returned error: %v", err)
 	}
-	if next != "CCCCC" {
-		t.Errorf("GetNextWallpaper() at position 1: got %q, want %q", next, "CCCCC")
+	if next != "AAAAA" {
+		t.Errorf("GetNextWallpaper() with one item: got %q, want %q", next, "AAAAA")
 	}
 
-	if err = s.AddToHistoryWithLimit("CCCCC", 50); err != nil {
-		t.Fatalf("AddToHistory() returned error: %v", err)
-	}
-	next, err = s.GetNextWallpaper()
-	if err != nil {
-		t.Fatalf("GetNextWallpaper() returned error: %v", err)
-	}
-	if next != "DDDDD" {
-		t.Errorf("GetNextWallpaper() at position 2: got %q, want %q", next, "DDDDD")
+	peek, ok := q.Peek()
+	if !ok || peek != "AAAAA" {
+		t.Errorf("GetNextWallpaper() modified queue: Peek() = %q, %v, want %q, true", peek, ok, "AAAAA")
 	}
 }
 
-func TestGetNextWallpaperAtCurrent(t *testing.T) {
+func TestGetNextWallpaperMultipleItems(t *testing.T) {
 	tmp := t.TempDir()
 	s, err := New(tmp, tmp)
 	if err != nil {
 		t.Fatalf("New() returned error: %v", err)
 	}
 
-	history := &History{
-		Current:   "AAAAA",
-		Images:    []string{"AAAAA", "BBBBB", "CCCCC"},
-		UpdatedAt: time.Now(),
+	q := NewQueue(s.stateDir)
+	if err := q.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
 	}
-
-	if err = s.SaveHistory(history); err != nil {
-		t.Fatalf("SaveHistory() returned error: %v", err)
+	if err := q.AppendRandom([]string{"AAAAA", "BBBBB", "CCCCC"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
 	}
 
 	next, err := s.GetNextWallpaper()
 	if err != nil {
 		t.Fatalf("GetNextWallpaper() returned error: %v", err)
 	}
-	if next != "BBBBB" {
-		t.Errorf("GetNextWallpaper() at last item: got %q, want %q", next, "BBBBB")
+	if next == "" {
+		t.Fatal("GetNextWallpaper() with items: got empty, want non-empty")
+	}
+
+	peek, _ := q.Peek()
+	if next != peek {
+		t.Errorf("GetNextWallpaper() returned %q but queue Peek() shows %q", next, peek)
 	}
 }
 
-func TestGetNextWallpaperEmptyHistory(t *testing.T) {
+func TestGetNextWallpaperEmptyQueue(t *testing.T) {
 	tmp := t.TempDir()
 	s, err := New(tmp, tmp)
 	if err != nil {
 		t.Fatalf("New() returned error: %v", err)
-	}
-
-	history := &History{
-		Current:   "",
-		Images:    []string{},
-		UpdatedAt: time.Now(),
-	}
-
-	if err = s.SaveHistory(history); err != nil {
-		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
 	next, err := s.GetNextWallpaper()
@@ -611,7 +596,7 @@ func TestGetNextWallpaperEmptyHistory(t *testing.T) {
 		t.Fatalf("GetNextWallpaper() returned error: %v", err)
 	}
 	if next != "" {
-		t.Errorf("GetNextWallpaper() with empty history: got %q, want empty", next)
+		t.Errorf("GetNextWallpaper() with empty queue: got %q, want empty", next)
 	}
 }
 
