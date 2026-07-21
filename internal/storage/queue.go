@@ -18,7 +18,6 @@ type Queue struct {
 	path        string
 	monitorID   string
 	orientation string
-	monitors    map[string]MonitorQueueData
 }
 
 type QueueData struct {
@@ -28,27 +27,26 @@ type QueueData struct {
 
 type MonitorQueueData struct {
 	Items       []string `json:"items"`
-	Orientation string   `json:"orientation"`
+	Orientation string   `json:"orientation,omitempty"`
 }
 
-// NewQueue creates a queue persisted in the provided state directory.
+// NewQueue creates a queue persisted in queue.json.
 func NewQueue(stateDir string) *Queue {
 	path := filepath.Join(stateDir, "queue.json")
 	return &Queue{
-		items:    []string{},
-		path:     path,
-		monitors: map[string]MonitorQueueData{},
+		items: []string{},
+		path:  path,
 	}
 }
 
-// NewMonitorQueue creates a queue stored in queue.json for one monitor.
+// NewMonitorQueue creates a queue for one screen within the shared queue.json.
 func NewMonitorQueue(stateDir, monitorID string) *Queue {
 	q := NewQueue(stateDir)
 	q.monitorID = monitorID
 	return q
 }
 
-// Load reads queue contents from disk.
+// Load reads queue contents from the disk.
 func (q *Queue) Load() error {
 	data, err := os.ReadFile(q.path)
 	if err != nil {
@@ -63,35 +61,70 @@ func (q *Queue) Load() error {
 		return err
 	}
 
-	q.monitors = qd.Monitors
-	if q.monitors == nil {
-		q.monitors = map[string]MonitorQueueData{}
-	}
 	if q.monitorID == "" {
 		q.items = qd.Items
-	} else {
-		monitor := q.monitors[q.monitorID]
-		q.items = monitor.Items
-		q.orientation = monitor.Orientation
+	} else if sub, ok := qd.Monitors[q.monitorID]; ok {
+		q.items = sub.Items
+		q.orientation = sub.Orientation
 	}
+
 	return nil
 }
 
 // Save writes queue contents to disk.
 func (q *Queue) Save() error {
-	queueData := QueueData{Monitors: q.monitors}
-	if q.monitorID == "" {
-		queueData.Items = q.items
-	} else {
-		queueData.Items = nil
-		queueData.Monitors[q.monitorID] = MonitorQueueData{Items: q.items, Orientation: q.orientation}
-	}
-	data, err := json.MarshalIndent(queueData, "", "  ")
+	qd := q.buildQueueData()
+
+	data, err := json.MarshalIndent(qd, "", "  ")
 	if err != nil {
 		return err
 	}
 
 	return os.WriteFile(q.path, data, 0600)
+}
+
+func (q *Queue) buildQueueData() QueueData {
+	if existing := q.mergeIntoExisting(); existing != nil {
+		return *existing
+	}
+
+	return q.freshQueueData()
+}
+
+func (q *Queue) mergeIntoExisting() *QueueData {
+	data, readErr := os.ReadFile(q.path)
+	if readErr != nil {
+		return nil
+	}
+
+	var existing QueueData
+	if err := json.Unmarshal(data, &existing); err != nil {
+		return nil
+	}
+
+	if existing.Monitors == nil {
+		existing.Monitors = map[string]MonitorQueueData{}
+	}
+
+	if q.monitorID == "" {
+		existing.Items = q.items
+	} else {
+		existing.Monitors[q.monitorID] = MonitorQueueData{Items: q.items, Orientation: q.orientation}
+	}
+
+	return &existing
+}
+
+func (q *Queue) freshQueueData() QueueData {
+	if q.monitorID == "" {
+		return QueueData{Items: q.items}
+	}
+
+	return QueueData{
+		Monitors: map[string]MonitorQueueData{
+			q.monitorID: {Items: q.items, Orientation: q.orientation},
+		},
+	}
 }
 
 // Orientation returns the orientation used to build this monitor queue.

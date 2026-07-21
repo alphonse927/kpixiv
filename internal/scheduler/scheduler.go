@@ -158,10 +158,6 @@ func (sch *Scheduler) ResetRotationTimer() {
 		return
 	}
 
-	if err := sch.RebuildMonitorQueues(); err != nil {
-		logger.WithComponent("scheduler").Warn("Failed to rebuild monitor queues", "error", err)
-	}
-
 	select {
 	case sch.resetSetCh <- struct{}{}:
 	default:
@@ -413,6 +409,12 @@ func (sch *Scheduler) ApplyConfig(cfg *config.Config) {
 
 	if !running {
 		return
+	}
+
+	if sch.cfg.Wallpaper.MultiMonitorEnabled {
+		if err := sch.RebuildMonitorQueues(); err != nil {
+			logger.WithComponent("scheduler").Warn("Failed to rebuild monitor queues", "error", err)
+		}
 	}
 
 	select {
