@@ -563,10 +563,10 @@ func TestGetNextWallpaper(t *testing.T) {
 	}
 
 	q := NewQueue(s.stateDir)
-	if err := q.Load(); err != nil {
+	if err = q.Load(); err != nil {
 		t.Fatalf("Load() returned error: %v", err)
 	}
-	if err := q.AppendRandom([]string{"AAAAA"}); err != nil {
+	if err = q.AppendRandom([]string{"AAAAA"}); err != nil {
 		t.Fatalf("AppendRandom() returned error: %v", err)
 	}
 
@@ -592,10 +592,10 @@ func TestGetNextWallpaperMultipleItems(t *testing.T) {
 	}
 
 	q := NewQueue(s.stateDir)
-	if err := q.Load(); err != nil {
+	if err = q.Load(); err != nil {
 		t.Fatalf("Load() returned error: %v", err)
 	}
-	if err := q.AppendRandom([]string{"AAAAA", "BBBBB", "CCCCC"}); err != nil {
+	if err = q.AppendRandom([]string{"AAAAA", "BBBBB", "CCCCC"}); err != nil {
 		t.Fatalf("AppendRandom() returned error: %v", err)
 	}
 
