@@ -390,6 +390,27 @@ func (sch *Scheduler) Stop(cname string) {
 	sch.wg.Wait()
 }
 
+// RebuildQueue clears the queue and refills it from available images.
+func (sch *Scheduler) RebuildQueue() error {
+	log := logger.WithComponent(componentName)
+
+	q := storage.NewQueue(sch.storage.StateDir())
+	if err := q.Load(); err != nil {
+		return fmt.Errorf("failed to load queue: %w", err)
+	}
+
+	if err := q.Clear(); err != nil {
+		return fmt.Errorf("failed to clear queue: %w", err)
+	}
+
+	if err := sch.refillQueueFromStorage(q, componentName); err != nil {
+		log.Debug("Queue rebuild: no images available", "error", err)
+	}
+
+	log.Debug("Queue rebuilt", "count", q.Len())
+	return nil
+}
+
 // SetNextWallpaper applies the next wallpaper from the queue and updates history.
 func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 	log := logger.WithComponent(cname)
