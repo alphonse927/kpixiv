@@ -24,11 +24,13 @@ type Controller struct {
 	cfg          *config.Config
 	st           *storage.Storage
 	sch          *scheduler.Scheduler
+	setter       wallpaper.Setter
 	pixiv        *pixiv.Client
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.Mutex
 	pendingLogin *pixiv.LoginFlow
+	rebuildMenu  func()
 }
 
 const trayComponentName = "tray"
@@ -72,10 +74,54 @@ func New(cfg *config.Config, dryRun bool, reset bool) (*Controller, error) {
 		cfg:    cfg,
 		st:     st,
 		sch:    scheduler.New(cfg, st, client, setter),
+		setter: setter,
 		pixiv:  client,
 		ctx:    ctx,
 		cancel: cancel,
 	}, nil
+}
+
+// Monitors returns the screens currently reported by the desktop provider.
+func (c *Controller) Monitors() ([]wallpaper.Screen, error) {
+	setter, ok := c.setter.(wallpaper.MonitorSetter)
+	if !ok {
+		return nil, fmt.Errorf("wallpaper provider does not support monitor discovery")
+	}
+	return setter.Screens()
+}
+
+// MonitorWallpapers returns the currently remembered wallpaper for each
+// active screen.
+func (c *Controller) MonitorWallpapers() (map[string]*storage.ImageMeta, error) {
+	screens, err := c.Monitors()
+	if err != nil {
+		return nil, err
+	}
+
+	monitors, err := c.st.LoadMonitorHistory()
+	if err != nil {
+		return nil, err
+	}
+
+	metadata, err := c.st.LoadMetadata()
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]*storage.ImageMeta)
+	globalID, _ := c.st.GetCurrentWallpaper() //nolint:errcheck // monitor status has a best-effort fallback
+	for _, screen := range screens {
+		id := monitors[screen.ID]
+		if id == "" {
+			id = globalID
+		}
+		if id != "" {
+			if meta, ok := metadata[id]; ok {
+				result[screen.ID] = meta
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // Start starts the scheduler and applies or bootstraps the current wallpaper.
@@ -139,12 +185,18 @@ func (c *Controller) generateMissingThumbnails(images map[string]*storage.ImageM
 
 // NextWallpaper applies the next wallpaper from the persisted queue.
 func (c *Controller) NextWallpaper() error {
-	sq := storage.NewQueue(c.st.StateDir())
-	if err := sq.Load(); err != nil {
-		return fmt.Errorf("failed to load queue: %w", err)
+	var setErr error
+	if c.cfg.Wallpaper.MultiMonitorEnabled {
+		setErr = c.sch.SetNextWallpapers(trayComponentName)
+	} else {
+		sq := storage.NewQueue(c.st.StateDir())
+		if err := sq.Load(); err != nil {
+			return fmt.Errorf("failed to load queue: %w", err)
+		}
+		setErr = c.sch.SetNextWallpaper(sq, trayComponentName)
 	}
 
-	if err := c.sch.SetNextWallpaper(sq, trayComponentName); err != nil {
+	if err := setErr; err != nil {
 		return err
 	}
 
@@ -174,24 +226,40 @@ func (c *Controller) ResumeRotation() {
 	c.sch.ApplyConfig(c.cfg)
 }
 
+// OpenWallpaperFile opens the wallpaper file for the given artwork ID in the default app.
+func (c *Controller) OpenWallpaperFile(artworkID string) error {
+	if artworkID == "" {
+		return fmt.Errorf("no artwork ID provided")
+	}
+	path, ok := c.st.GetImagePath(artworkID)
+	if !ok {
+		return fmt.Errorf("artwork not found on disk")
+	}
+	//nolint:gosec // xdg-open is intentionally used with a local filesystem path.
+	return exec.Command("xdg-open", path).Start()
+}
+
 // OpenCurrentArtwork opens the currently active wallpaper in the system default app.
 func (c *Controller) OpenCurrentArtwork() error {
 	currentID, err := c.st.GetCurrentWallpaper()
 	if err != nil {
 		return err
 	}
-
 	if currentID == "" {
 		return fmt.Errorf("no current artwork")
 	}
+	return c.OpenWallpaperFile(currentID)
+}
 
-	path, ok := c.st.GetImagePath(currentID)
-	if !ok {
-		return fmt.Errorf("current artwork not found on disk")
+// OpenWallpaperInPixiv opens the Pixiv page for the given artwork ID.
+func (c *Controller) OpenWallpaperInPixiv(artworkID string) error {
+	if artworkID == "" {
+		return fmt.Errorf("no artwork ID provided")
 	}
-
-	//nolint:gosec // xdg-open is intentionally used with a local filesystem path.
-	return exec.Command("xdg-open", path).Start()
+	url := fmt.Sprintf("https://www.pixiv.net/artworks/%s", artworkID)
+	logger.WithComponent(componentName).Debug("opening artwork in Pixiv", "id", artworkID, "url", url)
+	//nolint:gosec // url is constructed from a trusted internal ID.
+	return exec.Command("xdg-open", url).Start()
 }
 
 // OpenCurrentArtworkInPixiv opens the current artwork's Pixiv page in the browser.
@@ -203,25 +271,15 @@ func (c *Controller) OpenCurrentArtworkInPixiv() error {
 	if currentID == "" {
 		return fmt.Errorf("no current artwork")
 	}
-
-	url := fmt.Sprintf("https://www.pixiv.net/artworks/%s", currentID)
-	logger.WithComponent(componentName).Debug("opening artwork in Pixiv", "id", currentID, "url", url)
-
-	//nolint:gosec // url is constructed from a trusted internal ID.
-	return exec.Command("xdg-open", url).Start()
+	return c.OpenWallpaperInPixiv(currentID)
 }
 
-// ExcludeCurrentWallpaper blacklists the current wallpaper, deletes the file, and switches to another one.
-func (c *Controller) ExcludeCurrentWallpaper() error {
+// ExcludeWallpaper blacklists an artwork, deletes its file, and switches to the next one.
+func (c *Controller) ExcludeWallpaper(artworkID string) error {
 	log := logger.WithComponent("app")
 
-	currentID, err := c.st.GetCurrentWallpaper()
-	if err != nil {
-		return err
-	}
-
-	if currentID == "" {
-		return fmt.Errorf("no current artwork")
+	if artworkID == "" {
+		return fmt.Errorf("no artwork ID provided")
 	}
 
 	metadata, err := c.st.LoadMetadata()
@@ -229,39 +287,54 @@ func (c *Controller) ExcludeCurrentWallpaper() error {
 		return fmt.Errorf("failed to load metadata: %w", err)
 	}
 
-	if meta, ok := metadata[currentID]; ok {
+	if meta, ok := metadata[artworkID]; ok {
 		if rErr := os.Remove(meta.Path); rErr != nil && !os.IsNotExist(rErr) {
-			log.Warn("Failed to delete excluded wallpaper file", "id", currentID, "path", meta.Path, "error", rErr)
+			log.Warn("Failed to delete excluded wallpaper file", "id", artworkID, "path", meta.Path, "error", rErr)
 		} else {
-			log.Debug("Deleted excluded wallpaper file", "id", currentID, "path", meta.Path)
+			log.Debug("Deleted excluded wallpaper file", "id", artworkID, "path", meta.Path)
 		}
-
-		delete(metadata, currentID)
-
+		delete(metadata, artworkID)
 		if sErr := c.st.SaveMetadata(metadata); sErr != nil {
 			log.Warn("Failed to save metadata after exclusion", "error", sErr)
 		}
 	}
 
-	if err = c.st.ExcludeWallpaper(currentID); err != nil {
-		return fmt.Errorf("failed to exclude current artwork: %w", err)
+	if err = c.st.ExcludeWallpaper(artworkID); err != nil {
+		return fmt.Errorf("failed to exclude artwork: %w", err)
 	}
 
 	q := storage.NewQueue(c.st.StateDir())
 	if err = q.Load(); err != nil {
-		return fmt.Errorf("excluded current artwork, but failed to load queue: %w", err)
+		return fmt.Errorf("excluded artwork, but failed to load queue: %w", err)
+	}
+	if err = q.Remove(artworkID); err != nil {
+		return fmt.Errorf("excluded artwork, but failed to update queue: %w", err)
 	}
 
-	if err = q.Remove(currentID); err != nil {
-		return fmt.Errorf("excluded current artwork, but failed to update queue: %w", err)
-	}
-
-	if err = c.sch.SetNextWallpaper(q, trayComponentName); err != nil {
-		return err
+	if c.cfg.Wallpaper.MultiMonitorEnabled {
+		if err = c.sch.SetNextWallpapers(trayComponentName); err != nil {
+			return err
+		}
+	} else {
+		if err = c.sch.SetNextWallpaper(q, trayComponentName); err != nil {
+			return err
+		}
 	}
 
 	c.sch.ResetRotationTimer()
 	return nil
+}
+
+// ExcludeCurrentWallpaper blacklists the current wallpaper, deletes the file, and switches to another one.
+func (c *Controller) ExcludeCurrentWallpaper() error {
+	currentID, err := c.st.GetCurrentWallpaper()
+	if err != nil {
+		return err
+	}
+	if currentID == "" {
+		return fmt.Errorf("no current artwork")
+	}
+	return c.ExcludeWallpaper(currentID)
 }
 
 // PixivLoggedIn reports whether Pixiv account actions are available.
@@ -345,6 +418,20 @@ func (c *Controller) LogoutFromPixiv() error {
 	return nil
 }
 
+// CopyWallpaperToFavorites copies an artwork to the configured download directory.
+func (c *Controller) CopyWallpaperToFavorites(artworkID string) error {
+	if artworkID == "" {
+		return fmt.Errorf("no artwork ID provided")
+	}
+	logger.WithComponent(componentName).Debug("copying artwork to favorites", "id", artworkID)
+	destPath, err := c.st.CopyImageToDownloadDir(artworkID)
+	if err != nil {
+		return err
+	}
+	logger.WithComponent(componentName).Debug("artwork copied", "id", artworkID, "dest", destPath)
+	return nil
+}
+
 // CopyCurrentArtwork copies the current artwork into the configured download directory.
 func (c *Controller) CopyCurrentArtwork() error {
 	currentID, err := c.st.GetCurrentWallpaper()
@@ -354,52 +441,46 @@ func (c *Controller) CopyCurrentArtwork() error {
 	if currentID == "" {
 		return fmt.Errorf("no current artwork")
 	}
+	return c.CopyWallpaperToFavorites(currentID)
+}
 
-	logger.WithComponent(componentName).Debug("copying current artwork", "id", currentID)
+// BookmarkWallpaper bookmarks a specific artwork in Pixiv.
+func (c *Controller) BookmarkWallpaper(artworkID string) error {
+	if !c.PixivLoggedIn() {
+		return fmt.Errorf("pixiv login required")
+	}
+	if artworkID == "" {
+		return fmt.Errorf("no artwork ID provided")
+	}
 
-	destPath, err := c.st.CopyImageToDownloadDir(currentID)
-	if err != nil {
+	ok, err := c.st.IsArtworkBookmarked(artworkID)
+	if err == nil && ok {
+		logger.WithComponent(componentName).Debug("artwork already bookmarked, skipping", "id", artworkID)
+		return nil
+	}
+
+	logger.WithComponent(componentName).Debug("bookmarking artwork on Pixiv", "id", artworkID)
+	if err = c.pixiv.BookmarkIllust(c.ctx, artworkID); err != nil {
 		return err
 	}
 
-	logger.WithComponent(componentName).Debug("artwork downloaded", "id", currentID, "dest", destPath)
+	logger.WithComponent(componentName).Debug("artwork bookmarked on Pixiv, saving locally", "id", artworkID)
+	if err = c.st.AddBookmark(artworkID); err != nil {
+		logger.WithComponent(componentName).Warn("bookmarked on Pixiv but failed to save locally", "id", artworkID, "error", err)
+	}
 	return nil
 }
 
 // BookmarkCurrentArtwork bookmarks the current artwork in Pixiv.
 func (c *Controller) BookmarkCurrentArtwork() error {
-	if !c.PixivLoggedIn() {
-		return fmt.Errorf("pixiv login required")
-	}
-
 	currentID, err := c.st.GetCurrentWallpaper()
 	if err != nil {
 		return err
 	}
-
 	if currentID == "" {
 		return fmt.Errorf("no current artwork")
 	}
-
-	if c.IsArtworkBookmarked() {
-		logger.WithComponent(componentName).Debug("artwork already bookmarked, skipping", "id", currentID)
-		return nil
-	}
-
-	logger.WithComponent(componentName).Debug("bookmarking current artwork on Pixiv", "id", currentID)
-
-	if err = c.pixiv.BookmarkIllust(c.ctx, currentID); err != nil {
-		return err
-	}
-
-	logger.WithComponent(componentName).Debug("artwork bookmarked on Pixiv, saving locally", "id", currentID)
-
-	if err = c.st.AddBookmark(currentID); err != nil {
-		logger.WithComponent(componentName).Warn("bookmarked on Pixiv but failed to save locally", "id", currentID, "error", err)
-	}
-
-	logger.WithComponent(componentName).Debug("artwork bookmark saved locally", "id", currentID)
-	return nil
+	return c.BookmarkWallpaper(currentID)
 }
 
 // IsArtworkBookmarked returns whether the current artwork has been locally bookmarked.
@@ -431,6 +512,43 @@ func (c *Controller) ApplyConfig(cfg *config.Config) {
 	if c.sch != nil {
 		c.sch.ApplyConfig(cfg)
 	}
+	if c.rebuildMenu != nil {
+		c.rebuildMenu()
+	}
+}
+
+// SetTrayRebuilder registers a function that rebuilds the tray menu on config changes.
+func (c *Controller) SetTrayRebuilder(fn func()) {
+	c.rebuildMenu = fn
+}
+
+// MultiMonitorEnabled returns whether multi-monitor wallpaper mode is active.
+func (c *Controller) MultiMonitorEnabled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg.Wallpaper.MultiMonitorEnabled
+}
+
+// NextWallpaperForMonitor rotates the wallpaper on a single monitor.
+func (c *Controller) NextWallpaperForMonitor(monitorID string) error {
+	q := storage.NewQueue(c.st.StateDir())
+	if err := q.Load(); err != nil {
+		return fmt.Errorf("failed to load queue: %w", err)
+	}
+	if err := c.sch.SetNextWallpaperForScreen(q, monitorID, trayComponentName); err != nil {
+		return err
+	}
+	c.sch.ResetRotationTimer()
+	return nil
+}
+
+// NextWallpaperForAllMonitors rotates wallpapers on all monitors.
+func (c *Controller) NextWallpaperForAllMonitors() error {
+	if err := c.sch.SetNextWallpapers(trayComponentName); err != nil {
+		return err
+	}
+	c.sch.ResetRotationTimer()
+	return nil
 }
 
 // Config returns the current application configuration.

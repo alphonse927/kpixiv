@@ -63,14 +63,16 @@ func Default() *Config {
 			LandscapeOnly: true,
 		},
 		Wallpaper: WallpaperConfig{
-			Mode:            WallpaperFillMode,
-			QueueSource:     QueueSourceAll,
-			RotationEnabled: true,
-			FetchEnabled:    true,
-			HistoryLimit:    DefaultHistoryLimit,
-			SetInterval:     DefaultSetInterval,
-			FetchInterval:   DefaultFetchInterval,
-			CleanupDays:     DefaultCleanupDays,
+			Mode:                WallpaperFillMode,
+			QueueSource:         QueueSourceAll,
+			RotationEnabled:     true,
+			FetchEnabled:        true,
+			HistoryLimit:        DefaultHistoryLimit,
+			SetInterval:         DefaultSetInterval,
+			FetchInterval:       DefaultFetchInterval,
+			CleanupDays:         DefaultCleanupDays,
+			MultiMonitorEnabled: false,
+			Monitors:            map[string]MonitorConfig{},
 		},
 		Bookmarks: BookmarksConfig{
 			Enabled:      DefaultBookmarksEnabled,
@@ -132,6 +134,17 @@ func Save(path string, cfg *Config) error {
 
 // Validate normalizes and enforces minimum configuration values.
 func (c *Config) Validate() {
+	if c.Wallpaper.Monitors == nil {
+		c.Wallpaper.Monitors = map[string]MonitorConfig{}
+	}
+	for id, monitor := range c.Wallpaper.Monitors {
+		switch monitor.Orientation {
+		case WallpaperLandscapeOrientation, WallpaperPortraitOrientation:
+		default:
+			monitor.Orientation = WallpaperAnyOrientation
+			c.Wallpaper.Monitors[id] = monitor
+		}
+	}
 	if c.DownloadPath == "" {
 		c.DownloadPath = resolveDefaultDownloadPath()
 	}

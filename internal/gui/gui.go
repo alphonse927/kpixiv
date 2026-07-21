@@ -11,11 +11,13 @@ import (
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 const (
 	HomePage = iota
 	SettingsPage
+	MonitorPage
 	AccountPage
 	AboutPage
 )
@@ -39,6 +41,8 @@ type AppController interface {
 	EnableService() error
 	DisableService() error
 	ThumbnailPath(id string) string
+	Monitors() ([]wallpaper.Screen, error)
+	MonitorWallpapers() (map[string]*storage.ImageMeta, error)
 }
 
 var (

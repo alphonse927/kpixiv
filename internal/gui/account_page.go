@@ -70,7 +70,7 @@ func (ui *settingsUI) buildLoginForm() fyne.CanvasObject {
 	description.Wrapping = fyne.TextWrapWord
 
 	openBtn := widget.NewButton("Open Pixiv Login Page", func() {
-		//nolint:gosec // URL is generated internally by the Pixiv client, not user input
+		//nolint:gosec,errcheck // URL is generated internally; fire-and-forget browser open
 		exec.Command("xdg-open", ui.loginURL).Start()
 	})
 

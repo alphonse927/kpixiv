@@ -80,3 +80,39 @@ func TestDownloadAndSaveSkipsMissingOutputFiles(t *testing.T) {
 		t.Fatalf("saved metadata should not include %s", img.ID)
 	}
 }
+
+func TestFilterImagesAllowsPortraitForPortraitMonitor(t *testing.T) {
+	cfg := testFetcherConfig()
+	cfg.Pixiv.LandscapeOnly = true
+	cfg.Wallpaper.MultiMonitorEnabled = true
+	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{
+		"0": {Orientation: config.WallpaperPortraitOrientation},
+	}
+	f := NewFetcher(cfg, testFetcherStorage(t), &mockImageClient{})
+
+	images := f.filterImages([]pixiv.Image{
+		{ID: "portrait", Width: 1280, Height: 2000},
+		{ID: "landscape", Width: 2000, Height: 1280},
+	}, map[string]struct{}{})
+	if len(images) != 2 {
+		t.Fatalf("filterImages() returned %d images, want both orientations", len(images))
+	}
+}
+
+func TestFilterImagesAllowsPortraitForAnyMonitor(t *testing.T) {
+	cfg := testFetcherConfig()
+	cfg.Pixiv.LandscapeOnly = true
+	cfg.Wallpaper.MultiMonitorEnabled = true
+	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{
+		"0": {Orientation: config.WallpaperAnyOrientation},
+	}
+	f := NewFetcher(cfg, testFetcherStorage(t), &mockImageClient{})
+
+	images := f.filterImages([]pixiv.Image{
+		{ID: "portrait", Width: 1280, Height: 2000},
+		{ID: "landscape", Width: 2000, Height: 1280},
+	}, map[string]struct{}{})
+	if len(images) != 2 {
+		t.Fatalf("filterImages() returned %d images, want both orientations", len(images))
+	}
+}

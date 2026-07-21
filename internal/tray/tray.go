@@ -2,10 +2,13 @@ package tray
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"fyne.io/systray"
 	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 type Controller interface {
@@ -23,9 +26,40 @@ type Controller interface {
 	OpenCurrentArtwork() error
 	OpenCurrentArtworkInPixiv() error
 	ExcludeCurrentWallpaper() error
+
+	MultiMonitorEnabled() bool
+	Monitors() ([]wallpaper.Screen, error)
+	MonitorWallpapers() (map[string]*storage.ImageMeta, error)
+	NextWallpaperForMonitor(monitorID string) error
+	NextWallpaperForAllMonitors() error
+	BookmarkWallpaper(artworkID string) error
+	ExcludeWallpaper(artworkID string) error
+	OpenWallpaperFile(artworkID string) error
+	OpenWallpaperInPixiv(artworkID string) error
+	CopyWallpaperToFavorites(artworkID string) error
+
 	ShowSettingsWindow() error
 	ShowAccountSettings() error
 	Shutdown()
+}
+
+type trayMenu struct {
+	ctrl Controller
+	log  *slog.Logger
+
+	next            *systray.MenuItem
+	rotate          *systray.MenuItem
+	login           *systray.MenuItem
+	bookmarkCurrent *systray.MenuItem
+	logout          *systray.MenuItem
+	favoriteCurrent *systray.MenuItem
+	openCurrent     *systray.MenuItem
+	openPixiv       *systray.MenuItem
+	excludeCurrent  *systray.MenuItem
+	settings        *systray.MenuItem
+	quit            *systray.MenuItem
+
+	rebuildCh chan struct{}
 }
 
 // Run starts the tray event loop and wires it to the application controller.
@@ -35,9 +69,13 @@ func Run(appCtx context.Context, controller Controller) {
 	})
 }
 
-//nolint:cyclop,funlen // straightforward select handler with many menu cases
 func onReady(appCtx context.Context, controller Controller) {
-	log := logger.WithComponent("tray")
+	tm := &trayMenu{
+		ctrl:      controller,
+		log:       logger.WithComponent("tray"),
+		rebuildCh: make(chan struct{}, 1),
+	}
+
 	systray.SetTitle("kPixiv")
 	systray.SetTooltip("kPixiv Wallpaper Manager")
 
@@ -46,128 +84,162 @@ func onReady(appCtx context.Context, controller Controller) {
 	}
 
 	if err := controller.Start(); err != nil {
-		log.Error("Failed to start application controller", "error", err)
+		tm.log.Error("Failed to start application controller", "error", err)
 	}
 
-	next := systray.AddMenuItem("Next Wallpaper", "Immediately switch wallpaper")
-	rotate := systray.AddMenuItemCheckbox("Rotate Wallpaper", "Enable or pause wallpaper rotation", true)
+	tm.next = systray.AddMenuItem("Next Wallpaper", "Immediately switch wallpaper")
+	tm.rotate = systray.AddMenuItemCheckbox("Rotate Wallpaper", "Enable or pause wallpaper rotation", true)
 
 	systray.AddSeparator()
 
-	login := systray.AddMenuItem("Login to Pixiv", "Connect your Pixiv account")
-	bookmarkCurrent := systray.AddMenuItem("Bookmark Current Artwork", "Bookmark the current artwork in Pixiv")
-	logout := systray.AddMenuItem("Logout from Pixiv", "Forget the saved Pixiv session")
+	tm.login = systray.AddMenuItem("Login to Pixiv", "Connect your Pixiv account")
+	tm.bookmarkCurrent = systray.AddMenuItem("Bookmark Current Artwork", "Bookmark the current artwork in Pixiv")
+	tm.logout = systray.AddMenuItem("Logout from Pixiv", "Forget the saved Pixiv session")
 
 	systray.AddSeparator()
 
-	favoriteCurrent := systray.AddMenuItem("Copy to Favorites", "Copy the current wallpaper to the favorite directory")
-	openCurrent := systray.AddMenuItem("Open Current Artwork", "Open currently active image")
-	openPixiv := systray.AddMenuItem("Open Artwork in Pixiv", "Open the current artwork's Pixiv page in your browser")
-	excludeCurrent := systray.AddMenuItem("Exclude Current Wallpaper", "Blacklist the current wallpaper and switch away")
+	tm.favoriteCurrent = systray.AddMenuItem("Copy to Favorites", "Copy the current wallpaper to the favorite directory")
+	tm.openCurrent = systray.AddMenuItem("Open Current Artwork", "Open currently active image")
+	tm.openPixiv = systray.AddMenuItem("Open Artwork in Pixiv", "Open the current artwork's Pixiv page in your browser")
+	tm.excludeCurrent = systray.AddMenuItem("Exclude Current Wallpaper", "Blacklist the current wallpaper and switch away")
 
 	systray.AddSeparator()
-	settings := systray.AddMenuItem("Settings", "Open settings window")
-	quit := systray.AddMenuItem("Quit", "Quit kPixiv")
+	tm.settings = systray.AddMenuItem("Settings", "Open settings window")
+	tm.quit = systray.AddMenuItem("Quit", "Quit kPixiv")
 
-	updateBookmarkItem := func() {
-		if controller.IsArtworkBookmarked() {
-			bookmarkCurrent.SetTitle("Bookmarked")
-			bookmarkCurrent.Disable()
-		} else {
-			bookmarkCurrent.SetTitle("Bookmark Current Artwork")
-			bookmarkCurrent.Enable()
-		}
+	// Register as rebuild target (socket-ready foundation)
+	if r, ok := controller.(interface{ SetTrayRebuilder(func()) }); ok {
+		r.SetTrayRebuilder(tm.RebuildMenu)
 	}
-	updateAuthItems := func() {
-		if controller.PixivLoggedIn() {
-			userName := controller.PixivUserName()
-			if userName != "" {
-				login.SetTitle("Pixiv: " + userName)
-			} else {
-				login.SetTitle("Pixiv Connected")
+
+	tm.updateAuthItems()
+	go tm.eventLoop(appCtx)
+}
+
+//nolint:cyclop
+func (tm *trayMenu) eventLoop(appCtx context.Context) {
+	bookmarkTicker := time.NewTicker(3 * time.Second)
+	defer bookmarkTicker.Stop()
+
+	for {
+		select {
+		case <-tm.next.ClickedCh:
+			if err := tm.ctrl.NextWallpaper(); err != nil {
+				tm.log.Warn("Failed to set next wallpaper", "error", err)
 			}
-			login.Disable()
-			logout.Show()
-			logout.Enable()
-			bookmarkCurrent.Enable()
-			updateBookmarkItem()
+			tm.updateBookmarkItem()
+
+		case <-tm.rotate.ClickedCh:
+			if tm.rotate.Checked() {
+				tm.rotate.Uncheck()
+				tm.ctrl.PauseRotation()
+			} else {
+				tm.rotate.Check()
+				tm.ctrl.ResumeRotation()
+			}
+
+		case <-tm.login.ClickedCh:
+			if err := tm.ctrl.ShowAccountSettings(); err != nil {
+				tm.log.Warn("Failed to open account settings", "error", err)
+			}
+
+		case <-tm.logout.ClickedCh:
+			if err := tm.ctrl.LogoutFromPixiv(); err != nil {
+				tm.log.Warn("Failed to log out from Pixiv", "error", err)
+			}
+			tm.updateAuthItems()
+
+		case <-tm.favoriteCurrent.ClickedCh:
+			if err := tm.ctrl.CopyCurrentArtwork(); err != nil {
+				tm.log.Warn("Failed to copy current artwork", "error", err)
+			}
+
+		case <-tm.bookmarkCurrent.ClickedCh:
+			if err := tm.ctrl.BookmarkCurrentArtwork(); err != nil {
+				tm.log.Warn("Failed to bookmark current artwork", "error", err)
+			}
+			tm.updateBookmarkItem()
+
+		case <-tm.openCurrent.ClickedCh:
+			if err := tm.ctrl.OpenCurrentArtwork(); err != nil {
+				tm.log.Warn("Failed to open current artwork", "error", err)
+			}
+
+		case <-tm.openPixiv.ClickedCh:
+			if err := tm.ctrl.OpenCurrentArtworkInPixiv(); err != nil {
+				tm.log.Warn("Failed to open current artwork in Pixiv", "error", err)
+			}
+
+		case <-tm.excludeCurrent.ClickedCh:
+			if err := tm.ctrl.ExcludeCurrentWallpaper(); err != nil {
+				tm.log.Warn("Failed to exclude current artwork", "error", err)
+			}
+			tm.updateBookmarkItem()
+
+		case <-tm.settings.ClickedCh:
+			if err := tm.ctrl.ShowSettingsWindow(); err != nil {
+				tm.log.Warn("Failed to open settings", "error", err)
+			}
+
+		case <-tm.quit.ClickedCh:
+			tm.ctrl.Shutdown()
+			systray.Quit()
+			return
+
+		case <-bookmarkTicker.C:
+			tm.updateBookmarkItem()
+
+		case <-tm.rebuildCh:
+			tm.updateBookmarkItem()
+			tm.updateAuthItems()
+
+		case <-appCtx.Done():
+			systray.Quit()
 			return
 		}
-
-		login.SetTitle("Login to Pixiv")
-		login.Enable()
-		logout.Hide()
-		logout.Disable()
-		bookmarkCurrent.Disable()
-		bookmarkCurrent.SetTitle("Bookmark Current Artwork")
 	}
-	updateAuthItems()
+}
 
-	go func() {
-		bookmarkTicker := time.NewTicker(3 * time.Second)
-		defer bookmarkTicker.Stop()
-		for {
-			select {
-			case <-next.ClickedCh:
-				if err := controller.NextWallpaper(); err != nil {
-					log.Warn("Failed to set next wallpaper", "error", err)
-				}
-				updateBookmarkItem()
-			case <-rotate.ClickedCh:
-				if rotate.Checked() {
-					rotate.Uncheck()
-					controller.PauseRotation()
-					log.Debug("Rotation paused")
-				} else {
-					rotate.Check()
-					controller.ResumeRotation()
-					log.Debug("Rotation resumed")
-				}
-			case <-login.ClickedCh:
-				if err := controller.ShowAccountSettings(); err != nil {
-					log.Warn("Failed to open account settings", "error", err)
-				}
-			case <-logout.ClickedCh:
-				if err := controller.LogoutFromPixiv(); err != nil {
-					log.Warn("Failed to log out from Pixiv", "error", err)
-				}
-				updateAuthItems()
-			case <-favoriteCurrent.ClickedCh:
-				if err := controller.CopyCurrentArtwork(); err != nil {
-					log.Warn("Failed to copy current artwork", "error", err)
-				}
-			case <-bookmarkCurrent.ClickedCh:
-				if err := controller.BookmarkCurrentArtwork(); err != nil {
-					log.Warn("Failed to bookmark current artwork", "error", err)
-				}
-				updateBookmarkItem()
-			case <-openCurrent.ClickedCh:
-				if err := controller.OpenCurrentArtwork(); err != nil {
-					log.Warn("Failed to open current artwork", "error", err)
-				}
-			case <-openPixiv.ClickedCh:
-				if err := controller.OpenCurrentArtworkInPixiv(); err != nil {
-					log.Warn("Failed to open current artwork in Pixiv", "error", err)
-				}
-			case <-excludeCurrent.ClickedCh:
-				if err := controller.ExcludeCurrentWallpaper(); err != nil {
-					log.Warn("Failed to exclude current artwork", "error", err)
-				}
-				updateBookmarkItem()
-			case <-settings.ClickedCh:
-				if err := controller.ShowSettingsWindow(); err != nil {
-					log.Warn("Failed to open settings", "error", err)
-				}
-			case <-quit.ClickedCh:
-				controller.Shutdown()
-				systray.Quit()
-				return
-			case <-bookmarkTicker.C:
-				updateBookmarkItem()
-			case <-appCtx.Done():
-				systray.Quit()
-				return
-			}
+// RebuildMenu is called by the controller when config changes (e.g. multi-monitor toggle).
+// Currently refreshes auth/bookmark state; in the socket architecture it will rebuild the
+// full menu from a state message sent by the daemon.
+func (tm *trayMenu) RebuildMenu() {
+	select {
+	case tm.rebuildCh <- struct{}{}:
+	default:
+	}
+}
+
+func (tm *trayMenu) updateAuthItems() {
+	if tm.ctrl.PixivLoggedIn() {
+		userName := tm.ctrl.PixivUserName()
+		if userName != "" {
+			tm.login.SetTitle("Pixiv: " + userName)
+		} else {
+			tm.login.SetTitle("Pixiv Connected")
 		}
-	}()
+		tm.login.Disable()
+		tm.logout.Show()
+		tm.logout.Enable()
+		tm.bookmarkCurrent.Enable()
+		tm.updateBookmarkItem()
+		return
+	}
+
+	tm.login.SetTitle("Login to Pixiv")
+	tm.login.Enable()
+	tm.logout.Hide()
+	tm.logout.Disable()
+	tm.bookmarkCurrent.Disable()
+	tm.bookmarkCurrent.SetTitle("Bookmark Current Artwork")
+}
+
+func (tm *trayMenu) updateBookmarkItem() {
+	if tm.ctrl.IsArtworkBookmarked() {
+		tm.bookmarkCurrent.SetTitle("Bookmarked")
+		tm.bookmarkCurrent.Disable()
+	} else {
+		tm.bookmarkCurrent.SetTitle("Bookmark Current Artwork")
+		tm.bookmarkCurrent.Enable()
+	}
 }

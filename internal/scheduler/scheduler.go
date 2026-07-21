@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -156,6 +157,9 @@ func (sch *Scheduler) ResetRotationTimer() {
 	if !running {
 		return
 	}
+	if err := sch.RebuildMonitorQueues(); err != nil {
+		logger.WithComponent("scheduler").Warn("Failed to rebuild monitor queues", "error", err)
+	}
 
 	select {
 	case sch.resetSetCh <- struct{}{}:
@@ -281,6 +285,11 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 		}
 	}
 
+	valid, err = sch.filterQueueByOrientation(q, valid, blacklist)
+	if err != nil {
+		return err
+	}
+
 	if len(valid) == 0 {
 		return fmt.Errorf("no wallpapers found in storage")
 	}
@@ -291,6 +300,48 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 
 	log.Debug("Loaded images into queue", "count", len(valid))
 	return nil
+}
+
+func (sch *Scheduler) filterQueueByOrientation(q *storage.Queue, valid []string, blacklist map[string]struct{}) ([]string, error) {
+	orientation := q.Orientation()
+	if orientation == "" || orientation == config.WallpaperAnyOrientation.String() {
+		return valid, nil
+	}
+
+	images, err := sch.storage.LoadMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	filtered := valid[:0]
+	for _, id := range valid {
+		if matchesOrientation(images[id], config.WallpaperOrientation(orientation)) {
+			filtered = append(filtered, id)
+		}
+	}
+
+	if len(filtered) > 0 {
+		return filtered, nil
+	}
+
+	fallback := make([]string, 0)
+	seen := make(map[string]bool)
+	if err = sch.collectImagesFromDir(sch.storage.RankingDir(), blacklist, seen, &fallback); err != nil {
+		return nil, fmt.Errorf("failed to read ranking directory: %w", err)
+	}
+
+	if err = sch.collectImagesFromDir(sch.storage.BookmarksDir(), blacklist, seen, &fallback); err != nil {
+		return nil, fmt.Errorf("failed to read bookmarks directory: %w", err)
+	}
+
+	result := fallback[:0]
+	for _, id := range fallback {
+		if matchesOrientation(images[id], config.WallpaperOrientation(orientation)) {
+			result = append(result, id)
+		}
+	}
+
+	return result, nil
 }
 
 func (sch *Scheduler) collectImagesFromDir(dir string, blacklist map[string]struct{}, seen map[string]bool, valid *[]string) error {
@@ -392,6 +443,28 @@ func (sch *Scheduler) Stop(cname string) {
 
 // SetNextWallpaper applies the next wallpaper from the queue and updates history.
 func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
+	return sch.setNextWallpaper(q, "", cname)
+}
+
+// SetNextWallpaperForScreen advances the shared queue and applies the result
+// only to the requested screen.
+func (sch *Scheduler) SetNextWallpaperForScreen(q *storage.Queue, screenID, cname string) error {
+	monitorQueue := storage.NewMonitorQueue(sch.storage.StateDir(), screenID)
+	if err := monitorQueue.Load(); err != nil {
+		return err
+	}
+	if err := monitorQueue.SetOrientation(sch.monitorOrientation(screenID).String()); err != nil {
+		return err
+	}
+	return sch.setNextWallpaper(monitorQueue, screenID, cname)
+}
+
+// SetNextWallpapers advances the rotation on every active screen.
+func (sch *Scheduler) SetNextWallpapers(cname string) error {
+	return sch.rotateWallpaper(cname)
+}
+
+func (sch *Scheduler) setNextWallpaper(q *storage.Queue, screenID, cname string) error {
 	log := logger.WithComponent(cname)
 	blacklist, err := sch.storage.LoadBlacklistSet()
 	if err != nil {
@@ -400,6 +473,7 @@ func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 
 	attempts := 0
 	maxAttempts := 5
+	orientation := sch.monitorOrientation(screenID)
 	applied := false
 	for attempts < maxAttempts {
 		attempts++
@@ -423,6 +497,14 @@ func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 			log.Debug("Skipping blacklisted wallpaper", "id", nextID)
 			continue
 		}
+		images, loadErr := sch.storage.LoadMetadata()
+		if loadErr != nil {
+			return fmt.Errorf("failed to load metadata: %w", loadErr)
+		}
+		if !matchesOrientation(images[nextID], orientation) {
+			log.Debug("Skipping wallpaper with incompatible orientation", "id", nextID, "orientation", orientation)
+			continue
+		}
 
 		path, exists := sch.storage.GetImagePath(nextID)
 		if !exists {
@@ -430,12 +512,12 @@ func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 			continue
 		}
 
-		if err = sch.setter.Set(path); err != nil {
+		if err = sch.applyWallpaperSet(screenID, path); err != nil {
 			return fmt.Errorf("failed to set wallpaper: %w", err)
 		}
 
-		if err = sch.storage.AddToHistoryWithLimit(nextID, sch.cfg.Wallpaper.HistoryLimit); err != nil {
-			return fmt.Errorf("failed to update history: %w", err)
+		if err = sch.addWallpaperHistory(screenID, nextID); err != nil {
+			return fmt.Errorf("failed to update wallpaper history: %w", err)
 		}
 
 		log.Info("New wallpaper set", "path", path)
@@ -448,6 +530,27 @@ func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
 	}
 
 	return nil
+}
+
+func (sch *Scheduler) applyWallpaperSet(screenID, path string) error {
+	if screenID == "" {
+		return sch.setter.Set(path)
+	}
+
+	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
+	if !ok {
+		return fmt.Errorf("wallpaper setter does not support monitor %q", screenID)
+	}
+
+	return monitorSetter.SetForScreen(screenID, path)
+}
+
+func (sch *Scheduler) addWallpaperHistory(screenID, nextID string) error {
+	if screenID == "" {
+		return sch.storage.AddToHistoryWithLimit(nextID, sch.cfg.Wallpaper.HistoryLimit)
+	}
+
+	return sch.storage.AddToMonitorHistory(screenID, nextID, sch.cfg.Wallpaper.HistoryLimit)
 }
 
 // IsRunning reports whether the scheduler is currently active.
@@ -487,6 +590,15 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 	}
 
 	path := images[targetID].Path
+	if sch.cfg.Wallpaper.MultiMonitorEnabled {
+		applied, multiErr := sch.applyCurrentOrNextMultiMonitor(images, blacklist, targetID)
+		if multiErr != nil {
+			return multiErr
+		}
+		if applied {
+			return nil
+		}
+	}
 
 	log.Info("Setting wallpaper", "path", path, "setter_type", fmt.Sprintf("%T", sch.setter))
 	if err = sch.setter.Set(path); err != nil {
@@ -501,9 +613,79 @@ func (sch *Scheduler) ApplyCurrentOrNext() error {
 	return nil
 }
 
+func (sch *Scheduler) applyCurrentOrNextMultiMonitor(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, targetID string) (bool, error) {
+	log := logger.WithComponent("scheduler")
+	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
+	if !ok {
+		return false, nil
+	}
+
+	screens, err := monitorSetter.Screens()
+	if err != nil {
+		return false, nil //nolint:nilerr // intentional fall-through to single-monitor
+	}
+
+	if len(screens) == 0 {
+		return false, nil
+	}
+
+	monitors, err := sch.storage.LoadMonitorHistory()
+	if err != nil {
+		return false, fmt.Errorf("failed to load monitor history: %w", err)
+	}
+
+	for _, screen := range screens {
+		if multiErr := sch.applyScreenWallpaper(screen, images, blacklist, targetID, monitors, monitorSetter); multiErr != nil {
+			return false, multiErr
+		}
+	}
+
+	if err = sch.storage.SaveMonitorHistory(monitors, sch.cfg.Wallpaper.HistoryLimit); err != nil {
+		return false, fmt.Errorf("failed to save monitor history: %w", err)
+	}
+
+	log.Info("Per-screen wallpapers restored", "screens", len(screens))
+	return true, nil
+}
+
+func (sch *Scheduler) applyScreenWallpaper(screen wallpaper.Screen, images map[string]*storage.ImageMeta, blacklist map[string]struct{}, targetID string, monitors map[string]string, monitorSetter wallpaper.MonitorSetter) error {
+	settings, configured := sch.cfg.Wallpaper.Monitors[screen.ID]
+	if configured && !settings.RotationEnabled {
+		return nil
+	}
+
+	orientation := config.WallpaperAnyOrientation
+	if settings.Orientation != "" {
+		orientation = settings.Orientation
+	}
+
+	monitorID := monitors[screen.ID]
+	if !wallpaperAvailable(images, blacklist, monitorID) || images[monitorID].Path == "" || !matchesOrientation(images[monitorID], orientation) {
+		monitorID = targetID
+	}
+
+	if !matchesOrientation(images[monitorID], orientation) {
+		monitorID = selectTargetWallpaperIDForOrientation(images, blacklist, orientation, targetID)
+		if monitorID == "" {
+			return nil
+		}
+	}
+
+	if err := monitorSetter.SetForScreen(screen.ID, images[monitorID].Path); err != nil {
+		return fmt.Errorf("failed to restore wallpaper on screen %s: %w", screen.ID, err)
+	}
+
+	monitors[screen.ID] = monitorID
+	return nil
+}
+
 func selectTargetWallpaperID(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, currentID, nextID string) string {
-	for _, candidateID := range []string{currentID, nextID} {
-		if wallpaperAvailable(images, blacklist, candidateID) {
+	return selectTargetWallpaperIDForOrientation(images, blacklist, config.WallpaperAnyOrientation, currentID, nextID)
+}
+
+func selectTargetWallpaperIDForOrientation(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, orientation config.WallpaperOrientation, candidates ...string) string {
+	for _, candidateID := range candidates {
+		if wallpaperAvailable(images, blacklist, candidateID) && matchesOrientation(images[candidateID], orientation) {
 			return candidateID
 		}
 	}
@@ -512,12 +694,26 @@ func selectTargetWallpaperID(images map[string]*storage.ImageMeta, blacklist map
 		if _, excluded := blacklist[id]; excluded {
 			continue
 		}
-		if meta.Path != "" {
+		if meta != nil && meta.Path != "" && matchesOrientation(meta, orientation) {
 			return id
 		}
 	}
 
 	return ""
+}
+
+func matchesOrientation(meta *storage.ImageMeta, orientation config.WallpaperOrientation) bool {
+	if orientation == "" || orientation == config.WallpaperAnyOrientation || meta == nil || meta.Width <= 0 || meta.Height <= 0 {
+		return orientation == "" || orientation == config.WallpaperAnyOrientation
+	}
+	switch orientation {
+	case config.WallpaperLandscapeOrientation:
+		return meta.Width >= meta.Height
+	case config.WallpaperPortraitOrientation:
+		return meta.Height > meta.Width
+	default:
+		return true
+	}
 }
 
 func wallpaperAvailable(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, id string) bool {
@@ -529,8 +725,8 @@ func wallpaperAvailable(images map[string]*storage.ImageMeta, blacklist map[stri
 		return false
 	}
 
-	_, ok := images[id]
-	return ok
+	meta, ok := images[id]
+	return ok && meta != nil && meta.Path != ""
 }
 
 func (sch *Scheduler) rotateWallpaper(cname string) error {
@@ -539,5 +735,64 @@ func (sch *Scheduler) rotateWallpaper(cname string) error {
 		return fmt.Errorf("failed to load queue: %w", err)
 	}
 
-	return sch.SetNextWallpaper(q, cname)
+	if !sch.cfg.Wallpaper.MultiMonitorEnabled {
+		return sch.SetNextWallpaper(q, cname)
+	}
+
+	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
+	if !ok {
+		return sch.SetNextWallpaper(q, cname)
+	}
+	screens, err := monitorSetter.Screens()
+	if err != nil || len(screens) == 0 {
+		return sch.SetNextWallpaper(q, cname)
+	}
+	for _, screen := range screens {
+		settings, configured := sch.cfg.Wallpaper.Monitors[screen.ID]
+		if configured && !settings.RotationEnabled {
+			continue
+		}
+		if err := sch.SetNextWallpaperForScreen(q, screen.ID, cname); err != nil && !errors.Is(err, ErrImageNotFound) {
+			return fmt.Errorf("screen %s: %w", screen.ID, err)
+		}
+	}
+
+	return nil
+}
+
+func (sch *Scheduler) monitorOrientation(screenID string) config.WallpaperOrientation {
+	if settings, ok := sch.cfg.Wallpaper.Monitors[screenID]; ok && settings.Orientation != "" {
+		return settings.Orientation
+	}
+	return config.WallpaperAnyOrientation
+}
+
+// RebuildMonitorQueues clears monitor queues when their orientation changes.
+func (sch *Scheduler) RebuildMonitorQueues() error {
+	if !sch.cfg.Wallpaper.MultiMonitorEnabled {
+		return nil
+	}
+	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
+	if !ok {
+		return nil
+	}
+	screens, err := monitorSetter.Screens()
+	if err != nil {
+		return err
+	}
+	for _, screen := range screens {
+		q := storage.NewMonitorQueue(sch.storage.StateDir(), screen.ID)
+		if err := q.Load(); err != nil {
+			return err
+		}
+		if err := q.SetOrientation(sch.monitorOrientation(screen.ID).String()); err != nil {
+			return err
+		}
+		if q.IsEmpty() {
+			if err := sch.refillQueueFromStorage(q, "scheduler"); err != nil {
+				return fmt.Errorf("screen %s: %w", screen.ID, err)
+			}
+		}
+	}
+	return nil
 }
