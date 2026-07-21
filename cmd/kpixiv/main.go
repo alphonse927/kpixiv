@@ -27,11 +27,13 @@ import (
 )
 
 var (
-	cfgPath string
-	verbose bool
-	dryRun  bool
-	reset   bool
-	cfg     *config.Config
+	cfgPath     string
+	verbose     bool
+	dryRun      bool
+	reset       bool
+	monitorID   string
+	allMonitors bool
+	cfg         *config.Config
 )
 
 var rootCmd = &cobra.Command{
@@ -116,12 +118,56 @@ var nextCmd = &cobra.Command{
 
 		log.Debug("Setting wallpaper")
 		sch := scheduler.New(cfg, s, nil, setter)
-		if err := sch.SetNextWallpaper(q, "next"); err != nil {
+		var setErr error
+		switch {
+		case monitorID != "":
+			setErr = sch.SetNextWallpaperForScreen(q, monitorID, "next")
+		case allMonitors:
+			setErr = sch.SetNextWallpapers("next")
+		default:
+			setErr = sch.SetNextWallpaper(q, "next")
+		}
+		if err := setErr; err != nil {
 			if errors.Is(err, scheduler.ErrImageNotFound) {
 				return nil
 			}
 
 			return err
+		}
+		return nil
+	},
+}
+
+var monitorsCmd = &cobra.Command{
+	Use:   "monitors",
+	Short: "List active KDE Plasma screens",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if dryRun {
+			fmt.Println("Dry-run does not query Plasma screens")
+			return nil
+		}
+		screens, err := wallpaper.NewKDESetter(cfg.KDE.SetLockScreen).Screens()
+		if err != nil {
+			return err
+		}
+		if len(screens) == 0 {
+			fmt.Println("No active Plasma screens found")
+			return nil
+		}
+		for _, screen := range screens {
+			state := "enabled"
+			if settings, ok := cfg.Wallpaper.Monitors[screen.ID]; ok && !settings.RotationEnabled {
+				state = "disabled"
+			}
+			name := screen.Name
+			if name == "" {
+				name = "Screen " + screen.ID
+			}
+			if screen.Model != "" {
+				fmt.Printf("%s (%s/%s)\t%s\n", name, screen.Model, screen.ID, state)
+			} else {
+				fmt.Printf("%s (%s)\t%s\n", name, screen.ID, state)
+			}
 		}
 		return nil
 	},
@@ -180,6 +226,7 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load history: %w", err)
 		}
+		monitorHistory, monitorHistoryErr := st.LoadMonitorHistory()
 
 		metadata, err := st.LoadMetadata()
 		if err != nil {
@@ -221,6 +268,12 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("Previous: none\n")
 		}
 		fmt.Printf("Last updated: %s\n", history.UpdatedAt.Format(time.DateTime))
+		if monitorHistoryErr == nil && len(monitorHistory) > 0 {
+			fmt.Printf("\n=== Monitor Wallpapers ===\n")
+			for screen, imageID := range monitorHistory {
+				fmt.Printf("Screen %s: %s\n", screen, imageID)
+			}
+		}
 		fmt.Printf("\n=== Storage ===\n")
 		fmt.Printf("Downloaded images: %d\n", len(metadata))
 
@@ -250,15 +303,16 @@ var queueBookmarksCmd = &cobra.Command{
 		}
 
 		q := storage.NewQueue(st.StateDir())
-		if err := q.Load(); err != nil {
+		if err = q.Load(); err != nil {
 			return fmt.Errorf("failed to load queue: %w", err)
 		}
 
-		if err := q.Clear(); err != nil {
+		if err = q.Clear(); err != nil {
 			return fmt.Errorf("failed to clear queue: %w", err)
 		}
 
-		blacklist, err := st.LoadBlacklistSet()
+		var blacklist map[string]struct{}
+		blacklist, err = st.LoadBlacklistSet()
 		if err != nil {
 			return fmt.Errorf("failed to load blacklist: %w", err)
 		}
@@ -292,15 +346,16 @@ var queueRankingCmd = &cobra.Command{
 		}
 
 		q := storage.NewQueue(st.StateDir())
-		if err := q.Load(); err != nil {
+		if err = q.Load(); err != nil {
 			return fmt.Errorf("failed to load queue: %w", err)
 		}
 
-		if err := q.Clear(); err != nil {
+		if err = q.Clear(); err != nil {
 			return fmt.Errorf("failed to clear queue: %w", err)
 		}
 
-		blacklist, err := st.LoadBlacklistSet()
+		var blacklist map[string]struct{}
+		blacklist, err = st.LoadBlacklistSet()
 		if err != nil {
 			return fmt.Errorf("failed to load blacklist: %w", err)
 		}
@@ -330,15 +385,16 @@ var queueAllCmd = &cobra.Command{
 		}
 
 		q := storage.NewQueue(st.StateDir())
-		if err := q.Load(); err != nil {
+		if err = q.Load(); err != nil {
 			return fmt.Errorf("failed to load queue: %w", err)
 		}
 
-		if err := q.Clear(); err != nil {
+		if err = q.Clear(); err != nil {
 			return fmt.Errorf("failed to clear queue: %w", err)
 		}
 
-		blacklist, err := st.LoadBlacklistSet()
+		var blacklist map[string]struct{}
+		blacklist, err = st.LoadBlacklistSet()
 		if err != nil {
 			return fmt.Errorf("failed to load blacklist: %w", err)
 		}
@@ -529,18 +585,14 @@ var bookmarksAddCmd = &cobra.Command{
 var bookmarksAddCurrentCmd = &cobra.Command{
 	Use:   "add-current",
 	Short: "Bookmark the current wallpaper on Pixiv",
+	Long: `Bookmark the current wallpaper on Pixiv and save it locally.
+
+With --monitor, bookmarks the current wallpaper for a specific screen.
+With --all, bookmarks the current wallpaper on every active screen.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
 			return fmt.Errorf("failed to initialize storage: %w", err)
-		}
-
-		currentID, err := st.GetCurrentWallpaper()
-		if err != nil {
-			return fmt.Errorf("failed to get current wallpaper: %w", err)
-		}
-		if currentID == "" {
-			return fmt.Errorf("no current wallpaper")
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
@@ -553,15 +605,71 @@ var bookmarksAddCurrentCmd = &cobra.Command{
 		}
 
 		ctx := context.Background()
-		if err := pixivClient.BookmarkIllust(ctx, currentID); err != nil {
-			return fmt.Errorf("failed to bookmark on pixiv: %w", err)
+
+		var currentIDs []string
+		switch {
+		case monitorID != "":
+			monitors, err := st.LoadMonitorHistory()
+			if err != nil {
+				return fmt.Errorf("failed to load monitor history: %w", err)
+			}
+
+			id, ok := monitors[monitorID]
+			if !ok || id == "" {
+				return fmt.Errorf("no current wallpaper for monitor %s", monitorID)
+			}
+
+			currentIDs = []string{id}
+
+		case allMonitors:
+			setter := wallpaper.NewKDESetter(false)
+			screens, err := setter.Screens()
+			if err != nil {
+				return fmt.Errorf("failed to list monitors: %w", err)
+			}
+
+			monitors, err := st.LoadMonitorHistory()
+			if err != nil {
+				return fmt.Errorf("failed to load monitor history: %w", err)
+			}
+
+			globalID, _ := st.GetCurrentWallpaper() //nolint:errcheck // best-effort fallback
+			for _, s := range screens {
+				id := monitors[s.ID]
+				if id == "" {
+					id = globalID
+				} else {
+					currentIDs = append(currentIDs, id)
+				}
+			}
+
+			if len(currentIDs) == 0 {
+				return fmt.Errorf("no current wallpaper on any monitor")
+			}
+
+		default:
+			currentID, err := st.GetCurrentWallpaper()
+			if err != nil {
+				return fmt.Errorf("failed to get current wallpaper: %w", err)
+			}
+			if currentID == "" {
+				return fmt.Errorf("no current wallpaper")
+			}
+			currentIDs = []string{currentID}
 		}
 
-		if err := st.AddBookmark(currentID); err != nil {
-			return fmt.Errorf("failed to save local bookmark: %w", err)
+		for _, id := range currentIDs {
+			if err := pixivClient.BookmarkIllust(ctx, id); err != nil {
+				return fmt.Errorf("failed to bookmark artwork %s on pixiv: %w", id, err)
+			}
+
+			if err := st.AddBookmark(id); err != nil {
+				return fmt.Errorf("failed to save local bookmark for %s: %w", id, err)
+			}
+
+			fmt.Printf("Artwork %s bookmarked successfully\n", id)
 		}
 
-		fmt.Printf("Current artwork %s bookmarked successfully\n", currentID)
 		return nil
 	},
 }
@@ -571,6 +679,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.PersistentFlags().BoolVar(&dryRun, "dry-run", false, "Show actions without applying or downloading")
 	daemonCmd.Flags().BoolVar(&reset, "reset", false, "Remove all cached images before daemon starts")
+	nextCmd.Flags().StringVar(&monitorID, "monitor", "", "set the next wallpaper on one screen ID")
+	nextCmd.Flags().BoolVar(&allMonitors, "all", false, "set the next wallpaper on every active screen")
+	bookmarksAddCurrentCmd.Flags().StringVar(&monitorID, "monitor", "", "bookmark current wallpaper on one screen")
+	bookmarksAddCurrentCmd.Flags().BoolVar(&allMonitors, "all", false, "bookmark current wallpaper on every active screen")
 
 	rootCmd.AddCommand(fetchCmd)
 	rootCmd.AddCommand(nextCmd)
@@ -578,6 +690,7 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(queueCmd)
 	rootCmd.AddCommand(bookmarksCmd)
+	rootCmd.AddCommand(monitorsCmd)
 
 	queueCmd.AddCommand(queueRankingCmd)
 	queueCmd.AddCommand(queueBookmarksCmd)

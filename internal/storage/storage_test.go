@@ -42,6 +42,35 @@ func TestNewCreatesDirectories(t *testing.T) {
 	}
 }
 
+func TestMonitorHistoryRoundTrip(t *testing.T) {
+	s, err := New(t.TempDir(), filepath.Join(t.TempDir(), "downloads"))
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	if err = s.AddToMonitorHistory("1", "wallpaper-a", 100); err != nil {
+		t.Fatalf("AddToMonitorHistory() returned error: %v", err)
+	}
+	if err = s.AddToMonitorHistory("2", "wallpaper-b", 100); err != nil {
+		t.Fatalf("AddToMonitorHistory() returned error: %v", err)
+	}
+
+	monitors, err := s.LoadMonitorHistory()
+	if err != nil {
+		t.Fatalf("LoadMonitorHistory() returned error: %v", err)
+	}
+	if monitors["1"] != "wallpaper-a" || monitors["2"] != "wallpaper-b" {
+		t.Fatalf("unexpected monitor history: %#v", monitors)
+	}
+	mainHistory, err := s.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	if mainHistory.Monitors["1"] != "wallpaper-a" {
+		t.Fatalf("monitor history was not stored in history.json: %#v", mainHistory.Monitors)
+	}
+}
+
 func TestNewExpandsTildeDownloadPath(t *testing.T) {
 	tmp := t.TempDir()
 	tildePath := "~/Pictures/KPixiv"
@@ -249,7 +278,7 @@ func TestSaveMetadataAddsImage(t *testing.T) {
 	}
 
 	imgPath := filepath.Join(tmp, "some-image.jpg")
-	if err := os.WriteFile(imgPath, []byte("fake-image-data"), 0600); err != nil {
+	if err = os.WriteFile(imgPath, []byte("fake-image-data"), 0600); err != nil {
 		t.Fatalf("failed to create test image: %v", err)
 	}
 

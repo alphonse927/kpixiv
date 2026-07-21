@@ -8,10 +8,13 @@ A tray-centric Linux wallpaper application for fetching and rotating Pixiv wallp
 - Resolve original resolution images from Pixiv thumbnails
 - Download and store wallpapers locally with deduplication
 - Apply wallpapers directly to the KDE Plasma desktop
+- **Per-monitor wallpaper assignment** on multi-monitor setups — each screen gets its own wallpaper
+- **Orientation-aware rotation** — per-monitor filter (landscape/portrait/any) with queue fallback
+- **EDID-based monitor model detection** — displays connector name and model (e.g. `DP-3 (DELL S2721DS/0)`)
 - Tray-centric runtime with automatic wallpaper rotation
 - Pixiv OAuth login with automatic token refresh (browser-based PKCE flow)
 - Bookmark and exclude wallpapers from the tray
-- GUI settings window with tabbed navigation (Home, Settings, Account, About)
+- GUI settings window with tabbed navigation (Home, Monitors, Settings, Account, About)
 - Thumbnail generation for the settings Home page
 - In-app log viewer (systemd journal)
 - Systemd service autostart toggle from settings
@@ -55,6 +58,11 @@ wallpaper:
   set_interval: 5
   fetch_interval: 30
   cleanup_days: 7
+  multi_monitor_enabled: false
+  monitors:
+    "0":
+      rotation_enabled: true
+      orientation: "any"
 
 bookmarks:
   enabled: false
@@ -67,23 +75,26 @@ kde:
 
 ### Options
 
-| Option                       | Default             | Description                                        |
-|------------------------------|---------------------|----------------------------------------------------|
-| `download_path`              | `~/Pictures/KPixiv` | Where to store wallpapers                          |
-| `pixiv.ranking`              | `daily`             | Ranking type (`daily`/`weekly`/`monthly`)          |
-| `pixiv.r18`                  | `false`             | Include R-18 content                               |
-| `pixiv.min_width`            | `1280`              | Minimum image width                                |
-| `pixiv.min_height`           | `720`               | Minimum image height                               |
-| `pixiv.landscape_only`       | `true`              | Only download landscape images                     |
-| `wallpaper.mode`             | `fill`              | Scaling mode (`fill`/`cover`/`fit`)                |
-| `wallpaper.history_limit`    | `10`                | Max wallpapers to keep in rotation history         |
-| `wallpaper.set_interval`     | `5`                 | Minutes between wallpaper changes                  |
-| `wallpaper.fetch_interval`   | `30`                | Minutes between Pixiv fetch cycles                 |
-| `wallpaper.cleanup_days`     | `7`                 | Remove cached wallpapers older than N days         |
-| `bookmarks.enabled`          | `false`             | Enable periodic bookmark sync                      |
-| `bookmarks.sync_interval`    | `60`                | Minutes between bookmark sync cycles               |
-| `bookmarks.auto_cleanup`     | `true`              | Remove unbookmarked images from favorites          |
-| `kde.set_lock_screen`        | `false`             | Also apply wallpaper to the KDE lock screen        |
+| Option                                    | Default             | Description                                        |
+|-------------------------------------------|---------------------|----------------------------------------------------|
+| `download_path`                           | `~/Pictures/KPixiv` | Where to store wallpapers                          |
+| `pixiv.ranking`                           | `daily`             | Ranking type (`daily`/`weekly`/`monthly`)          |
+| `pixiv.r18`                               | `false`             | Include R-18 content                               |
+| `pixiv.min_width`                         | `1280`              | Minimum image width                                |
+| `pixiv.min_height`                        | `720`               | Minimum image height                               |
+| `pixiv.landscape_only`                    | `true`              | Only download landscape images                     |
+| `wallpaper.mode`                          | `fill`              | Scaling mode (`fill`/`cover`/`fit`)                |
+| `wallpaper.multi_monitor_enabled`         | `false`             | Enable per-monitor wallpaper assignment            |
+| `wallpaper.monitors.<id>.rotation_enabled`| `true`              | Enable rotation for this monitor                   |
+| `wallpaper.monitors.<id>.orientation`     | `any`               | Orientation filter: `any`, `landscape`, `portrait` |
+| `wallpaper.history_limit`                 | `10`                | Max wallpapers to keep in rotation history         |
+| `wallpaper.set_interval`                  | `5`                 | Minutes between wallpaper changes                  |
+| `wallpaper.fetch_interval`                | `30`                | Minutes between Pixiv fetch cycles                 |
+| `wallpaper.cleanup_days`                  | `7`                 | Remove cached wallpapers older than N days         |
+| `bookmarks.enabled`                       | `false`             | Enable periodic bookmark sync                      |
+| `bookmarks.sync_interval`                 | `60`                | Minutes between bookmark sync cycles               |
+| `bookmarks.auto_cleanup`                  | `true`              | Remove unbookmarked images from favorites          |
+| `kde.set_lock_screen`                     | `false`             | Also apply wallpaper to the KDE lock screen        |
 
 ## Pixiv Login
 
@@ -98,14 +109,14 @@ Once logged in, tokens are persisted and automatically refreshed. The tray menu 
 
 ## Runtime Architecture
 
-KPixiv runs as one process:
+KPixiv currently runs as one process:
 
 `systemd user service -> kpixiv process -> tray + scheduler + fetch + wallpaper management`
 
-- No split daemon/tray design
+- No split daemon/tray design (socket separation is planned — see `docs/tray-socket-design.md`)
 - No IPC or local socket layer
 - Tray lifecycle is app lifecycle (`Quit` stops the whole process)
-- systemd still supervises startup and restart behavior
+- systemd supervises startup and restart behavior
 
 ## Usage
 
@@ -114,23 +125,29 @@ KPixiv runs as one process:
 ```bash
 kpixiv fetch                        # Download wallpapers from Pixiv rankings
 kpixiv next                         # Apply the next wallpaper in queue
+  --monitor 0                       # Apply next wallpaper on monitor 0 only
+  --all                             # Apply next wallpaper on all monitors
 kpixiv daemon                       # Launch tray-enabled runtime (used by systemd)
   --reset                           # Clear all cached images before starting
+kpixiv monitors                     # List active KDE Plasma screens
 kpixiv status                       # Show config, history, and storage info
+kpixiv queue                        # Manage the wallpaper queue
 
 kpixiv bookmarks sync               # Sync bookmarked images from Pixiv
 kpixiv bookmarks list               # List locally bookmarked images
 kpixiv bookmarks add <illust_id>    # Bookmark an artwork on Pixiv
 kpixiv bookmarks add-current        # Bookmark the current wallpaper on Pixiv
+  --monitor 1                       # Bookmark monitor 1's current wallpaper
+  --all                             # Bookmark current wallpapers on all monitors
 ```
 
 ### Global flags
 
-| Flag             | Description                                              |
-|------------------|----------------------------------------------------------|
+| Flag             | Description                                                   |
+|------------------|---------------------------------------------------------------|
 | `-c, --config`   | Path to config file (default: `~/.config/kpixiv/config.yaml`) |
-| `-v, --verbose`  | Enable verbose logging                                   |
-| `--dry-run`      | Show actions without downloading or applying             |
+| `-v, --verbose`  | Enable verbose logging                                        |
+| `--dry-run`      | Show actions without downloading or applying                  |
 
 ### Tray Menu
 
@@ -157,7 +174,8 @@ Quit                        Stop KPixiv
 
 The **Settings** tray option opens a GUI dialog with tabbed navigation:
 
-- **Home** — live status: current wallpaper info with thumbnail preview, cached count, next/last rotation time
+- **Home** — live status: current wallpaper info with thumbnail preview, cached count, next/last rotation time. When multi-monitor is enabled, shows per-monitor wallpapers instead.
+- **Monitors** — enable/disable per-monitor wallpaper mode, list detected monitors with EDID model names, toggle rotation per monitor, set orientation filter (Any / Landscape / Portrait). At least one monitor must be enabled.
 - **Settings** — editing config live:
   - **Intervals** — wallpaper change and download intervals
   - **Wallpaper Source** — daily, weekly, or monthly feed

@@ -93,29 +93,36 @@ type settingsUI struct {
 	currentPage   int
 	statusRefresh chan struct{}
 
-	downloadPath    *widget.Entry
-	setInterval     *numericalEntry
-	fetchInterval   *numericalEntry
-	historyLimit    *numericalEntry
-	cleanupDays     *numericalEntry
-	feedSource      *widget.Select
-	rankingSub      *widget.Select
-	rotationEnabled *widget.Check
-	fetchEnabled    *widget.Check
-	minWidth        *numericalEntry
-	minHeight       *numericalEntry
-	lockScreen      *widget.Check
+	downloadPath        *widget.Entry
+	setInterval         *numericalEntry
+	fetchInterval       *numericalEntry
+	historyLimit        *numericalEntry
+	cleanupDays         *numericalEntry
+	feedSource          *widget.Select
+	rankingSub          *widget.Select
+	rotationEnabled     *widget.Check
+	fetchEnabled        *widget.Check
+	minWidth            *numericalEntry
+	minHeight           *numericalEntry
+	lockScreen          *widget.Check
+	multiMonitor        *widget.Check
+	monitorSettings     *fyne.Container
+	monitorChecks       map[string]*widget.Check
+	monitorOrientations map[string]*widget.Select
 
 	bookmarksEnabled      *widget.Check
 	bookmarksSyncInterval *numericalEntry
 	bookmarksAutoCleanup  *widget.Check
 
-	statusWallpaper *widget.Label
-	statusCached    *widget.Label
-	statusLastRot   *widget.Label
-	statusNextRot   *widget.Label
-	statusThumbnail *canvas.Image
-	lastWallpaperID string
+	statusWallpaper         *widget.Label
+	statusCached            *widget.Label
+	statusLastRot           *widget.Label
+	statusNextRot           *widget.Label
+	statusThumbnail         *canvas.Image
+	monitorStatus           *fyne.Container
+	currentWallpaperSection *fyne.Container
+	monitorWallpaperSection *fyne.Container
+	lastWallpaperID         string
 
 	autostartCheck     *widget.Check
 	autostartStatus    *widget.Label
@@ -140,7 +147,7 @@ func newSettingsUI(a fyne.App, ctrl AppController, log *slog.Logger) *settingsUI
 
 func (ui *settingsUI) build(a fyne.App) {
 	w := a.NewWindow("kPixiv – Settings")
-	w.Resize(fyne.NewSize(640, 520))
+	w.Resize(fyne.NewSize(720, 600))
 	w.SetFixedSize(false)
 	w.CenterOnScreen()
 	w.SetIcon(fyne.NewStaticResource("kpixiv", assets.IconPNG))
@@ -200,6 +207,7 @@ func (ui *settingsUI) createWidgets() {
 
 	ui.lockScreen = widget.NewCheck("Set Lock Screen", nil)
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
+	ui.createMonitorWidgets()
 
 	ui.bookmarksEnabled = widget.NewCheck("Enable Bookmark Sync", func(enabled bool) {
 		if enabled {
@@ -232,6 +240,7 @@ func (ui *settingsUI) createWidgets() {
 	ui.statusThumbnail = canvas.NewImageFromFile("")
 	ui.statusThumbnail.FillMode = canvas.ImageFillContain
 	ui.statusThumbnail.SetMinSize(fyne.NewSize(140, 0))
+	ui.monitorStatus = container.NewVBox()
 
 	ui.autostartCheck = widget.NewCheck("Start KPixiv automatically when I log in", nil)
 	ui.autostartCheck.Disable()
@@ -269,6 +278,18 @@ func (ui *settingsUI) createWidgets() {
 	})
 }
 
+func (ui *settingsUI) createMonitorWidgets() {
+	cfg := ui.ctrl.Config()
+	ui.multiMonitor = widget.NewCheck("Enable independent wallpapers for each monitor", func(enabled bool) {
+		ui.setMonitorControlsEnabled(enabled)
+	})
+	ui.multiMonitor.SetChecked(cfg.Wallpaper.MultiMonitorEnabled)
+	ui.monitorChecks = make(map[string]*widget.Check)
+	ui.monitorOrientations = make(map[string]*widget.Select)
+	ui.monitorSettings = container.NewVBox()
+	ui.refreshMonitorSettings()
+}
+
 func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 	sidebar := container.NewVBox()
 
@@ -278,6 +299,7 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 	}{
 		{"🏠 Home", ui.buildHomePage},
 		{"⚙️ Settings", ui.buildSettingsPage},
+		{"🖥 Monitors", ui.buildMonitorPage},
 		{"👤 Account", ui.buildAccountPage},
 		{"ℹ️ About", ui.buildAboutPage},
 	}
@@ -367,12 +389,12 @@ func (ui *settingsUI) highlightNav(idx int) {
 }
 
 func (ui *settingsUI) rebuildAccountPage() {
-	old := ui.pages[2]
-	ui.pages[2] = ui.buildAccountPage()
+	old := ui.pages[AccountPage]
+	ui.pages[AccountPage] = ui.buildAccountPage()
 	ui.content.Remove(old)
-	ui.content.Add(ui.pages[2])
-	if ui.currentPage != 2 {
-		ui.pages[2].Hide()
+	ui.content.Add(ui.pages[AccountPage])
+	if ui.currentPage != AccountPage {
+		ui.pages[AccountPage].Hide()
 	}
 }
 
@@ -408,6 +430,8 @@ func (ui *settingsUI) update() {
 	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
 	ui.minHeight.SetText(strconv.Itoa(cfg.Pixiv.MinHeight))
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
+	ui.multiMonitor.SetChecked(cfg.Wallpaper.MultiMonitorEnabled)
+	ui.refreshMonitorSettings()
 
 	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
 	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
@@ -453,31 +477,19 @@ func (ui *settingsUI) applySettings() {
 		cfg.Pixiv.MinHeight = v
 	}
 
-	switch ui.feedSource.Selected {
-	case feedSourceWeeklyRanking:
-		cfg.Pixiv.Ranking = config.RankingWeeklyMode
-		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
-	case feedSourceMonthlyRanking:
-		cfg.Pixiv.Ranking = config.RankingMonthlyMode
-		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
-	case feedSourceBookmarks:
-		cfg.Wallpaper.QueueSource = config.QueueSourceBookmarks
-	case feedSourceAll:
-		cfg.Wallpaper.QueueSource = config.QueueSourceAll
-		switch ui.rankingSub.Selected {
-		case rankingSubWeekly:
-			cfg.Pixiv.Ranking = config.RankingWeeklyMode
-		case rankingSubMonthly:
-			cfg.Pixiv.Ranking = config.RankingMonthlyMode
-		default:
-			cfg.Pixiv.Ranking = config.RankingDailyMode
-		}
-	default:
-		cfg.Pixiv.Ranking = config.RankingDailyMode
-		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
-	}
+	ui.applyFeedSource(cfg)
 
 	cfg.KDE.SetLockScreen = ui.lockScreen.Checked
+	cfg.Wallpaper.MultiMonitorEnabled = ui.multiMonitor.Checked
+	if cfg.Wallpaper.Monitors == nil {
+		cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{}
+	}
+	for id, check := range ui.monitorChecks {
+		cfg.Wallpaper.Monitors[id] = config.MonitorConfig{
+			RotationEnabled: check.Checked,
+			Orientation:     orientationValue(ui.monitorOrientations[id].Selected),
+		}
+	}
 
 	if ui.lockScreen.Checked {
 		updater := wallpaper.NewKDELockScreenUpdater()
@@ -505,6 +517,127 @@ func (ui *settingsUI) applySettings() {
 	ui.applyAutostart()
 
 	ui.log.Info("Settings applied")
+}
+
+func (ui *settingsUI) applyFeedSource(cfg *config.Config) {
+	switch ui.feedSource.Selected {
+	case feedSourceWeeklyRanking:
+		cfg.Pixiv.Ranking = config.RankingWeeklyMode
+		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
+	case feedSourceMonthlyRanking:
+		cfg.Pixiv.Ranking = config.RankingMonthlyMode
+		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
+	case feedSourceBookmarks:
+		cfg.Wallpaper.QueueSource = config.QueueSourceBookmarks
+	case feedSourceAll:
+		cfg.Wallpaper.QueueSource = config.QueueSourceAll
+		switch ui.rankingSub.Selected {
+		case rankingSubWeekly:
+			cfg.Pixiv.Ranking = config.RankingWeeklyMode
+		case rankingSubMonthly:
+			cfg.Pixiv.Ranking = config.RankingMonthlyMode
+		default:
+			cfg.Pixiv.Ranking = config.RankingDailyMode
+		}
+	default:
+		cfg.Pixiv.Ranking = config.RankingDailyMode
+		cfg.Wallpaper.QueueSource = config.QueueSourceRanking
+	}
+}
+
+func (ui *settingsUI) refreshMonitorSettings() {
+	if ui.monitorSettings == nil {
+		return
+	}
+	ui.monitorSettings.Objects = nil
+	ui.monitorChecks = make(map[string]*widget.Check)
+	ui.monitorOrientations = make(map[string]*widget.Select)
+	screens, err := ui.ctrl.Monitors()
+	if err != nil || len(screens) == 0 {
+		ui.monitorSettings.Add(widget.NewLabel("No active KDE screens detected."))
+		ui.monitorSettings.Refresh()
+		return
+	}
+	cfg := ui.ctrl.Config()
+	for _, screen := range screens {
+		settings, configured := cfg.Wallpaper.Monitors[screen.ID]
+		enabled := cfg.Wallpaper.RotationEnabled
+		if configured {
+			enabled = settings.RotationEnabled
+		}
+		name := screen.Name
+		if name == "" {
+			name = "Screen " + screen.ID
+		}
+		if screen.Model != "" {
+			name = name + " (" + screen.Model + ")"
+		}
+		check := widget.NewCheck(name, nil)
+		check.OnChanged = func(checked bool) {
+			if !checked {
+				active := 0
+				for _, c := range ui.monitorChecks {
+					if c.Checked {
+						active++
+					}
+				}
+				if active == 0 {
+					check.SetChecked(true)
+				}
+			}
+		}
+		check.SetChecked(enabled)
+		orientation := widget.NewSelect([]string{"Any", "Landscape", "Portrait"}, nil)
+		selectedOrientation := settings.Orientation
+		if selectedOrientation == "" || selectedOrientation == config.WallpaperAnyOrientation {
+			selectedOrientation = config.WallpaperAnyOrientation
+		}
+		orientation.SetSelected(orientationDisplay(selectedOrientation))
+		ui.monitorChecks[screen.ID] = check
+		ui.monitorOrientations[screen.ID] = orientation
+		ui.monitorSettings.Add(container.NewGridWithColumns(2, check, orientation))
+	}
+	ui.monitorSettings.Refresh()
+	ui.setMonitorControlsEnabled(ui.multiMonitor.Checked)
+}
+
+func (ui *settingsUI) setMonitorControlsEnabled(enabled bool) {
+	for _, check := range ui.monitorChecks {
+		if enabled {
+			check.Enable()
+		} else {
+			check.Disable()
+		}
+	}
+	for _, orientation := range ui.monitorOrientations {
+		if enabled {
+			orientation.Enable()
+		} else {
+			orientation.Disable()
+		}
+	}
+}
+
+func orientationDisplay(orientation config.WallpaperOrientation) string {
+	switch orientation {
+	case config.WallpaperLandscapeOrientation:
+		return "Landscape"
+	case config.WallpaperPortraitOrientation:
+		return "Portrait"
+	default:
+		return "Any"
+	}
+}
+
+func orientationValue(display string) config.WallpaperOrientation {
+	switch display {
+	case "Landscape":
+		return config.WallpaperLandscapeOrientation
+	case "Portrait":
+		return config.WallpaperPortraitOrientation
+	default:
+		return config.WallpaperAnyOrientation
+	}
 }
 
 func (ui *settingsUI) applyAutostart() {
@@ -552,6 +685,14 @@ func (ui *settingsUI) stopStatusRefresh() {
 }
 
 func (ui *settingsUI) refreshStatus() {
+	ui.refreshMonitorStatus()
+	if ui.ctrl.Config().Wallpaper.MultiMonitorEnabled {
+		ui.currentWallpaperSection.Hide()
+		ui.monitorWallpaperSection.Show()
+	} else {
+		ui.currentWallpaperSection.Show()
+		ui.monitorWallpaperSection.Hide()
+	}
 	meta, _ := ui.ctrl.CurrentWallpaper() //nolint:errcheck
 
 	if meta != nil && meta.ID != "" && meta.ID != ui.lastWallpaperID {

@@ -13,22 +13,39 @@ import (
 )
 
 type Queue struct {
-	mu    sync.RWMutex
-	items []string
-	path  string
+	mu          sync.RWMutex
+	items       []string
+	path        string
+	monitorID   string
+	orientation string
+	monitors    map[string]MonitorQueueData
 }
 
 type QueueData struct {
-	Items []string `json:"items"`
+	Items    []string                    `json:"items"`
+	Monitors map[string]MonitorQueueData `json:"monitors,omitempty"`
+}
+
+type MonitorQueueData struct {
+	Items       []string `json:"items"`
+	Orientation string   `json:"orientation"`
 }
 
 // NewQueue creates a queue persisted in the provided state directory.
 func NewQueue(stateDir string) *Queue {
 	path := filepath.Join(stateDir, "queue.json")
 	return &Queue{
-		items: []string{},
-		path:  path,
+		items:    []string{},
+		path:     path,
+		monitors: map[string]MonitorQueueData{},
 	}
+}
+
+// NewMonitorQueue creates a queue stored in queue.json for one monitor.
+func NewMonitorQueue(stateDir, monitorID string) *Queue {
+	q := NewQueue(stateDir)
+	q.monitorID = monitorID
+	return q
 }
 
 // Load reads queue contents from disk.
@@ -46,18 +63,54 @@ func (q *Queue) Load() error {
 		return err
 	}
 
-	q.items = qd.Items
+	q.monitors = qd.Monitors
+	if q.monitors == nil {
+		q.monitors = map[string]MonitorQueueData{}
+	}
+	if q.monitorID == "" {
+		q.items = qd.Items
+	} else {
+		monitor := q.monitors[q.monitorID]
+		q.items = monitor.Items
+		q.orientation = monitor.Orientation
+	}
 	return nil
 }
 
 // Save writes queue contents to disk.
 func (q *Queue) Save() error {
-	data, err := json.MarshalIndent(QueueData{Items: q.items}, "", "  ")
+	queueData := QueueData{Monitors: q.monitors}
+	if q.monitorID == "" {
+		queueData.Items = q.items
+	} else {
+		queueData.Items = nil
+		queueData.Monitors[q.monitorID] = MonitorQueueData{Items: q.items, Orientation: q.orientation}
+	}
+	data, err := json.MarshalIndent(queueData, "", "  ")
 	if err != nil {
 		return err
 	}
 
 	return os.WriteFile(q.path, data, 0600)
+}
+
+// Orientation returns the orientation used to build this monitor queue.
+func (q *Queue) Orientation() string {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	return q.orientation
+}
+
+// SetOrientation clears a monitor queue when its filtering changes.
+func (q *Queue) SetOrientation(orientation string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.monitorID == "" || q.orientation == orientation {
+		return nil
+	}
+	q.items = []string{}
+	q.orientation = orientation
+	return q.Save()
 }
 
 // Len returns the number of queued IDs.

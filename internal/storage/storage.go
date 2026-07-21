@@ -31,9 +31,10 @@ type ImageMeta struct {
 }
 
 type History struct {
-	Current   string    `json:"current"`
-	Images    []string  `json:"images"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Current   string            `json:"current"`
+	Images    []string          `json:"images"`
+	Monitors  map[string]string `json:"monitors,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at"`
 }
 
 type PaginationState struct {
@@ -613,7 +614,7 @@ func (s *Storage) lookupImageMeta(id string) (*ImageMeta, bool) {
 	return meta, ok
 }
 
-// LoadHistory reads wallpaper history from disk.
+// LoadHistory reads wallpaper history from the disk.
 func (s *Storage) LoadHistory() (*History, error) {
 	path := s.HistoryPath()
 	data, err := os.ReadFile(path)
@@ -621,15 +622,21 @@ func (s *Storage) LoadHistory() (*History, error) {
 		if os.IsNotExist(err) {
 			return &History{
 				Images:    []string{},
+				Monitors:  map[string]string{},
 				UpdatedAt: time.Now(),
 			}, nil
 		}
+
 		return nil, err
 	}
 
 	var history History
 	if err = json.Unmarshal(data, &history); err != nil {
 		return nil, err
+	}
+
+	if history.Monitors == nil {
+		history.Monitors = map[string]string{}
 	}
 
 	return &history, nil
@@ -644,6 +651,47 @@ func (s *Storage) SaveHistory(history *History) error {
 	}
 
 	return os.WriteFile(s.HistoryPath(), data, 0600)
+}
+
+func (s *Storage) LoadMonitorHistory() (map[string]string, error) {
+	history, err := s.LoadHistory()
+	if err != nil {
+		return nil, err
+	}
+
+	return history.Monitors, nil
+}
+
+func (s *Storage) SaveMonitorHistory(monitors map[string]string, historyLimit int) error {
+	history, err := s.LoadHistory()
+	if err != nil {
+		return err
+	}
+
+	if history.Monitors == nil {
+		history.Monitors = map[string]string{}
+	}
+
+	for screenID, imageID := range monitors {
+		if oldID, exists := history.Monitors[screenID]; exists && oldID != "" && oldID != imageID {
+			history.Images = append(history.Images, oldID)
+		}
+
+		history.Monitors[screenID] = imageID
+	}
+
+	trimHistory(history, historyLimit)
+	return s.SaveHistory(history)
+}
+
+func (s *Storage) AddToMonitorHistory(screenID, imageID string, historyLimit int) error {
+	monitors, err := s.LoadMonitorHistory()
+	if err != nil {
+		return err
+	}
+
+	monitors[screenID] = imageID
+	return s.SaveMonitorHistory(monitors, historyLimit)
 }
 
 // AddToHistoryWithLimit updates current wallpaper and trims history length.
@@ -664,11 +712,7 @@ func (s *Storage) AddToHistoryWithLimit(imageID string, historyLimit int) error 
 }
 
 func trimHistory(history *History, historyLimit int) bool {
-	limit := historyLimit
-	if limit < 1 {
-		limit = 1
-	}
-
+	limit := max(historyLimit, 1)
 	if len(history.Images) <= limit {
 		return false
 	}

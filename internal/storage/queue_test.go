@@ -19,6 +19,36 @@ func TestNewQueueCreatesEmptyQueue(t *testing.T) {
 	}
 }
 
+func TestMonitorQueueRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	q := NewMonitorQueue(tmp, "0")
+	if err := q.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if err := q.SetOrientation("portrait"); err != nil {
+		t.Fatalf("SetOrientation() returned error: %v", err)
+	}
+	if err := q.AppendRandom([]string{"a", "b"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	reloaded := NewMonitorQueue(tmp, "0")
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("reloaded Load() returned error: %v", err)
+	}
+	if reloaded.Orientation() != "portrait" || reloaded.Len() != 2 {
+		t.Fatalf("unexpected monitor queue: orientation=%q len=%d", reloaded.Orientation(), reloaded.Len())
+	}
+
+	global := NewQueue(tmp)
+	if err := global.Load(); err != nil {
+		t.Fatalf("global Load() returned error: %v", err)
+	}
+	if global.Len() != 0 {
+		t.Fatalf("monitor queue changed global queue length: got %d", global.Len())
+	}
+}
+
 func TestQueueLoadCreatesFileIfNotExists(t *testing.T) {
 	tmp := t.TempDir()
 	q := NewQueue(tmp)

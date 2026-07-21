@@ -111,7 +111,16 @@ func (f *Fetcher) filterImages(images []pixiv.Image, blacklist map[string]struct
 		if img.Width < f.cfg.Pixiv.MinWidth || img.Height < f.cfg.Pixiv.MinHeight {
 			continue
 		}
-		if f.cfg.Pixiv.LandscapeOnly && img.Height > img.Width {
+		landscapeOnly := f.cfg.Pixiv.LandscapeOnly
+		if landscapeOnly && f.cfg.Wallpaper.MultiMonitorEnabled {
+			for _, monitor := range f.cfg.Wallpaper.Monitors {
+				if monitor.Orientation != config.WallpaperLandscapeOrientation {
+					landscapeOnly = false
+					break
+				}
+			}
+		}
+		if landscapeOnly && img.Height > img.Width {
 			continue
 		}
 		filtered = append(filtered, img)

@@ -20,6 +20,24 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
+func TestMatchesOrientation(t *testing.T) {
+	landscape := &storage.ImageMeta{Width: 1920, Height: 1080}
+	portrait := &storage.ImageMeta{Width: 1080, Height: 1920}
+
+	if !matchesOrientation(landscape, config.WallpaperLandscapeOrientation) {
+		t.Error("landscape image did not match landscape orientation")
+	}
+	if matchesOrientation(landscape, config.WallpaperPortraitOrientation) {
+		t.Error("landscape image matched portrait orientation")
+	}
+	if !matchesOrientation(portrait, config.WallpaperPortraitOrientation) {
+		t.Error("portrait image did not match portrait orientation")
+	}
+	if !matchesOrientation(landscape, config.WallpaperAnyOrientation) {
+		t.Error("landscape image did not match any orientation")
+	}
+}
+
 type mockSetter struct {
 	setCalled bool
 	lastPath  string
