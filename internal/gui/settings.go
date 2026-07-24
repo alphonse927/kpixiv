@@ -209,6 +209,12 @@ func (ui *settingsUI) createWidgets() {
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
 	ui.createMonitorWidgets()
 
+	ui.bookmarksSyncInterval = newNumericalEntry()
+	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
+
+	ui.bookmarksAutoCleanup = widget.NewCheck("Remove unbookmarked images", nil)
+	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
+
 	ui.bookmarksEnabled = widget.NewCheck("Enable Bookmark Sync", func(enabled bool) {
 		if enabled {
 			ui.bookmarksSyncInterval.Enable()
@@ -219,12 +225,6 @@ func (ui *settingsUI) createWidgets() {
 		}
 	})
 	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
-
-	ui.bookmarksSyncInterval = newNumericalEntry()
-	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
-
-	ui.bookmarksAutoCleanup = widget.NewCheck("Remove unbookmarked images", nil)
-	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
 
 	if !cfg.Bookmarks.Enabled {
 		ui.bookmarksSyncInterval.Disable()
