@@ -638,7 +638,8 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 				id := monitors[s.ID]
 				if id == "" {
 					id = globalID
-				} else {
+				}
+				if id != "" {
 					currentIDs = append(currentIDs, id)
 				}
 			}
