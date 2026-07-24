@@ -12,10 +12,18 @@ func TestParseScreenIDs(t *testing.T) {
 	}
 }
 
-func TestParseKScreenNames(t *testing.T) {
+func TestParseKScreenOutputs(t *testing.T) {
 	output := "Output: 1 DP-3 uuid\n\tenabled\nOutput: 2 DP-2 uuid\n\tenabled\nOutput: 3 eDP-1 uuid\n\tdisabled\n"
-	names := parseKScreenNames(output)
-	if len(names) != 2 || names[0] != "DP-3" || names[1] != "DP-2" {
+	names := parseKScreenOutputs(output)
+	if len(names) != 2 || names[1] != "DP-3" || names[2] != "DP-2" {
+		t.Fatalf("unexpected display names: %#v", names)
+	}
+}
+
+func TestParseKScreenOutputsUnordered(t *testing.T) {
+	output := "Output: 2 DP-2 uuid\n\tenabled\nOutput: 1 DP-1 uuid\n\tenabled\n"
+	names := parseKScreenOutputs(output)
+	if len(names) != 2 || names[1] != "DP-1" || names[2] != "DP-2" {
 		t.Fatalf("unexpected display names: %#v", names)
 	}
 }

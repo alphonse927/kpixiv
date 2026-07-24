@@ -42,60 +42,80 @@ func (k *KDESetter) Screens() ([]Screen, error) {
 	}
 
 	screens := parseScreenIDs(output)
-	for i, name := range k.displayNames() {
-		if i >= len(screens) {
-			break
-		}
-		screens[i].Name = name
-		screens[i].Model = k.monitorModel(name)
-	}
+	outputs := k.displayOutputs()
 	for i := range screens {
-		if screens[i].Name == "" {
-			screens[i].Name = "Screen " + screens[i].ID
+		index := screens[i].ID
+		screenNum, snErr := strconv.Atoi(index)
+		if snErr != nil {
+			screens[i].Name = "Screen " + index
+			continue
+		}
+
+		name, ok := outputs[screenNum+1]
+		if ok {
+			screens[i].ID = name     // connector name — stable config key
+			screens[i].Index = index // plasma index — used by SetForScreen
+			screens[i].Name = name
+			screens[i].Model = k.monitorModel(name)
+		} else {
+			screens[i].Name = "Screen " + index
 		}
 	}
 	return screens, nil
 }
 
-func (k *KDESetter) displayNames() []string {
+func (k *KDESetter) displayOutputs() map[int]string {
 	binary, err := exec.LookPath("kscreen-doctor")
 	if err != nil {
 		return nil
 	}
+
 	output, err := exec.Command(binary, "-o").CombinedOutput() // #nosec G204 -- fixed desktop utility
 	if err != nil {
 		return nil
 	}
-	return parseKScreenNames(string(output))
+
+	return parseKScreenOutputs(string(output))
 }
 
-func parseKScreenNames(output string) []string {
+func parseKScreenOutputs(output string) map[int]string {
 	output = regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(output, "")
 	outputLines := strings.Split(output, "\n")
-	var names []string
+	outputs := make(map[int]string)
+
 	for i, line := range outputLines {
 		fields := strings.Fields(line)
 		if len(fields) < 3 || fields[0] != "Output:" {
 			continue
 		}
+
+		outputNum, err := strconv.Atoi(fields[1])
+		if err != nil {
+			continue
+		}
+
 		enabled := false
 		for _, stateLine := range outputLines[i+1:] {
 			stateFields := strings.Fields(stateLine)
 			if len(stateFields) > 0 && stateFields[0] == "Output:" {
 				break
 			}
+
 			if len(stateFields) == 1 && stateFields[0] == "enabled" {
 				enabled = true
 			}
+
 			if len(stateFields) == 1 && stateFields[0] == "disabled" {
 				break
 			}
 		}
+
 		if enabled {
-			names = append(names, fields[2])
+			outputs[outputNum] = fields[2]
 		}
 	}
-	return names
+
+	return outputs
 }
 
 func parseScreenIDs(output string) []Screen {
@@ -140,7 +160,7 @@ for (var i = 0; i < allDesktops.length; i++) {
 }`
 
 	// #nosec G204 -- script is constructed safely using strconv.Quote; qdbus is a trusted KDE Plasma interface
-	if _, err := k.evaluate(script); err != nil {
+	if _, err = k.evaluate(script); err != nil {
 		return fmt.Errorf("failed to set wallpaper via qdbus: %w", err)
 	}
 
@@ -159,6 +179,8 @@ for (var i = 0; i < allDesktops.length; i++) {
 }
 
 // SetForScreen applies a wallpaper to every virtual desktop on one screen.
+// screenID must be the connector name (e.g. "DP-2") — it is resolved internally
+// to the transient Plasma screen index used in the qdbus JavaScript API.
 func (k *KDESetter) SetForScreen(screenID, path string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
@@ -168,8 +190,22 @@ func (k *KDESetter) SetForScreen(screenID, path string) error {
 		return fmt.Errorf("qdbus binary not found (tried: qdbus, qdbus6, qdbus-qt5)")
 	}
 
+	// Resolve connector name to the Plasma screen index (output number - 1).
+	outputs := k.displayOutputs()
+	var screenIndex string
+	for outputNum, name := range outputs {
+		if name == screenID {
+			screenIndex = strconv.Itoa(outputNum - 1)
+			break
+		}
+	}
+
+	if screenIndex == "" {
+		return fmt.Errorf("screen %q not found in kscreen-doctor output", screenID)
+	}
+
 	imageURI := strconv.Quote("file://" + absPath)
-	screen := strconv.Quote(screenID)
+	screen := strconv.Quote(screenIndex)
 	script := `var allDesktops = desktops();
 for (var i = 0; i < allDesktops.length; i++) {
  var d = allDesktops[i];
@@ -178,7 +214,7 @@ for (var i = 0; i < allDesktops.length; i++) {
  d.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];
  d.writeConfig("Image", ` + imageURI + `);
 }`
-	if _, err := k.evaluate(script); err != nil {
+	if _, err = k.evaluate(script); err != nil {
 		return fmt.Errorf("failed to set wallpaper on screen %q via qdbus: %w", screenID, err)
 	}
 	return nil
@@ -237,6 +273,7 @@ func readModelRaw(path string) string {
 	if err != nil {
 		return ""
 	}
+
 	// Pick the longest plausible ASCII string from the raw EDID blob.
 	var best, cur string
 	for _, b := range data {
@@ -249,11 +286,14 @@ func readModelRaw(path string) string {
 			cur = ""
 		}
 	}
+
 	if len(cur) > len(best) {
 		best = cur
 	}
+
 	if len(best) > 4 {
 		return strings.TrimSpace(best)
 	}
+
 	return ""
 }
