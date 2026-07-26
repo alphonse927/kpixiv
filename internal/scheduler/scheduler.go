@@ -818,7 +818,9 @@ func (sch *Scheduler) monitorOrientation(screenID string) config.WallpaperOrient
 	return config.WallpaperAnyOrientation
 }
 
-// RebuildMonitorQueues clears monitor queues when their orientation changes.
+// RebuildMonitorQueues recreates all monitor queues from the main queue.
+// This is called when monitor config or rotation settings change, ensuring
+// every monitor starts with a fresh queue.
 func (sch *Scheduler) RebuildMonitorQueues() error {
 	if !sch.cfg.Wallpaper.MultiMonitorEnabled {
 		return nil
@@ -834,6 +836,19 @@ func (sch *Scheduler) RebuildMonitorQueues() error {
 		return err
 	}
 
+	// Build a set of current screen IDs to detect stale entries.
+	currentIDs := make(map[string]struct{}, len(screens))
+	for _, s := range screens {
+		currentIDs[s.ID] = struct{}{}
+	}
+
+	// Load the main queue to check for stale monitor entries.
+	mq := storage.NewQueue(sch.storage.StateDir())
+	if err = mq.Load(); err != nil {
+		return err
+	}
+
+	// Recreate each monitor queue: clear and refill from the main queue.
 	for _, screen := range screens {
 		q := storage.NewMonitorQueue(sch.storage.StateDir(), screen.ID)
 		if err = q.Load(); err != nil {
