@@ -121,7 +121,8 @@ var nextCmd = &cobra.Command{
 		var setErr error
 		switch {
 		case monitorID != "":
-			setErr = sch.SetNextWallpaperForScreen(q, monitorID, "next")
+			index := sch.ResolveScreenIndex(monitorID)
+			setErr = sch.SetNextWallpaperForScreen(q, monitorID, index, "next")
 		case allMonitors:
 			setErr = sch.SetNextWallpapers("next")
 		default:
