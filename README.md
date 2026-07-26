@@ -10,7 +10,8 @@ A tray-centric Linux wallpaper application for fetching and rotating Pixiv wallp
 - Apply wallpapers directly to the KDE Plasma desktop
 - **Per-monitor wallpaper assignment** on multi-monitor setups — each screen gets its own wallpaper
 - **Orientation-aware rotation** — per-monitor filter (landscape/portrait/any) with queue fallback
-- **EDID-based monitor model detection** — displays connector name and model (e.g. `DP-3 (DELL S2721DS/0)`)
+- **EDID-based monitor model detection** — displays connector name and model (e.g. `DP-1 (LG ULTRAGEAR)`)
+- **Automatic queue recreation** — per-monitor wallpaper queues are rebuilt when monitor settings change
 - Tray-centric runtime with automatic wallpaper rotation
 - Pixiv OAuth login with automatic token refresh (browser-based PKCE flow)
 - Bookmark and exclude wallpapers from the tray
@@ -58,11 +59,14 @@ wallpaper:
   set_interval: 5
   fetch_interval: 30
   cleanup_days: 7
-  multi_monitor_enabled: false
+  multi_monitor_enabled: true
   monitors:
-    "0":
+    "DP-1":
       rotation_enabled: true
-      orientation: "any"
+      orientation: "landscape"
+    "DP-2":
+      rotation_enabled: true
+      orientation: "portrait"
 
 bookmarks:
   enabled: false
@@ -84,9 +88,9 @@ kde:
 | `pixiv.min_height`                        | `720`               | Minimum image height                               |
 | `pixiv.landscape_only`                    | `true`              | Only download landscape images                     |
 | `wallpaper.mode`                          | `fill`              | Scaling mode (`fill`/`cover`/`fit`)                |
-| `wallpaper.multi_monitor_enabled`         | `false`             | Enable per-monitor wallpaper assignment            |
-| `wallpaper.monitors.<id>.rotation_enabled`| `true`              | Enable rotation for this monitor                   |
-| `wallpaper.monitors.<id>.orientation`     | `any`               | Orientation filter: `any`, `landscape`, `portrait` |
+| `wallpaper.multi_monitor_enabled`                | `false`             | Enable per-monitor wallpaper assignment                           |
+| `wallpaper.monitors.<conn>.rotation_enabled`     | `true`              | Enable rotation for this monitor (key is connector name e.g. `DP-1`) |
+| `wallpaper.monitors.<conn>.orientation`          | `any`               | Orientation filter: `any`, `landscape`, `portrait`                |
 | `wallpaper.history_limit`                 | `10`                | Max wallpapers to keep in rotation history         |
 | `wallpaper.set_interval`                  | `5`                 | Minutes between wallpaper changes                  |
 | `wallpaper.fetch_interval`                | `30`                | Minutes between Pixiv fetch cycles                 |
@@ -125,19 +129,19 @@ KPixiv currently runs as one process:
 ```bash
 kpixiv fetch                        # Download wallpapers from Pixiv rankings
 kpixiv next                         # Apply the next wallpaper in queue
-  --monitor 0                       # Apply next wallpaper on monitor 0 only
+  --monitor DP-1                    # Apply on monitor DP-1 (or by index: --monitor 0)
   --all                             # Apply next wallpaper on all monitors
 kpixiv daemon                       # Launch tray-enabled runtime (used by systemd)
   --reset                           # Clear all cached images before starting
-kpixiv monitors                     # List active KDE Plasma screens
-kpixiv status                       # Show config, history, and storage info
+kpixiv monitors                     # List active KDE Plasma screens with index and connector
+kpixiv status                       # Show config, history, monitors, and storage info
 kpixiv queue                        # Manage the wallpaper queue
 
 kpixiv bookmarks sync               # Sync bookmarked images from Pixiv
 kpixiv bookmarks list               # List locally bookmarked images
 kpixiv bookmarks add <illust_id>    # Bookmark an artwork on Pixiv
 kpixiv bookmarks add-current        # Bookmark the current wallpaper on Pixiv
-  --monitor 1                       # Bookmark monitor 1's current wallpaper
+  --monitor DP-1                    # Bookmark monitor DP-1's current wallpaper (or by index: --monitor 0)
   --all                             # Bookmark current wallpapers on all monitors
 ```
 

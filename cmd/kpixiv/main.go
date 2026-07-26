@@ -150,29 +150,36 @@ var monitorsCmd = &cobra.Command{
 			fmt.Println("Dry-run does not query Plasma screens")
 			return nil
 		}
+
 		screens, err := wallpaper.NewKDESetter(cfg.KDE.SetLockScreen).Screens()
 		if err != nil {
 			return err
 		}
+
 		if len(screens) == 0 {
 			fmt.Println("No active Plasma screens found")
 			return nil
 		}
+
 		for _, screen := range screens {
 			state := "enabled"
 			if settings, ok := cfg.Wallpaper.Monitors[screen.ID]; ok && !settings.RotationEnabled {
 				state = "disabled"
 			}
+
 			name := screen.Name
 			if name == "" {
 				name = "Screen " + screen.ID
 			}
+
+			fmt.Printf("[%s] ", screen.Index)
 			if screen.Model != "" {
 				fmt.Printf("%s (%s/%s)\t%s\n", name, screen.Model, screen.ID, state)
 			} else {
 				fmt.Printf("%s (%s)\t%s\n", name, screen.ID, state)
 			}
 		}
+
 		return nil
 	},
 }
@@ -259,23 +266,56 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Fetch interval: %d minutes\n", cfg.Wallpaper.FetchInterval)
 		fmt.Printf("Min image size: %dx%d\n", cfg.Pixiv.MinWidth, cfg.Pixiv.MinHeight)
 		fmt.Printf("R-18: %t\n", cfg.Pixiv.R18)
-		fmt.Printf("Landscape only: %t\n", cfg.Pixiv.LandscapeOnly)
 		fmt.Printf("Wallpaper history: %d\n", cfg.Wallpaper.HistoryLimit)
 		fmt.Printf("Cleanup images older than: %d days\n", cfg.Wallpaper.CleanupDays)
 		fmt.Printf("Lock screen: %t\n", cfg.KDE.SetLockScreen)
+		fmt.Printf("Multi-monitor: %t\n", cfg.Wallpaper.MultiMonitorEnabled)
+
+		screens, _ := wallpaper.NewKDESetter(false).Screens()
+
 		fmt.Printf("\n=== Wallpaper History ===\n")
 		fmt.Printf("Total wallpapers: %d\n", totalWallpapers)
-		fmt.Printf("Current: %s\n", history.Current)
-		if len(history.Images) > 0 {
-			fmt.Printf("Previous: %s\n", history.Images[len(history.Images)-1])
+		if cfg.Wallpaper.MultiMonitorEnabled {
+			if monitorHistoryErr == nil {
+				for _, s := range screens {
+					imageID, ok := monitorHistory[s.ID]
+					if !ok {
+						imageID = "none"
+					}
+
+					fmt.Printf("Current [%s]: %s\n", s.ID, imageID)
+				}
+			}
 		} else {
-			fmt.Printf("Previous: none\n")
+			fmt.Printf("Current: %s\n", history.Current)
+			if len(history.Images) > 0 {
+				fmt.Printf("Previous: %s\n", history.Images[len(history.Images)-1])
+			} else {
+				fmt.Printf("Previous: none\n")
+			}
 		}
+
 		fmt.Printf("Last updated: %s\n", history.UpdatedAt.Format(time.DateTime))
-		if monitorHistoryErr == nil && len(monitorHistory) > 0 {
-			fmt.Printf("\n=== Monitor Wallpapers ===\n")
-			for screen, imageID := range monitorHistory {
-				fmt.Printf("Screen %s: %s\n", screen, imageID)
+		if len(screens) > 0 {
+			fmt.Printf("\n=== Monitors ===\n")
+			for _, s := range screens {
+				model := s.Model
+				if model == "" {
+					model = "(unknown)"
+				}
+
+				settings, configured := cfg.Wallpaper.Monitors[s.ID]
+				rotation := "enabled"
+				if configured && !settings.RotationEnabled {
+					rotation = "disabled"
+				}
+
+				orientation := settings.Orientation
+				if orientation == "" {
+					orientation = "any"
+				}
+
+				fmt.Printf("  [%s] %s (%s)\trotation=%s\torientation=%s\n", s.Index, s.ID, model, rotation, orientation)
 			}
 		}
 		fmt.Printf("\n=== Storage ===\n")
