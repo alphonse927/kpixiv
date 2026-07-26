@@ -493,23 +493,47 @@ func (sch *Scheduler) SetNextWallpapers(cname string) error {
 // ResolveScreenIndex returns the Plasma screen index for a given connector name.
 // Falls back to monitorID if it cannot be resolved.
 func (sch *Scheduler) ResolveScreenIndex(monitorID string) string {
+	screen := sch.resolveScreen(monitorID)
+	if screen == nil {
+		return monitorID
+	}
+
+	return screen.Index
+}
+
+// ResolveScreen returns the Screen for a connector name or numeric screen
+// index. Returns nil when no monitor matches.
+func (sch *Scheduler) ResolveScreen(monitorID string) *wallpaper.Screen {
+	return sch.resolveScreen(monitorID)
+}
+
+// resolveScreen looks up a screen by connector name or numeric index.
+func (sch *Scheduler) resolveScreen(monitorID string) *wallpaper.Screen {
 	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
 	if !ok {
-		return monitorID
+		return nil
 	}
 
 	screens, err := monitorSetter.Screens()
 	if err != nil {
-		return monitorID
+		return nil
 	}
 
+	// First try matching by connector name (e.g. "DP-1").
 	for _, s := range screens {
 		if s.ID == monitorID {
-			return s.Index
+			return &s
 		}
 	}
 
-	return monitorID
+	// Then try matching by numeric screen index (e.g. "0").
+	for _, s := range screens {
+		if s.Index == monitorID {
+			return &s
+		}
+	}
+
+	return nil
 }
 
 func (sch *Scheduler) setNextWallpaper(q *storage.Queue, screenID, screenIndex, cname string) error {

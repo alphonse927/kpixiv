@@ -121,8 +121,11 @@ var nextCmd = &cobra.Command{
 		var setErr error
 		switch {
 		case monitorID != "":
-			index := sch.ResolveScreenIndex(monitorID)
-			setErr = sch.SetNextWallpaperForScreen(q, monitorID, index, "next")
+			screen := sch.ResolveScreen(monitorID)
+			if screen == nil {
+				return fmt.Errorf("monitor %q not found — use a connector name (e.g. DP-1) or numeric index from 'kpixiv monitors'", monitorID)
+			}
+			setErr = sch.SetNextWallpaperForScreen(q, screen.ID, screen.Index, "next")
 		case allMonitors:
 			setErr = sch.SetNextWallpapers("next")
 		default:
@@ -610,6 +613,17 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 		var currentIDs []string
 		switch {
 		case monitorID != "":
+			setter := wallpaper.NewKDESetter(false)
+			screens, listErr := setter.Screens()
+			if listErr == nil {
+				for _, s := range screens {
+					if s.ID == monitorID || s.Index == monitorID {
+						monitorID = s.ID
+						break
+					}
+				}
+			}
+
 			monitors, err := st.LoadMonitorHistory()
 			if err != nil {
 				return fmt.Errorf("failed to load monitor history: %w", err)
