@@ -540,9 +540,11 @@ func (c *Controller) NextWallpaperForMonitor(monitorID string) error {
 	if err := q.Load(); err != nil {
 		return fmt.Errorf("failed to load queue: %w", err)
 	}
-	if err := c.sch.SetNextWallpaperForScreen(q, monitorID, trayComponentName); err != nil {
+
+	if err := c.sch.SetNextWallpaperForScreen(q, monitorID, c.sch.ResolveScreenIndex(monitorID), trayComponentName); err != nil {
 		return err
 	}
+
 	c.sch.ResetRotationTimer()
 	return nil
 }
