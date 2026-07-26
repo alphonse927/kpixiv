@@ -467,20 +467,22 @@ func (sch *Scheduler) RebuildQueue() error {
 
 // SetNextWallpaper applies the next wallpaper from the queue and updates history.
 func (sch *Scheduler) SetNextWallpaper(q *storage.Queue, cname string) error {
-	return sch.setNextWallpaper(q, "", cname)
+	return sch.setNextWallpaper(q, "", "", cname)
 }
 
 // SetNextWallpaperForScreen advances the shared queue and applies the result
 // only to the requested screen.
-func (sch *Scheduler) SetNextWallpaperForScreen(q *storage.Queue, screenID, cname string) error {
-	monitorQueue := storage.NewMonitorQueue(sch.storage.StateDir(), screenID)
-	if err := monitorQueue.Load(); err != nil {
+func (sch *Scheduler) SetNextWallpaperForScreen(_ *storage.Queue, screenID, screenIndex, cname string) error {
+	mq := storage.NewMonitorQueue(sch.storage.StateDir(), screenID)
+	if err := mq.Load(); err != nil {
 		return err
 	}
-	if err := monitorQueue.SetOrientation(sch.monitorOrientation(screenID).String()); err != nil {
+
+	if err := mq.SetOrientation(sch.monitorOrientation(screenID).String()); err != nil {
 		return err
 	}
-	return sch.setNextWallpaper(monitorQueue, screenID, cname)
+
+	return sch.setNextWallpaper(mq, screenID, screenIndex, cname)
 }
 
 // SetNextWallpapers advances the rotation on every active screen.
@@ -488,7 +490,29 @@ func (sch *Scheduler) SetNextWallpapers(cname string) error {
 	return sch.rotateWallpaper(cname)
 }
 
-func (sch *Scheduler) setNextWallpaper(q *storage.Queue, screenID, cname string) error {
+// ResolveScreenIndex returns the Plasma screen index for a given connector name.
+// Falls back to monitorID if it cannot be resolved.
+func (sch *Scheduler) ResolveScreenIndex(monitorID string) string {
+	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
+	if !ok {
+		return monitorID
+	}
+
+	screens, err := monitorSetter.Screens()
+	if err != nil {
+		return monitorID
+	}
+
+	for _, s := range screens {
+		if s.ID == monitorID {
+			return s.Index
+		}
+	}
+
+	return monitorID
+}
+
+func (sch *Scheduler) setNextWallpaper(q *storage.Queue, screenID, screenIndex, cname string) error {
 	log := logger.WithComponent(cname)
 	blacklist, err := sch.storage.LoadBlacklistSet()
 	if err != nil {
@@ -536,7 +560,7 @@ func (sch *Scheduler) setNextWallpaper(q *storage.Queue, screenID, cname string)
 			continue
 		}
 
-		if err = sch.applyWallpaperSet(screenID, path); err != nil {
+		if err = sch.applyWallpaperSet(screenIndex, path); err != nil {
 			return fmt.Errorf("failed to set wallpaper: %w", err)
 		}
 
@@ -556,17 +580,17 @@ func (sch *Scheduler) setNextWallpaper(q *storage.Queue, screenID, cname string)
 	return nil
 }
 
-func (sch *Scheduler) applyWallpaperSet(screenID, path string) error {
-	if screenID == "" {
+func (sch *Scheduler) applyWallpaperSet(screenIndex, path string) error {
+	if screenIndex == "" {
 		return sch.setter.Set(path)
 	}
 
 	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
 	if !ok {
-		return fmt.Errorf("wallpaper setter does not support monitor %q", screenID)
+		return fmt.Errorf("wallpaper setter does not support screen index %q", screenIndex)
 	}
 
-	return monitorSetter.SetForScreen(screenID, path)
+	return monitorSetter.SetForScreen(screenIndex, path)
 }
 
 func (sch *Scheduler) addWallpaperHistory(screenID, nextID string) error {
@@ -695,7 +719,7 @@ func (sch *Scheduler) applyScreenWallpaper(screen wallpaper.Screen, images map[s
 		}
 	}
 
-	if err := monitorSetter.SetForScreen(screen.ID, images[monitorID].Path); err != nil {
+	if err := monitorSetter.SetForScreen(screen.Index, images[monitorID].Path); err != nil {
 		return fmt.Errorf("failed to restore wallpaper on screen %s: %w", screen.ID, err)
 	}
 
@@ -767,16 +791,19 @@ func (sch *Scheduler) rotateWallpaper(cname string) error {
 	if !ok {
 		return sch.SetNextWallpaper(q, cname)
 	}
+
 	screens, err := monitorSetter.Screens()
 	if err != nil || len(screens) == 0 {
 		return sch.SetNextWallpaper(q, cname)
 	}
+
 	for _, screen := range screens {
 		settings, configured := sch.cfg.Wallpaper.Monitors[screen.ID]
 		if configured && !settings.RotationEnabled {
 			continue
 		}
-		if err := sch.SetNextWallpaperForScreen(q, screen.ID, cname); err != nil && !errors.Is(err, ErrImageNotFound) {
+
+		if err = sch.SetNextWallpaperForScreen(q, screen.ID, screen.Index, cname); err != nil && !errors.Is(err, ErrImageNotFound) {
 			return fmt.Errorf("screen %s: %w", screen.ID, err)
 		}
 	}
@@ -817,11 +844,15 @@ func (sch *Scheduler) RebuildMonitorQueues() error {
 			return err
 		}
 
-		if q.IsEmpty() {
-			if err = sch.refillQueueFromStorage(q, "scheduler"); err != nil {
-				return fmt.Errorf("screen %s: %w", screen.ID, err)
-			}
+		// Always clear and refill to match current settings.
+		if !q.IsEmpty() {
+			_ = q.Clear()
+		}
+
+		if err = sch.refillQueueFromStorage(q, "scheduler"); err != nil {
+			return fmt.Errorf("screen %s: %w", screen.ID, err)
 		}
 	}
+
 	return nil
 }
