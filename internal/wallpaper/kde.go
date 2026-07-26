@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -15,6 +16,22 @@ type KDESetter struct {
 	qdbus             string
 	setLockScreen     bool
 	lockScreenUpdater *KDELockScreenUpdater
+}
+
+// plasmaScreenInfo holds the index and geometry of one Plasma screen.
+type plasmaScreenInfo struct {
+	Index               int
+	X, Y, Width, Height int
+}
+
+// KScreenOutputInfo holds parsed data for one KScreen output.
+type KScreenOutputInfo struct {
+	ID            int
+	Connector     string
+	Model         string
+	Enabled       bool
+	X, Y          int
+	Width, Height int
 }
 
 // NewKDESetter creates a KDE wallpaper setter using qdbus.
@@ -28,56 +45,189 @@ func NewKDESetter(setLockScreen bool) *KDESetter {
 }
 
 // Screens returns the physical screens currently known to Plasma.
+// It maps Plasma screen indices to KScreen connector names by sorting
+// KScreen outputs by their physical position (left-to-right, top-to-bottom)
+// and mapping them by index.  This avoids fragile assumptions about output
+// IDs or geometry equality, and works correctly even with identical monitors.
 func (k *KDESetter) Screens() ([]Screen, error) {
 	if k.qdbus == "" {
 		return nil, fmt.Errorf("qdbus binary not found (tried: qdbus, qdbus6, qdbus-qt5)")
 	}
 
-	// qdbus does not preserve newlines emitted by Plasma's print(), so use a
-	// delimiter and screenCount instead of parsing one print call per line.
 	script := `for (var i = 0; i < screenCount; i++) print("KPIXIV_SCREEN:" + i + ";");`
 	output, err := k.evaluate(script)
 	if err != nil {
 		return nil, err
 	}
 
-	screens := parseScreenIDs(output)
-	outputs := k.displayOutputs()
-	for i := range screens {
-		index := screens[i].ID
-		screenNum, snErr := strconv.Atoi(index)
-		if snErr != nil {
-			screens[i].Name = "Screen " + index
-			continue
-		}
+	plasmaIndices := parseScreenIDs(output)
 
-		name, ok := outputs[screenNum+1]
-		if ok {
-			screens[i].ID = name     // connector name — stable config key
-			screens[i].Index = index // plasma index — used by SetForScreen
-			screens[i].Name = name
-			screens[i].Model = k.monitorModel(name)
-		} else {
-			screens[i].Name = "Screen " + index
+	kscreenOutputs := k.getKScreenOutputsFull()
+
+	// Sort KScreen outputs by position: left-to-right, then top-to-bottom.
+	// This matches how KWin assigns Plasma screen indices.
+	sort.Slice(kscreenOutputs, func(i, j int) bool {
+		if kscreenOutputs[i].X != kscreenOutputs[j].X {
+			return kscreenOutputs[i].X < kscreenOutputs[j].X
 		}
+		return kscreenOutputs[i].Y < kscreenOutputs[j].Y
+	})
+
+	screens := make([]Screen, 0, len(plasmaIndices))
+	for _, ps := range plasmaIndices {
+		idx := atoiDefault(ps.ID, -1)
+		s := Screen{
+			Index: ps.ID,
+			Name:  "Screen " + ps.ID,
+		}
+		if idx >= 0 && idx < len(kscreenOutputs) {
+			ko := kscreenOutputs[idx]
+			s.ID = ko.Connector
+			s.Name = ko.Connector
+			s.Model = ko.Model
+		} else {
+			s.ID = ps.ID
+		}
+		screens = append(screens, s)
 	}
+
 	return screens, nil
 }
 
-func (k *KDESetter) displayOutputs() map[int]string {
+// getKScreenOutputsFull runs kscreen-doctor -o and parses each output's
+// connector, geometry, and enabled status.
+func (k *KDESetter) getKScreenOutputsFull() []KScreenOutputInfo {
 	binary, err := exec.LookPath("kscreen-doctor")
 	if err != nil {
 		return nil
 	}
 
-	output, err := exec.Command(binary, "-o").CombinedOutput() // #nosec G204 -- fixed desktop utility
+	output, err := exec.Command(binary, "-o").CombinedOutput() // #nosec G204
 	if err != nil {
 		return nil
 	}
 
-	return parseKScreenOutputs(string(output))
+	outputs := parseKScreenOutputsFull(string(output))
+
+	// Enrich with model names from EDID.
+	for i := range outputs {
+		outputs[i].Model = k.monitorModel(outputs[i].Connector)
+	}
+
+	return outputs
 }
 
+// parseKScreenOutputsFull parses kscreen-doctor -o output, extracting the
+// connector name, geometry (position + size), and enabled status for each
+// output. Unlike parseKScreenOutputs, this does NOT assume any particular
+// relationship between output IDs and screen indices.
+func parseKScreenOutputsFull(output string) []KScreenOutputInfo {
+	output = regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(output, "")
+	lines := strings.Split(output, "\n")
+
+	var results []KScreenOutputInfo
+	var cur *KScreenOutputInfo
+
+	flushCur := func() {
+		if cur != nil && cur.Enabled {
+			results = append(results, *cur)
+		}
+		cur = nil
+	}
+
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "Output:" {
+			flushCur()
+			num, _ := strconv.Atoi(fields[1])
+			cur = &KScreenOutputInfo{
+				ID:        num,
+				Connector: fields[2],
+				Enabled:   false,
+			}
+			continue
+		}
+
+		if cur == nil {
+			continue
+		}
+
+		trimmed := strings.TrimSpace(line)
+		switch {
+		case trimmed == "enabled":
+			cur.Enabled = true
+		case trimmed == "disabled":
+			cur.Enabled = false
+			flushCur()
+		case strings.HasPrefix(strings.ToLower(trimmed), "geometry:"):
+			geo := strings.TrimSpace(trimmed[9:])
+			// Format: "x,y widthxheight" or "x,y,widthxheight"
+			parts := strings.Split(geo, " ")
+			if len(parts) == 2 {
+				xy := strings.Split(parts[0], ",")
+				wh := strings.Split(parts[1], "x")
+				if len(xy) == 2 {
+					cur.X = atoiDefault(strings.TrimSpace(xy[0]), 0)
+					cur.Y = atoiDefault(strings.TrimSpace(xy[1]), 0)
+				}
+				if len(wh) == 2 {
+					cur.Width = atoiDefault(strings.TrimSpace(wh[0]), 0)
+					cur.Height = atoiDefault(strings.TrimSpace(wh[1]), 0)
+				}
+			}
+		}
+	}
+
+	flushCur()
+	return results
+}
+
+// parsePlasmaScreenInfo parses the output of the screenGeometries() query.
+// Expected token format: KPIXIV_SCR:<index>:<x>,<y>,<width>,<height>;
+func parsePlasmaScreenInfo(output string) []plasmaScreenInfo {
+	var screens []plasmaScreenInfo
+	seen := make(map[int]bool)
+
+	for _, token := range strings.Split(output, "KPIXIV_SCR:") {
+		token = strings.TrimRight(strings.TrimSpace(token), ";")
+		if token == "" {
+			continue
+		}
+
+		parts := strings.SplitN(token, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		idx, err := strconv.Atoi(parts[0])
+		if err != nil {
+			continue
+		}
+		if seen[idx] {
+			continue
+		}
+		seen[idx] = true
+
+		coords := strings.Split(parts[1], ",")
+		if len(coords) != 4 {
+			continue
+		}
+
+		screens = append(screens, plasmaScreenInfo{
+			Index:  idx,
+			X:      atoiDefault(coords[0], 0),
+			Y:      atoiDefault(coords[1], 0),
+			Width:  atoiDefault(coords[2], 0),
+			Height: atoiDefault(coords[3], 0),
+		})
+	}
+
+	return screens
+}
+
+// parseKScreenOutputs parses kscreen-doctor -o output and returns a map of
+// output ID -> connector name for enabled outputs. Deprecated: use
+// parseKScreenOutputsFull instead (which includes geometry).
 func parseKScreenOutputs(output string) map[int]string {
 	output = regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(output, "")
 	outputLines := strings.Split(output, "\n")
@@ -179,29 +329,15 @@ for (var i = 0; i < allDesktops.length; i++) {
 }
 
 // SetForScreen applies a wallpaper to every virtual desktop on one screen.
-// screenID must be the connector name (e.g. "DP-2") — it is resolved internally
-// to the transient Plasma screen index used in the qdbus JavaScript API.
-func (k *KDESetter) SetForScreen(screenID, path string) error {
+// screenIndex must be the Plasma screen index (e.g. "0"), NOT the connector
+// name — it is used directly in the qdbus JavaScript d.screen comparison.
+func (k *KDESetter) SetForScreen(screenIndex, path string) error {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 	if k.qdbus == "" {
 		return fmt.Errorf("qdbus binary not found (tried: qdbus, qdbus6, qdbus-qt5)")
-	}
-
-	// Resolve connector name to the Plasma screen index (output number - 1).
-	outputs := k.displayOutputs()
-	var screenIndex string
-	for outputNum, name := range outputs {
-		if name == screenID {
-			screenIndex = strconv.Itoa(outputNum - 1)
-			break
-		}
-	}
-
-	if screenIndex == "" {
-		return fmt.Errorf("screen %q not found in kscreen-doctor output", screenID)
 	}
 
 	imageURI := strconv.Quote("file://" + absPath)
@@ -215,7 +351,7 @@ for (var i = 0; i < allDesktops.length; i++) {
  d.writeConfig("Image", ` + imageURI + `);
 }`
 	if _, err = k.evaluate(script); err != nil {
-		return fmt.Errorf("failed to set wallpaper on screen %q via qdbus: %w", screenID, err)
+		return fmt.Errorf("failed to set wallpaper on screen %q via qdbus: %w", screenIndex, err)
 	}
 	return nil
 }
@@ -227,6 +363,14 @@ func (k *KDESetter) evaluate(script string) (string, error) {
 		return string(output), fmt.Errorf("qdbus evaluateScript: %w (output: %s)", err, string(output))
 	}
 	return string(output), nil
+}
+
+func atoiDefault(s string, defaultVal int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return defaultVal
+	}
+	return v
 }
 
 func detectQDBusBinary() string {
