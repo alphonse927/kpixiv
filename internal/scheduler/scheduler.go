@@ -108,7 +108,7 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 		case <-sch.resetFetchCh:
 			resetTicker(fetchTicker, sch.fetchInterval)
 		case <-setTicker.C:
-			if sch.cfg.Wallpaper.RotationEnabled {
+			if sch.cfg.Wallpaper.RotationEnabled || sch.cfg.Wallpaper.MultiMonitorEnabled {
 				log.Debug("Setting wallpaper")
 				if err := sch.rotateWallpaper(cname); err != nil {
 					log.Warn("Failed to set wallpaper", "error", err)
