@@ -541,7 +541,12 @@ func (c *Controller) NextWallpaperForMonitor(monitorID string) error {
 		return fmt.Errorf("failed to load queue: %w", err)
 	}
 
-	if err := c.sch.SetNextWallpaperForScreen(q, monitorID, c.sch.ResolveScreenIndex(monitorID), trayComponentName); err != nil {
+	screen := c.sch.ResolveScreen(monitorID)
+	if screen == nil {
+		return fmt.Errorf("monitor %q not found", monitorID)
+	}
+
+	if err := c.sch.SetNextWallpaperForScreen(q, screen.ID, screen.Index, trayComponentName); err != nil {
 		return err
 	}
 
