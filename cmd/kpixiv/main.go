@@ -18,9 +18,9 @@ import (
 	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
+	"github.com/alphonse927/kpixiv/internal/protocol"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
 	"github.com/alphonse927/kpixiv/internal/storage"
-	"github.com/alphonse927/kpixiv/internal/tray"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 
 	"github.com/spf13/cobra"
@@ -197,6 +197,22 @@ var daemonCmd = &cobra.Command{
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		server := protocol.NewServerWithShutdown(controller, func() {
+			cancel()
+		})
+		defer func() {
+			if err := server.Close(); err != nil {
+				log.Debug("Failed to close protocol server", "error", err)
+			}
+		}()
+
+		go func() {
+			if err := server.ListenAndServe(protocol.DefaultSocketPath()); err != nil {
+				log.Error("Protocol server stopped", "error", err)
+				cancel()
+			}
+		}()
+
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		defer signal.Stop(sigCh)
@@ -209,10 +225,6 @@ var daemonCmd = &cobra.Command{
 		}()
 
 		quitCh := make(chan struct{})
-		go func() {
-			tray.Run(ctx, controller)
-			close(quitCh)
-		}()
 
 		log.Info("Starting kPixiv")
 		gui.Run(controller, ctx, quitCh)
