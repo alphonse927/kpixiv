@@ -148,7 +148,7 @@ func parseKScreenOutputsFull(output string) []KScreenOutputInfo {
 		fields := strings.Fields(line)
 		if len(fields) >= 3 && fields[0] == "Output:" {
 			flushCur()
-			num, _ := strconv.Atoi(fields[1])
+			num := atoiDefault(fields[1], 0)
 			cur = &KScreenOutputInfo{
 				ID:        num,
 				Connector: fields[2],
@@ -170,7 +170,7 @@ func parseKScreenOutputsFull(output string) []KScreenOutputInfo {
 			flushCur()
 		case strings.HasPrefix(strings.ToLower(trimmed), "priority:"):
 			prioStr := strings.TrimSpace(trimmed[9:])
-			prio, _ := strconv.Atoi(prioStr)
+			prio := atoiDefault(prioStr, 0)
 			cur.Primary = prio == 1
 		case strings.HasPrefix(strings.ToLower(trimmed), "geometry:"):
 			geo := strings.TrimSpace(trimmed[9:])

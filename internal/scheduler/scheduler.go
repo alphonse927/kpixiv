@@ -885,7 +885,9 @@ func (sch *Scheduler) RebuildMonitorQueues() error {
 
 		// Always clear and refill to match current settings.
 		if !q.IsEmpty() {
-			_ = q.Clear()
+			if clearErr := q.Clear(); clearErr != nil {
+				return fmt.Errorf("failed to clear monitor queue for screen %s: %w", screen.ID, clearErr)
+			}
 		}
 
 		if err = sch.refillQueueFromStorage(q, "scheduler"); err != nil {
