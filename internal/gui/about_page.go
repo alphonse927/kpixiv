@@ -9,7 +9,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 func (ui *settingsUI) buildAboutPage() fyne.CanvasObject {
 	bold := fyne.TextStyle{Bold: true}
