@@ -16,6 +16,7 @@ type KDESetter struct {
 	qdbus             string
 	setLockScreen     bool
 	lockScreenUpdater *KDELockScreenUpdater
+	primaryScreenIdx  string // Plasma screen index of the primary display, cached from Screens()
 }
 
 // plasmaScreenInfo holds the index and geometry of one Plasma screen.
@@ -30,6 +31,7 @@ type KScreenOutputInfo struct {
 	Connector     string
 	Model         string
 	Enabled       bool
+	Primary       bool
 	X, Y          int
 	Width, Height int
 }
@@ -74,6 +76,7 @@ func (k *KDESetter) Screens() ([]Screen, error) {
 	})
 
 	screens := make([]Screen, 0, len(plasmaIndices))
+	k.primaryScreenIdx = ""
 	for _, ps := range plasmaIndices {
 		idx := atoiDefault(ps.ID, -1)
 		s := Screen{
@@ -85,9 +88,15 @@ func (k *KDESetter) Screens() ([]Screen, error) {
 			s.ID = ko.Connector
 			s.Name = ko.Connector
 			s.Model = ko.Model
+			s.Primary = ko.Primary
 		} else {
 			s.ID = ps.ID
 		}
+
+		if s.Primary {
+			k.primaryScreenIdx = s.Index
+		}
+
 		screens = append(screens, s)
 	}
 
@@ -159,6 +168,10 @@ func parseKScreenOutputsFull(output string) []KScreenOutputInfo {
 		case trimmed == "disabled":
 			cur.Enabled = false
 			flushCur()
+		case strings.HasPrefix(strings.ToLower(trimmed), "priority:"):
+			prioStr := strings.TrimSpace(trimmed[9:])
+			prio, _ := strconv.Atoi(prioStr)
+			cur.Primary = prio == 1
 		case strings.HasPrefix(strings.ToLower(trimmed), "geometry:"):
 			geo := strings.TrimSpace(trimmed[9:])
 			// Format: "x,y widthxheight" or "x,y,widthxheight"
@@ -353,6 +366,16 @@ for (var i = 0; i < allDesktops.length; i++) {
 	if _, err = k.evaluate(script); err != nil {
 		return fmt.Errorf("failed to set wallpaper on screen %q via qdbus: %w", screenIndex, err)
 	}
+
+	if !k.setLockScreen || screenIndex != k.primaryScreenIdx {
+		return nil
+	}
+
+	imageURI = (&url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}).String()
+	if updateErr := k.lockScreenUpdater.UpdateImage(imageURI); updateErr != nil {
+		return fmt.Errorf("failed to update KDE lock screen wallpaper: %w", updateErr)
+	}
+
 	return nil
 }
 
