@@ -271,7 +271,10 @@ var statusCmd = &cobra.Command{
 		fmt.Printf("Lock screen: %t\n", cfg.KDE.SetLockScreen)
 		fmt.Printf("Multi-monitor: %t\n", cfg.Wallpaper.MultiMonitorEnabled)
 
-		screens, _ := wallpaper.NewKDESetter(false).Screens()
+		screens, err := wallpaper.NewKDESetter(false).Screens()
+		if err != nil {
+			screens = nil
+		}
 
 		fmt.Printf("\n=== Wallpaper History ===\n")
 		fmt.Printf("Total wallpapers: %d\n", totalWallpapers)
