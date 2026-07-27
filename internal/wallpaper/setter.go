@@ -6,10 +6,11 @@ import (
 
 // Screen identifies a currently active Plasma screen.
 type Screen struct {
-	ID    string // connector name, e.g. "DP-2" — stable across reboots, used as config key
-	Index string // plasma screen index, e.g. "0" — transient, used internally for wallpaper API
-	Name  string
-	Model string
+	ID      string // connector name, e.g. "DP-2" — stable across reboots, used as config key
+	Index   string // plasma screen index, e.g. "0" — transient, used internally for wallpaper API
+	Name    string
+	Model   string
+	Primary bool // true if this is the primary (main) display
 }
 
 type Setter interface {
