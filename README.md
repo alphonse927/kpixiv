@@ -1,6 +1,6 @@
 # KPixiv
 
-A tray-centric Linux wallpaper application for fetching and rotating Pixiv wallpapers on KDE Plasma, supervised by systemd user services.
+A Linux wallpaper application for fetching and rotating Pixiv wallpapers on KDE Plasma, supervised by systemd user services.
 
 ## Features
 
@@ -20,7 +20,7 @@ A tray-centric Linux wallpaper application for fetching and rotating Pixiv wallp
 - In-app log viewer (systemd journal)
 - Systemd service autostart toggle from settings
 - Pixiv bookmark sync — periodic background sync of bookmarked images
-- CLI bookmark management commands
+- CLI management commands for scripting and automation
 - Dry-run mode for testing
 
 ## Requirements
@@ -32,12 +32,18 @@ A tray-centric Linux wallpaper application for fetching and rotating Pixiv wallp
 ## Install
 
 ```bash
-# Build and link to ~/.local/bin/kpixiv
 make install
 systemctl --user enable --now kpixiv.service
 ```
 
-This builds the binary, installs the systemd user service, and reloads systemd.
+This builds both binaries, installs the systemd user service, and reloads systemd.
+
+## Binaries
+
+| Binary        | Description                        | Links Fyne |
+|---------------|------------------------------------|-----------:|
+| `kpixiv`      | Desktop application (tray + GUI)   |        Yes |
+| `kpixivctl`   | Headless CLI for scripting         |         No |
 
 ## Configuration
 
@@ -79,104 +85,125 @@ kde:
 
 ### Options
 
-| Option                                    | Default             | Description                                        |
-|-------------------------------------------|---------------------|----------------------------------------------------|
-| `download_path`                           | `~/Pictures/KPixiv` | Where to store wallpapers                          |
-| `pixiv.ranking`                           | `daily`             | Ranking type (`daily`/`weekly`/`monthly`)          |
-| `pixiv.r18`                               | `false`             | Include R-18 content                               |
-| `pixiv.min_width`                         | `1280`              | Minimum image width                                |
-| `pixiv.min_height`                        | `720`               | Minimum image height                               |
-| `pixiv.landscape_only`                    | `true`              | Only download landscape images                     |
-| `wallpaper.mode`                          | `fill`              | Scaling mode (`fill`/`cover`/`fit`)                |
-| `wallpaper.multi_monitor_enabled`                | `false`             | Enable per-monitor wallpaper assignment                           |
-| `wallpaper.monitors.<conn>.rotation_enabled`     | `true`              | Enable rotation for this monitor (key is connector name e.g. `DP-1`) |
-| `wallpaper.monitors.<conn>.orientation`          | `any`               | Orientation filter: `any`, `landscape`, `portrait`                |
-| `wallpaper.history_limit`                 | `10`                | Max wallpapers to keep in rotation history         |
-| `wallpaper.set_interval`                  | `5`                 | Minutes between wallpaper changes                  |
-| `wallpaper.fetch_interval`                | `30`                | Minutes between Pixiv fetch cycles                 |
-| `wallpaper.cleanup_days`                  | `7`                 | Remove cached wallpapers older than N days         |
-| `bookmarks.enabled`                       | `false`             | Enable periodic bookmark sync                      |
-| `bookmarks.sync_interval`                 | `60`                | Minutes between bookmark sync cycles               |
-| `bookmarks.auto_cleanup`                  | `true`              | Remove unbookmarked images from favorites          |
-| `kde.set_lock_screen`                     | `false`             | Also apply wallpaper to the KDE lock screen        |
+| Option                                       | Default             | Description                                        |
+|----------------------------------------------|---------------------|----------------------------------------------------|
+| `download_path`                              | `~/Pictures/KPixiv` | Where to store wallpapers                          |
+| `pixiv.ranking`                              | `daily`             | Ranking type (`daily`/`weekly`/`monthly`)          |
+| `pixiv.r18`                                  | `false`             | Include R-18 content                               |
+| `pixiv.min_width`                            | `1280`              | Minimum image width                                |
+| `pixiv.min_height`                           | `720`               | Minimum image height                               |
+| `pixiv.landscape_only`                       | `true`              | Only download landscape images                     |
+| `wallpaper.mode`                             | `fill`              | Scaling mode (`fill`/`cover`/`fit`)                |
+| `wallpaper.multi_monitor_enabled`            | `false`             | Enable per-monitor wallpaper assignment            |
+| `wallpaper.monitors.<conn>.rotation_enabled` | `true`             | Enable rotation for this monitor                   |
+| `wallpaper.monitors.<conn>.orientation`      | `any`              | Orientation filter: `any`, `landscape`, `portrait` |
+| `wallpaper.history_limit`                    | `10`                | Max wallpapers to keep in rotation history         |
+| `wallpaper.set_interval`                     | `5`                 | Minutes between wallpaper changes                  |
+| `wallpaper.fetch_interval`                   | `30`                | Minutes between Pixiv fetch cycles                 |
+| `wallpaper.cleanup_days`                     | `7`                 | Remove cached wallpapers older than N days         |
+| `bookmarks.enabled`                          | `false`             | Enable periodic bookmark sync                      |
+| `bookmarks.sync_interval`                    | `60`                | Minutes between bookmark sync cycles               |
+| `bookmarks.auto_cleanup`                     | `true`              | Remove unbookmarked images from favorites          |
+| `kde.set_lock_screen`                        | `false`             | Also apply wallpaper to the KDE lock screen        |
 
 ## Pixiv Login
 
 KPixiv uses Pixiv's OAuth PKCE flow for authenticated API access.
 
-1. From the tray menu, select **Login to Pixiv** (or use the Account page in Settings)
-2. A browser opens to Pixiv's login page — sign in with your account
-3. After signing in, the browser redirects to a callback URL or an error page
-4. Copy the full URL from the address bar and paste it into the dialog
+**Desktop:** From the tray menu, select **Login to Pixiv** (or use the Account page in Settings).
 
-Once logged in, tokens are persisted and automatically refreshed. The tray menu shows your Pixiv username when connected. Use **Logout from Pixiv** to clear the session.
+**CLI:**
+```bash
+kpixivctl account login
+```
+
+This prints an authorization URL, opens your browser, and prompts for the callback.
+
+Once logged in, tokens are persisted and automatically refreshed. Use `kpixivctl account status` to check login state and `kpixivctl account logout` to clear the session.
 
 ## Runtime Architecture
 
-KPixiv currently runs as one process:
+KPixiv runs as a single desktop process:
 
-`systemd user service -> kpixiv process -> tray + scheduler + fetch + wallpaper management`
+```
+systemd user service -> kpixiv -> tray + scheduler + GUI
+```
 
-- No split daemon/tray design (socket separation is planned — see `docs/tray-socket-design.md`)
-- No IPC or local socket layer
-- Tray lifecycle is app lifecycle (`Quit` stops the whole process)
-- systemd supervises startup and restart behavior
+A separate CLI binary (`kpixivctl`) provides headless access to the same data for scripting without requiring Fyne or a display.
+
+See `docs/cli-desktop-split.md` and `docs/architecture.md` for details.
 
 ## Usage
 
-### Commands
+### Desktop application
 
 ```bash
-kpixiv fetch                        # Download wallpapers from Pixiv rankings
-kpixiv next                         # Apply the next wallpaper in queue
-  --monitor DP-1                    # Apply on monitor DP-1 (or by index: --monitor 0)
-  --all                             # Apply next wallpaper on all monitors
-kpixiv daemon                       # Launch tray-enabled runtime (used by systemd)
-  --reset                           # Clear all cached images before starting
-kpixiv monitors                     # List active KDE Plasma screens with index and connector
-kpixiv status                       # Show config, history, monitors, and storage info
-kpixiv queue                        # Manage the wallpaper queue
-
-kpixiv bookmarks sync               # Sync bookmarked images from Pixiv
-kpixiv bookmarks list               # List locally bookmarked images
-kpixiv bookmarks add <illust_id>    # Bookmark an artwork on Pixiv
-kpixiv bookmarks add-current        # Bookmark the current wallpaper on Pixiv
-  --monitor DP-1                    # Bookmark monitor DP-1's current wallpaper (or by index: --monitor 0)
-  --all                             # Bookmark current wallpapers on all monitors
+kpixiv                          # Launch tray + scheduler + GUI
+  --reset                       # Clear all cached images before starting
 ```
 
-### Global flags
-
-| Flag             | Description                                                   |
-|------------------|---------------------------------------------------------------|
-| `-c, --config`   | Path to config file (default: `~/.config/kpixiv/config.yaml`) |
-| `-v, --verbose`  | Enable verbose logging                                        |
-| `--dry-run`      | Show actions without downloading or applying                  |
-
-### Tray Menu
-
-When running `kpixiv daemon`, the tray menu provides:
+The system tray provides:
 
 ```
 Next Wallpaper              Immediately switch to the next queued wallpaper
 Rotate Wallpaper            Toggle automatic rotation on/off
 ---
-Login to Pixiv / <user>    Authenticate with Pixiv or show connected user
-Bookmark Current Artwork    Bookmark the current artwork on Pixiv
-Logout from Pixiv           Clear the saved Pixiv session
+Login to Pixiv / <user>    Authenticate or show connected user
+Bookmark Current Artwork    Bookmark on Pixiv
+Logout from Pixiv           Clear saved session
 ---
-Copy to Favorites           Copy the current wallpaper to the favorites directory
-Open Current Artwork        Open the current wallpaper file
-Open Artwork in Pixiv       Open the current artwork's Pixiv page in browser
-Exclude Current Wallpaper   Blacklist this wallpaper and immediately switch
+Copy to Favorites           Copy wallpaper to favorites directory
+Open Current Artwork        Open the image file
+Open Artwork in Pixiv       Open artwork page in browser
+Exclude Current Wallpaper   Blacklist and switch away
 ---
-Settings                    Open the configuration settings window
+Settings                    Open configuration window
 Quit                        Stop KPixiv
 ```
 
+### CLI
+
+```bash
+kpixivctl wallpaper fetch               # Download wallpapers from Pixiv
+kpixivctl wallpaper next                 # Apply the next wallpaper in queue
+  --monitor DP-1                         # Apply on a specific monitor
+  --all                                  # Apply on all monitors
+kpixivctl wallpaper queue ranking        # Rebuild queue from ranking images
+kpixivctl wallpaper queue bookmarks      # Rebuild queue from bookmarks
+kpixivctl wallpaper queue all            # Rebuild queue from both sources
+
+kpixivctl bookmarks sync                 # Sync bookmarked images from Pixiv
+kpixivctl bookmarks list                 # List local bookmarked images
+kpixivctl bookmarks add <illust_id>      # Bookmark an artwork on Pixiv
+kpixivctl bookmarks add-current          # Bookmark the current wallpaper
+  --monitor DP-1
+  --all
+
+kpixivctl account login                  # Log in to Pixiv
+kpixivctl account logout                 # Log out from Pixiv
+kpixivctl account status                 # Show login status
+
+kpixivctl cache stats                    # Show downloaded image count
+kpixivctl cache clear                    # Remove all cached images
+
+kpixivctl config show                    # Print configuration
+kpixivctl config set <key> <value>       # Set a config value
+
+kpixivctl monitors                       # List active KDE Plasma screens
+kpixivctl status                         # Show full application status
+```
+
+### Global flags
+
+| Flag             | Description                                                    |
+|------------------|----------------------------------------------------------------|
+| `-c, --config`   | Path to config file (default: `~/.config/kpixiv/config.yaml`)  |
+| `-v, --verbose`  | Enable verbose logging                                         |
+| `--dry-run`      | Show actions without downloading or applying                   |
+
 ### Settings Window
 
-The **Settings** tray option opens a GUI dialog with tabbed navigation:
+The tray **Settings** option opens a GUI dialog with tabbed navigation:
 
 - **Home** — live status: current wallpaper info with thumbnail preview, cached count, next/last rotation time. When multi-monitor is enabled, shows per-monitor wallpapers instead.
 - **Monitors** — enable/disable per-monitor wallpaper mode, list detected monitors with EDID model names, toggle rotation per monitor, set orientation filter (Any / Landscape / Portrait). At least one monitor must be enabled.
@@ -194,7 +221,7 @@ Changes are saved to the config file on applying. The **Autostart** toggle on th
 
 ### Log Viewer
 
-The **View Logs** option (accessible from the system tray via the Settings window) opens a scrollable window that tails the `kpixiv.service` systemd journal in real time.
+The **View Logs** option (accessible via the Settings window) opens a scrollable window that tails the `kpixiv.service` systemd journal in real time.
 
 ## Favorites
 
@@ -215,5 +242,5 @@ On the first sync, all bookmarked pages are fetched. Subsequent syncs only check
 Manual sync can be triggered at any time via:
 
 ```bash
-kpixiv bookmarks sync
+kpixivctl bookmarks sync
 ```
