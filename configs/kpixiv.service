@@ -5,7 +5,7 @@ Wants=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/kpixiv daemon -v
+ExecStart=%h/.local/bin/kpixiv -v
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGTERM
