@@ -448,6 +448,11 @@ func (ui *settingsUI) update() {
 
 func (ui *settingsUI) applySettings() {
 	cfg := ui.ctrl.Config()
+
+	if ui.downloadPath.Text == "" {
+		dialog.ShowError(fmt.Errorf("download directory is required"), ui.w)
+		return
+	}
 	cfg.DownloadPath = ui.downloadPath.Text
 
 	if v, err := strconv.Atoi(ui.setInterval.Text); err == nil {
