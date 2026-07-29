@@ -24,6 +24,8 @@ install: build
 
 uninstall:
 	rm -f $(KPIXIV_BIN) $(KPIXIVCTL_BIN)
+	rm -f $(HOME)/.config/systemd/user/kpixiv.service
+	-systemctl --user daemon-reload 2>/dev/null
 
 test:
 	go test ./...

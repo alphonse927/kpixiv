@@ -682,10 +682,11 @@ and the service is enabled for automatic startup on login.`,
 
 var autostartDisableCmd = &cobra.Command{
 	Use:   "disable",
-	Short: "Disable and remove the systemd user service",
-	Long: `Disables and removes the KPixiv systemd user service.
+	Short: "Disable automatic startup",
+	Long: `Prevents KPixiv from starting automatically when you log in.
 
-The unit file is removed and the service is disabled.`,
+The current session is not affected. The service unit file is
+kept on disk so the service state remains queryable.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := platform.DisableService("kpixiv.service"); err != nil {
 			return err

@@ -19,6 +19,7 @@ func serviceUnitPath() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("cannot determine home directory: %w", err)
 	}
+
 	return filepath.Join(home, ".config", "systemd", "user", serviceName), nil
 }
 
@@ -61,6 +62,15 @@ func RemoveServiceUnit() error {
 }
 
 func IsServiceEnabled(service string) (bool, error) {
+	path, err := serviceUnitPath()
+	if err != nil {
+		return false, err
+	}
+
+	if _, err = os.Stat(path); os.IsNotExist(err) {
+		return false, nil
+	}
+
 	//nolint:gosec // service name is controlled by the application, not user input
 	cmd := exec.Command("systemctl", "--user", "is-enabled", service)
 	out, err := cmd.Output()
@@ -97,5 +107,5 @@ func DisableService(service string) error {
 		return fmt.Errorf("cannot disable service: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
-	return RemoveServiceUnit()
+	return nil
 }
