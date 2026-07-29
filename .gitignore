@@ -13,8 +13,7 @@ bin
 *.out
 
 # Dependency directories
-references/
-docs/
+references/*
 
 # Go workspace file
 go.work
