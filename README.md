@@ -3,6 +3,9 @@
 Native KDE Plasma wallpaper manager for Pixiv.
 
 [![CI](https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml/badge.svg)](https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/alphonse927/kpixiv?label=release)](https://github.com/alphonse927/kpixiv/releases)
+
+<img src="docs/screenshots/settings_windows.png" width="500" alt="Configuration tabs">
 
 ## About
 
@@ -267,3 +270,16 @@ systemd user service -> kpixiv -> tray + scheduler + GUI
 ```
 
 The desktop binary (`kpixiv`) runs as a systemd user service. A separate CLI binary (`kpixivctl`) provides headless access for scripting without requiring a display server.
+
+## AI-assisted contributions
+
+AI-assisted pull requests are welcome.
+
+However, contributors are expected to:
+
+- understand the code they submit,
+- test their changes,
+- follow the project's coding standards,
+- and remain responsible for the correctness of their contributions.
+
+Submissions consisting solely of unreviewed AI-generated code may be rejected.
