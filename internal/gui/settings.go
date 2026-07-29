@@ -714,7 +714,7 @@ func (ui *settingsUI) refreshStatus() {
 		ui.statusThumbnail.Refresh()
 	}
 
-	if meta != nil && meta.ID != "" && meta.Title != "" {
+	if meta != nil && meta.ID != "" {
 		ui.statusWallpaper.SetText(ui.formatWallpaperInfo(meta))
 		ui.statusThumbnail.Show()
 	} else {
@@ -738,13 +738,22 @@ func (ui *settingsUI) refreshAutostartState() {
 }
 
 func (ui *settingsUI) formatWallpaperInfo(meta *storage.ImageMeta) string {
+	title := meta.Title
+	if title == "" {
+		title = "Unknown artwork"
+	}
+
+	artist := meta.Artist
+	if artist == "" {
+		artist = "Unknown artist"
+	}
 	res := ""
 	if meta.Width > 0 && meta.Height > 0 {
 		res = strconv.Itoa(meta.Width) + " × " + strconv.Itoa(meta.Height)
 	}
 
 	src := formatSource(meta.Source, meta.Rank)
-	return meta.Title + "\n" + meta.Artist + "\n" + res + "\n" + src
+	return title + "\n" + artist + "\n" + res + "\n" + src
 }
 
 func (ui *settingsUI) formatCachedCount() string {

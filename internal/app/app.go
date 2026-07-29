@@ -604,11 +604,22 @@ func (c *Controller) CurrentWallpaper() (*storage.ImageMeta, error) {
 	}
 
 	meta, ok := metaMap[currentID]
-	if !ok {
+	if ok {
+		return meta, nil
+	}
+
+	// Wallpaper ID exists in history, but metadata is missing (e.g., after
+	// cleanup or queue refill from filesystem). Fall back to finding the
+	// file on disk so the GUI can still display that a wallpaper is set.
+	path, exists := c.st.GetImagePath(currentID)
+	if !exists {
 		return nil, nil //nolint:nilnil // wallpaper ID not found in metadata
 	}
 
-	return meta, nil
+	return &storage.ImageMeta{
+		ID:   currentID,
+		Path: path,
+	}, nil
 }
 
 // CachedCount returns the number of images in the metadata store.
