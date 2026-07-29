@@ -37,6 +37,72 @@ type History struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 }
 
+func NewHistory() *History {
+	return &History{
+		Images:   []string{},
+		Monitors: map[string]string{},
+	}
+}
+
+func (h *History) Normalize() {
+	if h.Images == nil {
+		h.Images = []string{}
+	}
+	if h.Monitors == nil {
+		h.Monitors = map[string]string{}
+	}
+}
+
+func (h *History) SetCurrent(imageID string) {
+	if h.Current != "" && h.Current != imageID {
+		h.Images = append(h.Images, h.Current)
+	}
+	h.Current = imageID
+}
+
+func (h *History) SetMonitor(screenID, imageID string) {
+	if oldID, exists := h.Monitors[screenID]; exists && oldID != "" && oldID != imageID {
+		h.Images = append(h.Images, oldID)
+	}
+	h.Monitors[screenID] = imageID
+}
+
+func (h *History) Remove(imageID string) {
+	filtered := make([]string, 0, len(h.Images))
+	for _, id := range h.Images {
+		if id == imageID {
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+	h.Images = filtered
+	if h.Current == imageID {
+		h.Current = ""
+	}
+}
+
+func (h *History) RemoveSet(ids map[string]struct{}) {
+	filtered := make([]string, 0, len(h.Images))
+	for _, id := range h.Images {
+		if _, removed := ids[id]; removed {
+			continue
+		}
+		filtered = append(filtered, id)
+	}
+	h.Images = filtered
+	if _, removed := ids[h.Current]; removed {
+		h.Current = ""
+	}
+}
+
+func (h *History) Trim(limit int) {
+	limit = max(limit, 1)
+	if len(h.Images) <= limit {
+		return
+	}
+	h.Images = h.Images[len(h.Images)-limit:]
+}
+
 type PaginationState struct {
 	Pages            map[string]int `json:"pages"`
 	LastBookmarkPage string         `json:"last_bookmark_page,omitempty"`
@@ -102,23 +168,6 @@ func New(homeDir, downloadPath string) (*Storage, error) {
 		homeDir:      homeDir,
 		stateDir:     stateDir,
 	}, nil
-}
-
-func resolveDownloadDir(homeDir, downloadPath string) string {
-	trimmed := strings.TrimSpace(downloadPath)
-	if trimmed == "" {
-		return filepath.Join(homeDir, "Pictures", "KPixiv")
-	}
-
-	if trimmed == "~" {
-		return homeDir
-	}
-
-	if strings.HasPrefix(trimmed, "~/") {
-		return filepath.Join(homeDir, strings.TrimPrefix(trimmed, "~/"))
-	}
-
-	return trimmed
 }
 
 // DataDir returns the base data directory.
@@ -214,27 +263,6 @@ func (s *Storage) GenerateThumbnail(srcPath, id string) error {
 	return nil
 }
 
-func scaleImage(src image.Image, maxWidth int) image.Image {
-	bounds := src.Bounds()
-	w := bounds.Dx()
-	h := bounds.Dy()
-	if w <= maxWidth {
-		return src
-	}
-
-	newH := h * maxWidth / w
-	dst := image.NewRGBA(image.Rect(0, 0, maxWidth, newH))
-	for y := range newH {
-		for x := range maxWidth {
-			srcX := x * w / maxWidth
-			srcY := y * h / newH
-			dst.Set(x, y, src.At(srcX, srcY))
-		}
-	}
-
-	return dst
-}
-
 // FavoritesMetadataPath returns the favorite metadata JSON path (same as the main metadata).
 func (s *Storage) FavoritesMetadataPath() string {
 	return s.MetadataPath()
@@ -325,25 +353,10 @@ func (s *Storage) ExcludeWallpaper(imageID string) error {
 		return err
 	}
 
-	history, err := s.LoadHistory()
-	if err != nil {
-		return err
-	}
-
-	filtered := make([]string, 0, len(history.Images))
-	for _, id := range history.Images {
-		if id == imageID {
-			continue
-		}
-		filtered = append(filtered, id)
-	}
-
-	history.Images = filtered
-	if history.Current == imageID {
-		history.Current = ""
-	}
-
-	return s.SaveHistory(history)
+	return s.updateHistory(func(h *History) error {
+		h.Remove(imageID)
+		return nil
+	})
 }
 
 // LoadPaginationState reads persisted ranking pagination state.
@@ -614,17 +627,26 @@ func (s *Storage) lookupImageMeta(id string) (*ImageMeta, bool) {
 	return meta, ok
 }
 
+func (s *Storage) updateHistory(fn func(*History) error) error {
+	history, err := s.LoadHistory()
+	if err != nil {
+		return err
+	}
+	if err = fn(history); err != nil {
+		return err
+	}
+	return s.SaveHistory(history)
+}
+
 // LoadHistory reads wallpaper history from the disk.
 func (s *Storage) LoadHistory() (*History, error) {
 	path := s.HistoryPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &History{
-				Images:    []string{},
-				Monitors:  map[string]string{},
-				UpdatedAt: time.Now(),
-			}, nil
+			h := NewHistory()
+			h.UpdatedAt = time.Now()
+			return h, nil
 		}
 
 		return nil, err
@@ -635,14 +657,11 @@ func (s *Storage) LoadHistory() (*History, error) {
 		return nil, err
 	}
 
-	if history.Monitors == nil {
-		history.Monitors = map[string]string{}
-	}
-
+	history.Normalize()
 	return &history, nil
 }
 
-// SaveHistory writes wallpaper history to disk.
+// SaveHistory writes wallpaper history to the disk.
 func (s *Storage) SaveHistory(history *History) error {
 	history.UpdatedAt = time.Now()
 	data, err := json.MarshalIndent(history, "", "  ")
@@ -663,79 +682,31 @@ func (s *Storage) LoadMonitorHistory() (map[string]string, error) {
 }
 
 func (s *Storage) SaveMonitorHistory(monitors map[string]string, historyLimit int) error {
-	history, err := s.LoadHistory()
-	if err != nil {
-		return err
-	}
-
-	if history.Monitors == nil {
-		history.Monitors = map[string]string{}
-	}
-
-	for screenID, imageID := range monitors {
-		if oldID, exists := history.Monitors[screenID]; exists && oldID != "" && oldID != imageID {
-			history.Images = append(history.Images, oldID)
+	return s.updateHistory(func(h *History) error {
+		for screenID, imageID := range monitors {
+			h.SetMonitor(screenID, imageID)
 		}
-
-		history.Monitors[screenID] = imageID
-	}
-
-	trimHistory(history, historyLimit)
-	return s.SaveHistory(history)
+		h.Trim(historyLimit)
+		return nil
+	})
 }
 
 func (s *Storage) AddToMonitorHistory(screenID, imageID string, historyLimit int) error {
-	monitors, err := s.LoadMonitorHistory()
-	if err != nil {
-		return err
-	}
-
-	monitors[screenID] = imageID
-
-	if err = s.SaveMonitorHistory(monitors, historyLimit); err != nil {
-		return err
-	}
-
-	history, err := s.LoadHistory()
-	if err != nil {
-		return err
-	}
-
-	if history.Current != "" && history.Current != imageID {
-		history.Images = append(history.Images, history.Current)
-	}
-
-	history.Current = imageID
-	trimHistory(history, historyLimit)
-
-	return s.SaveHistory(history)
+	return s.updateHistory(func(h *History) error {
+		h.SetMonitor(screenID, imageID)
+		h.SetCurrent(imageID)
+		h.Trim(historyLimit)
+		return nil
+	})
 }
 
 // AddToHistoryWithLimit updates current wallpaper and trims history length.
 func (s *Storage) AddToHistoryWithLimit(imageID string, historyLimit int) error {
-	history, err := s.LoadHistory()
-	if err != nil {
-		return err
-	}
-
-	if history.Current != "" && history.Current != imageID {
-		history.Images = append(history.Images, history.Current)
-	}
-
-	history.Current = imageID
-	trimHistory(history, historyLimit)
-
-	return s.SaveHistory(history)
-}
-
-func trimHistory(history *History, historyLimit int) bool {
-	limit := max(historyLimit, 1)
-	if len(history.Images) <= limit {
-		return false
-	}
-
-	history.Images = history.Images[len(history.Images)-limit:]
-	return true
+	return s.updateHistory(func(h *History) error {
+		h.SetCurrent(imageID)
+		h.Trim(historyLimit)
+		return nil
+	})
 }
 
 // GetCurrentWallpaper returns the current wallpaper ID.
@@ -771,17 +742,6 @@ func (s *Storage) findImageInBookmarksDir(id string) (string, bool) {
 	return findImageInDir(s.BookmarksDir(), id)
 }
 
-func findImageInDir(dir, id string) (string, bool) {
-	for _, ext := range []string{".jpg", ".jpeg", ".png"} {
-		path := filepath.Join(dir, id+ext)
-		if _, err := os.Stat(path); err == nil {
-			return path, true
-		}
-	}
-
-	return "", false
-}
-
 func (s *Storage) downloadFilename(id, sourcePath string, meta *ImageMeta) string {
 	ext := filepath.Ext(sourcePath)
 	if ext == "" {
@@ -799,48 +759,6 @@ func (s *Storage) downloadFilename(id, sourcePath string, meta *ImageMeta) strin
 	}
 
 	return fmt.Sprintf("%s - %s%s", id, title, ext)
-}
-
-func copyFileAtomic(sourcePath, destPath string) error {
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return fmt.Errorf("failed to open source artwork: %w", err)
-	}
-	defer source.Close() //nolint:errcheck // deferred close on best-effort basis
-
-	if err = os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
-		return fmt.Errorf("failed to create download directory: %w", err)
-	}
-
-	tmpFile, err := os.CreateTemp(filepath.Dir(destPath), ".copy-*")
-	if err != nil {
-		return fmt.Errorf("failed to create temporary download file: %w", err)
-	}
-
-	tmpPath := tmpFile.Name()
-	defer tmpFile.Close()    //nolint:errcheck // deferred close on best-effort basis
-	defer os.Remove(tmpPath) //nolint:errcheck // deferred cleanup on best-effort basis
-
-	if _, err = io.Copy(tmpFile, source); err != nil {
-		return fmt.Errorf("failed to copy artwork: %w", err)
-	}
-
-	if err = tmpFile.Sync(); err != nil {
-		return fmt.Errorf("failed to flush copied artwork: %w", err)
-	}
-
-	if err = tmpFile.Close(); err != nil {
-		return fmt.Errorf("failed to close copied artwork: %w", err)
-	}
-
-	if err = os.Rename(tmpPath, destPath); err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return nil
-		}
-		return fmt.Errorf("failed to finalize copied artwork: %w", err)
-	}
-
-	return nil
 }
 
 // CleanupImagesOlderThanDays removes old images and syncs metadata/history.
@@ -874,15 +792,6 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (int, error) {
 	}
 
 	return removedFromMetadata + removedFromRanking, nil
-}
-
-func cleanupCutoff(days int) (time.Time, bool) {
-	removeAll := days <= 0
-	if removeAll {
-		return time.Now(), true
-	}
-
-	return time.Now().Add(-time.Duration(days) * 24 * time.Hour), false
 }
 
 func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time, removeAll bool) (map[string]struct{}, map[string]struct{}, int, error) {
@@ -951,25 +860,10 @@ func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedF
 }
 
 func (s *Storage) cleanupHistory(removedIDs map[string]struct{}) error {
-	history, err := s.LoadHistory()
-	if err != nil {
-		return err
-	}
-
-	filtered := make([]string, 0, len(history.Images))
-	for _, id := range history.Images {
-		if _, removed := removedIDs[id]; removed {
-			continue
-		}
-		filtered = append(filtered, id)
-	}
-
-	history.Images = filtered
-	if _, removed := removedIDs[history.Current]; removed {
-		history.Current = ""
-	}
-
-	return s.SaveHistory(history)
+	return s.updateHistory(func(h *History) error {
+		h.RemoveSet(removedIDs)
+		return nil
+	})
 }
 
 func (s *Storage) cleanupQueue(removedIDs map[string]struct{}) error {
@@ -989,4 +883,104 @@ func (s *Storage) cleanupQueue(removedIDs map[string]struct{}) error {
 	}
 
 	return nil
+}
+
+func resolveDownloadDir(homeDir, downloadPath string) string {
+	trimmed := strings.TrimSpace(downloadPath)
+	if trimmed == "" {
+		return filepath.Join(homeDir, "Pictures", "KPixiv")
+	}
+
+	if trimmed == "~" {
+		return homeDir
+	}
+
+	if after, ok := strings.CutPrefix(trimmed, "~/"); ok {
+		return filepath.Join(homeDir, after)
+	}
+
+	return trimmed
+}
+
+func scaleImage(src image.Image, maxWidth int) image.Image {
+	bounds := src.Bounds()
+	w := bounds.Dx()
+	h := bounds.Dy()
+	if w <= maxWidth {
+		return src
+	}
+
+	newH := h * maxWidth / w
+	dst := image.NewRGBA(image.Rect(0, 0, maxWidth, newH))
+	for y := range newH {
+		for x := range maxWidth {
+			srcX := x * w / maxWidth
+			srcY := y * h / newH
+			dst.Set(x, y, src.At(srcX, srcY))
+		}
+	}
+
+	return dst
+}
+
+func findImageInDir(dir, id string) (string, bool) {
+	for _, ext := range []string{".jpg", ".jpeg", ".png"} {
+		path := filepath.Join(dir, id+ext)
+		if _, err := os.Stat(path); err == nil {
+			return path, true
+		}
+	}
+
+	return "", false
+}
+
+func copyFileAtomic(sourcePath, destPath string) error {
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fmt.Errorf("failed to open source artwork: %w", err)
+	}
+	defer source.Close() //nolint:errcheck // deferred close on best-effort basis
+
+	if err = os.MkdirAll(filepath.Dir(destPath), 0750); err != nil {
+		return fmt.Errorf("failed to create download directory: %w", err)
+	}
+
+	tmpFile, err := os.CreateTemp(filepath.Dir(destPath), ".copy-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary download file: %w", err)
+	}
+
+	tmpPath := tmpFile.Name()
+	defer tmpFile.Close()    //nolint:errcheck // deferred close on best-effort basis
+	defer os.Remove(tmpPath) //nolint:errcheck // deferred cleanup on best-effort basis
+
+	if _, err = io.Copy(tmpFile, source); err != nil {
+		return fmt.Errorf("failed to copy artwork: %w", err)
+	}
+
+	if err = tmpFile.Sync(); err != nil {
+		return fmt.Errorf("failed to flush copied artwork: %w", err)
+	}
+
+	if err = tmpFile.Close(); err != nil {
+		return fmt.Errorf("failed to close copied artwork: %w", err)
+	}
+
+	if err = os.Rename(tmpPath, destPath); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return fmt.Errorf("failed to finalize copied artwork: %w", err)
+	}
+
+	return nil
+}
+
+func cleanupCutoff(days int) (time.Time, bool) {
+	removeAll := days <= 0
+	if removeAll {
+		return time.Now(), true
+	}
+
+	return time.Now().Add(-time.Duration(days) * 24 * time.Hour), false
 }
