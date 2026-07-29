@@ -7,9 +7,9 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
-)
 
-const version = "0.7.0"
+	"github.com/alphonse927/kpixiv/internal/build"
+)
 
 func (ui *settingsUI) buildAboutPage() fyne.CanvasObject {
 	bold := fyne.TextStyle{Bold: true}
@@ -19,7 +19,7 @@ func (ui *settingsUI) buildAboutPage() fyne.CanvasObject {
 		container.NewPadded(
 			container.NewVBox(
 				widget.NewLabelWithStyle("kPixiv", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
-				widget.NewLabelWithStyle("Version "+version, fyne.TextAlignCenter, fyne.TextStyle{}),
+				widget.NewLabelWithStyle("Version "+build.Version, fyne.TextAlignCenter, fyne.TextStyle{}),
 			),
 		),
 		container.NewPadded(

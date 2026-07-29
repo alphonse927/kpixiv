@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+      - run: make dist
+      - name: Generate release notes
+        run: |
+          echo "## What's Changed" > /tmp/release-notes.md
+          PREV=$(git describe --tags --abbrev=0 $(git rev-list --tags --skip=1 --max-count=1) 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            git log --oneline "$PREV".."${{ github.ref_name }}" >> /tmp/release-notes.md
+          else
+            git log --oneline "${{ github.ref_name }}" >> /tmp/release-notes.md
+          fi
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file /tmp/release-notes.md \
+            dist/kpixiv-*.tar.gz
