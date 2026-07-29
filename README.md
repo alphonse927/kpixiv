@@ -283,3 +283,12 @@ However, contributors are expected to:
 - and remain responsible for the correctness of their contributions.
 
 Submissions consisting solely of unreviewed AI-generated code may be rejected.
+
+## Disclaimer
+
+kPixiv is an unofficial client for Pixiv.
+
+This project is not affiliated with, endorsed by, or sponsored by Pixiv.
+
+All artwork remains the property of its respective artists.
+Users are responsible for complying with Pixiv's Terms of Service.
