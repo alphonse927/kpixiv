@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=KPixiv
+Comment=Pixiv wallpaper manager for KDE Plasma
+Exec=@HOME@/.local/bin/kpixiv
+Icon=@HOME@/.local/share/icons/hicolor/scalable/apps/kpixiv
+Terminal=false
+Type=Application
+Categories=Graphics;Qt;
+StartupNotify=false

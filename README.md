@@ -25,6 +25,8 @@ kpixivctl autostart enable     # Enable automatic startup
 
 For detailed installation options, see [Installation](#installation).
 
+**Development:** use `make dev-install` instead — it symlinks the binaries so you don't need to rebuild on every change.
+
 ## Features
 
 ### Pixiv Integration
@@ -90,6 +92,8 @@ Requirements: Go 1.26+, KDE Plasma, qdbus.
 make install
 kpixivctl autostart enable    # Enable automatic startup (optional)
 ```
+
+For development, use `make dev-install` instead — it symlinks the build output so you can iterate without re-running the full install.
 
 ### Uninstall
 
