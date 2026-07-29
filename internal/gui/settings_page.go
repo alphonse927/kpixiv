@@ -91,6 +91,12 @@ func (ui *settingsUI) buildSettingsPage() fyne.CanvasObject {
 				ui.lockScreen,
 			),
 		),
+		container.NewPadded(
+			container.NewVBox(
+				section("Logging"),
+				field("Log Level", ui.logLevel),
+			),
+		),
 	)
 
 	return container.NewScroll(container.NewPadded(content))

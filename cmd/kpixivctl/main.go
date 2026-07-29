@@ -49,6 +49,9 @@ var rootCmd = &cobra.Command{
 		cfg.Validate()
 
 		logger.Init(verbose)
+		if !verbose {
+			logger.SetLevel(cfg.LogLevel)
+		}
 		return nil
 	},
 }
@@ -725,6 +728,7 @@ var configSetCmd = &cobra.Command{
 	Long: `Set a configuration value by dotted key path.
 
 Supported keys:
+  log_level                   (string: info/debug/warn/error)
   pixiv.r18                   (bool)
   pixiv.ranking               (int: 0=daily, 1=weekly, 2=monthly)
   pixiv.min_width             (int, minimum 1280)
@@ -748,6 +752,14 @@ Supported keys:
 		value := args[1]
 
 		switch key {
+		case "log_level":
+			switch value {
+			case "debug", "info", "warn", "error":
+			default:
+				return fmt.Errorf("invalid log level: %s (must be one of: debug, info, warn, error)", value)
+			}
+			cfg.LogLevel = value
+
 		case "pixiv.r18":
 			v, err := strconv.ParseBool(value)
 			if err != nil {

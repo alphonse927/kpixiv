@@ -691,7 +691,24 @@ func (s *Storage) AddToMonitorHistory(screenID, imageID string, historyLimit int
 	}
 
 	monitors[screenID] = imageID
-	return s.SaveMonitorHistory(monitors, historyLimit)
+
+	if err = s.SaveMonitorHistory(monitors, historyLimit); err != nil {
+		return err
+	}
+
+	history, err := s.LoadHistory()
+	if err != nil {
+		return err
+	}
+
+	if history.Current != "" && history.Current != imageID {
+		history.Images = append(history.Images, history.Current)
+	}
+
+	history.Current = imageID
+	trimHistory(history, historyLimit)
+
+	return s.SaveHistory(history)
 }
 
 // AddToHistoryWithLimit updates current wallpaper and trims history length.

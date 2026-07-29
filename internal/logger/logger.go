@@ -3,6 +3,7 @@ package logger
 import (
 	"log/slog"
 	"os"
+	"strings"
 )
 
 var log *slog.Logger
@@ -16,6 +17,28 @@ func Init(verbose bool) {
 
 	log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: level,
+	}))
+}
+
+// SetLevel reconfigures the global logger to the given level string.
+// Supported values: debug, info, warn, error. Defaults to info if unrecognized.
+func SetLevel(level string) {
+	var l slog.Level
+	switch strings.ToLower(level) {
+	case "debug":
+		l = slog.LevelDebug
+	case "info":
+		l = slog.LevelInfo
+	case "warn":
+		l = slog.LevelWarn
+	case "error":
+		l = slog.LevelError
+	default:
+		l = slog.LevelInfo
+	}
+
+	log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: l,
 	}))
 }
 
