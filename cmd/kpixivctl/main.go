@@ -17,6 +17,7 @@ import (
 	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
+	"github.com/alphonse927/kpixiv/internal/platform"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
@@ -658,6 +659,42 @@ var cacheClearCmd = &cobra.Command{
 	},
 }
 
+var autostartCmd = &cobra.Command{
+	Use:   "autostart",
+	Short: "Manage systemd autostart",
+}
+
+var autostartEnableCmd = &cobra.Command{
+	Use:   "enable",
+	Short: "Install and enable the systemd user service",
+	Long: `Installs the systemd unit file and enables the KPixiv user service.
+
+The unit file is written to ~/.config/systemd/user/kpixiv.service
+and the service is enabled for automatic startup on login.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := platform.EnableService("kpixiv.service"); err != nil {
+			return err
+		}
+		fmt.Println("KPixiv autostart enabled.")
+		return nil
+	},
+}
+
+var autostartDisableCmd = &cobra.Command{
+	Use:   "disable",
+	Short: "Disable and remove the systemd user service",
+	Long: `Disables and removes the KPixiv systemd user service.
+
+The unit file is removed and the service is disabled.`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := platform.DisableService("kpixiv.service"); err != nil {
+			return err
+		}
+		fmt.Println("KPixiv autostart disabled.")
+		return nil
+	},
+}
+
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "View and edit configuration",
@@ -1053,9 +1090,13 @@ func init() {
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetCmd)
 
+	autostartCmd.AddCommand(autostartEnableCmd)
+	autostartCmd.AddCommand(autostartDisableCmd)
+
 	rootCmd.AddCommand(wallpaperCmd)
 	rootCmd.AddCommand(bookmarksCmd)
 	rootCmd.AddCommand(accountCmd)
+	rootCmd.AddCommand(autostartCmd)
 	rootCmd.AddCommand(cacheCmd)
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(monitorsCmd)
