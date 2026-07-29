@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"time"
+
+	"github.com/alphonse927/kpixiv/internal/sets"
+	"github.com/alphonse927/kpixiv/internal/slices"
 )
 
 type History struct {
@@ -44,29 +47,19 @@ func (h *History) SetMonitor(screenID, imageID string) {
 }
 
 func (h *History) Remove(imageID string) {
-	filtered := make([]string, 0, len(h.Images))
-	for _, id := range h.Images {
-		if id == imageID {
-			continue
-		}
-		filtered = append(filtered, id)
-	}
-	h.Images = filtered
+	h.Images = slices.Filter(h.Images, func(id string) bool {
+		return id != imageID
+	})
 	if h.Current == imageID {
 		h.Current = ""
 	}
 }
 
-func (h *History) RemoveSet(ids map[string]struct{}) {
-	filtered := make([]string, 0, len(h.Images))
-	for _, id := range h.Images {
-		if _, removed := ids[id]; removed {
-			continue
-		}
-		filtered = append(filtered, id)
-	}
-	h.Images = filtered
-	if _, removed := ids[h.Current]; removed {
+func (h *History) RemoveSet(ids sets.Set[string]) {
+	h.Images = slices.Filter(h.Images, func(id string) bool {
+		return !ids.Contains(id)
+	})
+	if ids.Contains(h.Current) {
 		h.Current = ""
 	}
 }
