@@ -17,10 +17,10 @@ KPixiv ships as two binaries: a desktop daemon with tray and GUI (`kpixiv`), and
 ```bash
 # Install from source
 make install
-systemctl --user enable --now kpixiv.service
+kpixivctl autostart enable     # Enable automatic startup
 
 # Or download a release
-https://github.com/alphonse927/kpixiv/releases
+# https://github.com/alphonse927/kpixiv/releases
 ```
 
 For detailed installation options, see [Installation](#installation).
@@ -38,7 +38,7 @@ For detailed installation options, see [Installation](#installation).
 ### Wallpaper Management
 
 - Automatic rotation on a configurable interval
-- Download cache with deduplication and age-based cleanup
+- Download cache with the deduplication and age-based cleanup
 - Favorites directory for keeping wallpapers you like
 - Queue rebuilding from ranking images and/or bookmarks
 - Dry-run mode for testing
@@ -60,14 +60,10 @@ For detailed installation options, see [Installation](#installation).
 
 ## Screenshots
 
-<!--
-
-[Screenshot: System tray menu]
-[Screenshot: Settings window - Home tab with wallpaper preview]
-[Screenshot: Settings window - Monitors tab with per-screen config]
-[Screenshot: Settings window - Account tab with Pixiv login]
-
--->
+<img src="docs/screenshots/settings.png" width="400" alt="Settings window">
+<img src="docs/screenshots/settings_windows.png" width="400" alt="Configuration tabs">
+<img src="docs/screenshots/settings_multi_monitor.png" width="400" alt="Multi-monitor settings">
+<img src="docs/screenshots/multi_monitor_support.png" width="400" alt="Multi-monitor wallpapers">
 
 ## Installation
 
@@ -79,11 +75,11 @@ Download the latest tarball from the [Releases page](https://github.com/alphonse
 tar xzf kpixiv-*.tar.gz
 cd kpixiv-*/
 
-mkdir -p ~/.local/bin ~/.config/systemd/user
+mkdir -p ~/.local/bin
 cp kpixiv kpixivctl ~/.local/bin/
-cp kpixiv.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now kpixiv.service
+
+# Enable automatic startup (optional)
+kpixivctl autostart enable
 ```
 
 ### Build from source
@@ -92,7 +88,7 @@ Requirements: Go 1.26+, KDE Plasma, qdbus.
 
 ```bash
 make install
-systemctl --user enable --now kpixiv.service
+kpixivctl autostart enable    # Enable automatic startup (optional)
 ```
 
 ### Uninstall
@@ -200,6 +196,8 @@ kpixivctl wallpaper next --monitor DP-1  # Apply on a specific monitor
 kpixivctl wallpaper next --all           # Apply on all monitors
 kpixivctl account login                  # Log in to Pixiv
 kpixivctl bookmarks sync                 # Sync bookmarked images
+kpixivctl autostart enable               # Enable automatic startup via systemd
+kpixivctl autostart disable              # Disable and remove systemd service
 kpixivctl status                         # Show full application status
 ```
 
@@ -207,11 +205,11 @@ See `kpixivctl help` or the [full CLI reference](docs/cli.md) for all commands.
 
 ### Global flags
 
-| Flag | Description |
-|---|---|
-| `-c, --config` | Path to config file (default: `~/.config/kpixiv/config.yaml`) |
-| `-v, --verbose` | Enable verbose logging |
-| `--dry-run` | Show actions without downloading or applying |
+| Flag            | Description                                                   |
+|-----------------|---------------------------------------------------------------|
+| `-c, --config`  | Path to config file (default: `~/.config/kpixiv/config.yaml`) |
+| `-v, --verbose` | Enable verbose logging                                        |
+| `--dry-run`     | Show actions without downloading or applying                  |
 
 ### Settings window
 
