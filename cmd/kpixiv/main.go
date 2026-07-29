@@ -12,6 +12,7 @@ import (
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/platform"
 	"github.com/alphonse927/kpixiv/internal/tray"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,13 @@ var (
 
 func runDesktop(*cobra.Command, []string) error {
 	log := logger.WithComponent("daemon")
+
+	listener, err := platform.TryAcquire()
+	if err != nil {
+		return nil
+	}
+	defer listener.Close()
+
 	controller, err := app.New(cfg, false, reset)
 	if err != nil {
 		return err
@@ -42,6 +50,7 @@ func runDesktop(*cobra.Command, []string) error {
 		<-sigCh
 		log.Info("Received shutdown signal")
 		controller.Shutdown()
+		listener.Close()
 		cancel()
 	}()
 
