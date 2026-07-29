@@ -27,18 +27,18 @@ func TryAcquire() (net.Listener, error) {
 		return nil, err
 	}
 
-	if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return nil, fmt.Errorf("cannot create state directory: %w", err)
 	}
 
-	// If the socket exists and we can connect, another instance is running
+	// If the socket exists, and we can connect, another instance is running
 	if conn, dialErr := net.Dial("unix", path); dialErr == nil {
-		conn.Close()
+		conn.Close() //nolint:errcheck,gosec // best-effort cleanup
 		return nil, fmt.Errorf("another instance is already running")
 	}
 
 	// Remove stale socket and take over
-	os.Remove(path)
+	os.Remove(path) //nolint:errcheck,gosec // best-effort cleanup
 
 	listener, err := net.Listen("unix", path)
 	if err != nil {

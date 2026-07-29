@@ -468,7 +468,11 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 				return fmt.Errorf("failed to load monitor history: %w", err)
 			}
 
-			globalID, _ := st.GetCurrentWallpaper()
+			globalID, err := st.GetCurrentWallpaper()
+			if err != nil {
+				globalID = ""
+			}
+
 			for _, s := range screens {
 				id := monitors[s.ID]
 				if id == "" {

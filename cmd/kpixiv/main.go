@@ -32,7 +32,11 @@ func runDesktop(*cobra.Command, []string) error {
 	if err != nil {
 		return nil
 	}
-	defer listener.Close()
+	defer func() {
+		if closeErr := listener.Close(); closeErr != nil {
+			log.Error("Failed to close instance listener", "error", closeErr)
+		}
+	}()
 
 	controller, err := app.New(cfg, false, reset)
 	if err != nil {
@@ -50,7 +54,9 @@ func runDesktop(*cobra.Command, []string) error {
 		<-sigCh
 		log.Info("Received shutdown signal")
 		controller.Shutdown()
-		listener.Close()
+		if closeErr := listener.Close(); closeErr != nil {
+			log.Error("Failed to close instance listener", "error", closeErr)
+		}
 		cancel()
 	}()
 

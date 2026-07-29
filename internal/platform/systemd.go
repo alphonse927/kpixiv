@@ -29,29 +29,12 @@ func InstallServiceUnit() error {
 		return err
 	}
 
-	if err = os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	if err = os.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return fmt.Errorf("cannot create systemd user directory: %w", err)
 	}
 
-	if err = os.WriteFile(path, []byte(serviceUnit), 0644); err != nil {
+	if err = os.WriteFile(path, []byte(serviceUnit), 0600); err != nil {
 		return fmt.Errorf("cannot write service unit: %w", err)
-	}
-
-	if out, err := exec.Command("systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
-		return fmt.Errorf("cannot reload systemd: %s: %w", strings.TrimSpace(string(out)), err)
-	}
-
-	return nil
-}
-
-func RemoveServiceUnit() error {
-	path, err := serviceUnitPath()
-	if err != nil {
-		return err
-	}
-
-	if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("cannot remove service unit: %w", err)
 	}
 
 	if out, err := exec.Command("systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
