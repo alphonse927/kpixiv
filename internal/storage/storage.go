@@ -15,7 +15,7 @@ type Storage struct {
 
 func New(homeDir, downloadPath string) (*Storage, error) {
 	if homeDir == "" {
-		homeDir, _ = os.UserHomeDir()
+		homeDir, _ = os.UserHomeDir() //nolint:errcheck
 	}
 
 	dataDir := filepath.Join(homeDir, ".local", "share", "kpixiv")
