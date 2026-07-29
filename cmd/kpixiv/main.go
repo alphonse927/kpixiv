@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/alphonse927/kpixiv/internal/app"
+	"github.com/alphonse927/kpixiv/internal/build"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -58,9 +59,10 @@ func runDesktop(*cobra.Command, []string) error {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "kpixiv",
-	Short: "KPixiv - Pixiv wallpaper manager for KDE Plasma",
-	Long:  `KPixiv fetches wallpapers from Pixiv and sets them as your KDE Plasma desktop wallpaper.`,
+	Use:     "kpixiv",
+	Version: build.Version,
+	Short:   "KPixiv - Pixiv wallpaper manager for KDE Plasma",
+	Long:    `KPixiv fetches wallpapers from Pixiv and sets them as your KDE Plasma desktop wallpaper.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = config.Load(cfgPath)
