@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/alphonse927/kpixiv/internal/bookmarks"
+	"github.com/alphonse927/kpixiv/internal/build"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -33,9 +34,10 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "kpixivctl",
-	Short: "KPixiv CLI - Pixiv wallpaper manager",
-	Long:  `kpixivctl is the command-line interface for KPixiv, a Pixiv wallpaper manager for KDE Plasma.`,
+	Use:     "kpixivctl",
+	Version: build.Version,
+	Short:   "KPixiv CLI - Pixiv wallpaper manager",
+	Long:    `kpixivctl is the command-line interface for KPixiv, a Pixiv wallpaper manager for KDE Plasma.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = config.Load(cfgPath)

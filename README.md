@@ -25,18 +25,46 @@ A Linux wallpaper application for fetching and rotating Pixiv wallpapers on KDE 
 
 ## Requirements
 
-- Go 1.26+
+- Go 1.26+ (to build from the source)
 - KDE Plasma desktop environment
 - qdbus (for KDE integration)
 
-## Install
+## Download
+
+Prebuilt binaries are available on the [Releases page](https://github.com/alphonse927/kpixiv/releases).
+
+Each release provides a tarball containing both binaries and a systemd service file:
+
+```bash
+# Download and extract
+curl -L https://github.com/alphonse927/kpixiv/releases/download/v0.7.0/kpixiv-v0.7.0-linux-amd64.tar.gz | tar xz
+cd kpixiv-v0.7.0-linux-amd64
+
+# Install to ~/.local/bin
+mkdir -p ~/.local/bin
+cp kpixiv kpixivctl ~/.local/bin/
+
+# Install systemd service
+mkdir -p ~/.config/systemd/user
+cp kpixiv.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now kpixiv.service
+```
+
+## Install from source
 
 ```bash
 make install
 systemctl --user enable --now kpixiv.service
 ```
 
-This builds both binaries, installs the systemd user service, and reloads systemd.
+This builds both binaries, symlinks them to `~/.local/bin/`, installs the systemd user service, and reloads systemd.
+
+To remove:
+
+```bash
+make uninstall
+```
 
 ## Binaries
 
