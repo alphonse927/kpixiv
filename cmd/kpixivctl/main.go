@@ -1119,36 +1119,6 @@ func init() {
 	rootCmd.AddCommand(monitorsCmd)
 	rootCmd.AddCommand(statusCmd)
 
-	rootCmd.AddCommand(&cobra.Command{
-		Use:    "fetch",
-		Hidden: true,
-		RunE:   wallpaperFetchCmd.RunE,
-	})
-
-	rootCmd.AddCommand(&cobra.Command{
-		Use:    "next",
-		Hidden: true,
-		RunE:   wallpaperNextCmd.RunE,
-	})
-
-	queueAlias := &cobra.Command{Use: "queue", Hidden: true}
-	queueAlias.AddCommand(&cobra.Command{
-		Use:    "ranking",
-		Hidden: true,
-		RunE:   wallpaperQueueRankingCmd.RunE,
-	})
-	queueAlias.AddCommand(&cobra.Command{
-		Use:     "bookmarks",
-		Aliases: []string{"favorites"},
-		Hidden:  true,
-		RunE:    wallpaperQueueBookmarksCmd.RunE,
-	})
-	queueAlias.AddCommand(&cobra.Command{
-		Use:    "all",
-		Hidden: true,
-		RunE:   wallpaperQueueAllCmd.RunE,
-	})
-	rootCmd.AddCommand(queueAlias)
 }
 
 func main() {
