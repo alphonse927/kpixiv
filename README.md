@@ -1,11 +1,14 @@
-# KPixiv
+<div style="text-align: center">
+  <img src="docs/logo.svg" width="128" alt="KPixiv logo">
+  <h1>KPixiv</h1>
+  <em>Native KDE Plasma wallpaper manager for Pixiv.</em>
+  <br>
 
-Native KDE Plasma wallpaper manager for Pixiv.
-
-[![CI](https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml/badge.svg)](https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml)
-[![Release](https://img.shields.io/github/v/release/alphonse927/kpixiv?label=release)](https://github.com/alphonse927/kpixiv/releases)
-
-<img src="docs/screenshots/settings_windows.png" width="500" alt="Configuration tabs">
+  <a href="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml"><img src="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/alphonse927/kpixiv/releases"><img src="https://img.shields.io/github/v/release/alphonse927/kpixiv?label=release" alt="Release"></a>
+  <br><br>
+  <img src="docs/screenshots/settings_windows.png" width="600" alt="Configuration tabs">
+</div>
 
 ## About
 
