@@ -87,6 +87,9 @@ var rootCmd = &cobra.Command{
 
 		cfg.Validate()
 		logger.Init(verbose)
+		if !verbose {
+			logger.SetLevel(cfg.LogLevel)
+		}
 		return nil
 	},
 	RunE: runDesktop,

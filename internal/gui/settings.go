@@ -110,6 +110,8 @@ type settingsUI struct {
 	monitorChecks       map[string]*widget.Check
 	monitorOrientations map[string]*widget.Select
 
+	logLevel *widget.Select
+
 	bookmarksEnabled      *widget.Check
 	bookmarksSyncInterval *numericalEntry
 	bookmarksAutoCleanup  *widget.Check
@@ -241,6 +243,9 @@ func (ui *settingsUI) createWidgets() {
 	ui.statusThumbnail.FillMode = canvas.ImageFillContain
 	ui.statusThumbnail.SetMinSize(fyne.NewSize(140, 0))
 	ui.monitorStatus = container.NewVBox()
+
+	ui.logLevel = widget.NewSelect([]string{"info", "debug"}, nil)
+	ui.logLevel.SetSelected(cfg.LogLevel)
 
 	ui.autostartCheck = widget.NewCheck("Start KPixiv automatically when I log in", nil)
 	ui.autostartCheck.Disable()
@@ -444,6 +449,8 @@ func (ui *settingsUI) update() {
 		ui.bookmarksSyncInterval.Disable()
 		ui.bookmarksAutoCleanup.Disable()
 	}
+
+	ui.logLevel.SetSelected(cfg.LogLevel)
 }
 
 func (ui *settingsUI) applySettings() {
@@ -504,6 +511,8 @@ func (ui *settingsUI) applySettings() {
 	if v, err := strconv.Atoi(ui.bookmarksSyncInterval.Text); err == nil {
 		cfg.Bookmarks.SyncInterval = v
 	}
+
+	cfg.LogLevel = ui.logLevel.Selected
 
 	cfg.Validate()
 
@@ -693,7 +702,10 @@ func (ui *settingsUI) refreshStatus() {
 		ui.currentWallpaperSection.Show()
 		ui.monitorWallpaperSection.Hide()
 	}
-	meta, _ := ui.ctrl.CurrentWallpaper() //nolint:errcheck
+	meta, err := ui.ctrl.CurrentWallpaper()
+	if err != nil {
+		ui.log.Error("Failed to get current wallpaper", "error", err)
+	}
 
 	if meta != nil && meta.ID != "" && meta.ID != ui.lastWallpaperID {
 		ui.lastWallpaperID = meta.ID
