@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/alphonse927/kpixiv/internal/sets"
 )
 
 func (s *Storage) CleanupImagesOlderThanDays(days int) (int, error) {
@@ -39,9 +41,9 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (int, error) {
 	return removedFromMetadata + removedFromRanking, nil
 }
 
-func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time, removeAll bool) (map[string]struct{}, map[string]struct{}, int, error) {
-	removedIDs := make(map[string]struct{})
-	removedFiles := make(map[string]struct{})
+func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time, removeAll bool) (sets.Set[string], sets.Set[string], int, error) {
+	removedIDs := sets.New[string]()
+	removedFiles := sets.New[string]()
 	removedCount := 0
 
 	for id, meta := range images {
@@ -57,18 +59,18 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 			if rmErr := os.Remove(meta.Path); rmErr != nil && !os.IsNotExist(rmErr) {
 				return nil, nil, removedCount, fmt.Errorf("failed to remove image file %s: %w", meta.Path, rmErr)
 			}
-			removedFiles[meta.Path] = struct{}{}
+			removedFiles.Add(meta.Path)
 		}
 
 		delete(images, id)
-		removedIDs[id] = struct{}{}
+		removedIDs.Add(id)
 		removedCount++
 	}
 
 	return removedIDs, removedFiles, removedCount, nil
 }
 
-func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles map[string]struct{}) (int, error) {
+func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles sets.Set[string]) (int, error) {
 	rankingEntries, readErr := os.ReadDir(s.RankingDir())
 	if readErr != nil {
 		return 0, fmt.Errorf("failed to read ranking directory: %w", readErr)
@@ -81,7 +83,7 @@ func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedF
 		}
 
 		path := filepath.Join(s.RankingDir(), entry.Name())
-		if _, alreadyRemoved := removedFiles[path]; alreadyRemoved {
+		if removedFiles.Contains(path) {
 			continue
 		}
 
@@ -104,14 +106,14 @@ func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedF
 	return removedCount, nil
 }
 
-func (s *Storage) cleanupHistory(removedIDs map[string]struct{}) error {
+func (s *Storage) cleanupHistory(removedIDs sets.Set[string]) error {
 	return s.updateHistory(func(h *History) error {
 		h.RemoveSet(removedIDs)
 		return nil
 	})
 }
 
-func (s *Storage) cleanupQueue(removedIDs map[string]struct{}) error {
+func (s *Storage) cleanupQueue(removedIDs sets.Set[string]) error {
 	q := NewQueue(s.stateDir)
 	if err := q.Load(); err != nil {
 		return err
