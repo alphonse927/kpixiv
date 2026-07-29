@@ -13,6 +13,7 @@ type Config struct {
 	DownloadPath string          `yaml:"download_path"`
 	Pixiv        PixivConfig     `yaml:"pixiv"`
 	Bookmarks    BookmarksConfig `yaml:"bookmarks"`
+	LogLevel     string          `yaml:"log_level"`
 	Wallpaper    WallpaperConfig `yaml:"wallpaper"`
 	KDE          KDEConfig       `yaml:"kde"`
 }
@@ -47,6 +48,7 @@ const (
 	DefaultBookmarksSync    = 60
 	DefaultBookmarksEnabled = false
 	DefaultBookmarksCleanup = true
+	DefaultLogLevel         = "info"
 )
 
 // Default returns the default application configuration.
@@ -74,6 +76,7 @@ func Default() *Config {
 			MultiMonitorEnabled: false,
 			Monitors:            map[string]MonitorConfig{},
 		},
+		LogLevel: DefaultLogLevel,
 		Bookmarks: BookmarksConfig{
 			Enabled:      DefaultBookmarksEnabled,
 			SyncInterval: DefaultBookmarksSync,
@@ -168,6 +171,11 @@ func (c *Config) Validate() {
 	}
 	if c.Bookmarks.SyncInterval < 60 {
 		c.Bookmarks.SyncInterval = DefaultBookmarksSync
+	}
+	switch c.LogLevel {
+	case "debug", "info", "warn", "error":
+	default:
+		c.LogLevel = DefaultLogLevel
 	}
 }
 
