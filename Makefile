@@ -1,9 +1,11 @@
-.PHONY: install build build-kpixiv build-kpixivctl test lint clean uninstall dist
+.PHONY: install dev-install build build-kpixiv build-kpixivctl test lint clean uninstall dist
 
-BIN_DIR      = $(PWD)/bin
-DIST_DIR     = $(PWD)/dist
-KPIXIV_BIN   = $(HOME)/.local/bin/kpixiv
-KPIXIVCTL_BIN = $(HOME)/.local/bin/kpixivctl
+BIN_DIR        = $(PWD)/bin
+DIST_DIR       = $(PWD)/dist
+KPIXIV_BIN     = $(HOME)/.local/bin/kpixiv
+KPIXIVCTL_BIN  = $(HOME)/.local/bin/kpixivctl
+APPS_DIR       = $(HOME)/.local/share/applications
+ICONS_DIR      = $(HOME)/.local/share/icons/hicolor/scalable/apps
 
 VERSION      ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 PKG          = github.com/alphonse927/kpixiv/internal/build
@@ -18,12 +20,24 @@ build-kpixivctl:
 
 build: build-kpixiv build-kpixivctl
 
-install: build
+install-desktop:
+	mkdir -p $(APPS_DIR) $(ICONS_DIR)
+	sed "s|@HOME@|$(HOME)|g" configs/kpixiv.desktop > $(APPS_DIR)/kpixiv.desktop
+	cp internal/tray/assets/kpixiv-symbolic.svg $(ICONS_DIR)/kpixiv.svg
+
+install: build install-desktop
+	rm -f $(KPIXIV_BIN) $(KPIXIVCTL_BIN)
+	cp $(BIN_DIR)/kpixiv $(KPIXIV_BIN)
+	cp $(BIN_DIR)/kpixivctl $(KPIXIVCTL_BIN)
+
+dev-install: build install-desktop
 	ln -sf $(BIN_DIR)/kpixiv $(KPIXIV_BIN)
 	ln -sf $(BIN_DIR)/kpixivctl $(KPIXIVCTL_BIN)
 
 uninstall:
 	rm -f $(KPIXIV_BIN) $(KPIXIVCTL_BIN)
+	rm -f $(APPS_DIR)/kpixiv.desktop
+	rm -f $(ICONS_DIR)/kpixiv.svg
 	rm -f $(HOME)/.config/systemd/user/kpixiv.service
 	-systemctl --user daemon-reload 2>/dev/null
 
