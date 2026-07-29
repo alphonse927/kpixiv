@@ -80,11 +80,8 @@ func (ui *settingsUI) buildSettingsPage() fyne.CanvasObject {
 		container.NewPadded(
 			container.NewVBox(
 				section("Storage"),
-				widget.NewForm(&widget.FormItem{
-					Text:     "Download Directory",
-					Widget:   container.NewBorder(nil, nil, nil, browse, ui.downloadPath),
-					Required: true,
-				}),
+				widget.NewLabel("Download Directory"),
+				container.NewBorder(nil, nil, nil, browse, ui.downloadPath),
 				other,
 			),
 		),
