@@ -718,16 +718,9 @@ func (ui *settingsUI) refreshStatus() {
 func (ui *settingsUI) refreshAutostartState() {
 	enabled, err := ui.ctrl.ServiceEnabled()
 	fyne.Do(func() {
-		if err != nil {
-			ui.autostartCheck.Disable()
-			ui.autostartCheck.SetChecked(false)
-			ui.autostartStatus.SetText("Unable to access the systemd user service.")
-			ui.autostartStatus.Show()
-			return
-		}
 		ui.autostartCheck.Enable()
-		ui.autostartCheck.SetChecked(enabled)
-		ui.autostartOrigState = enabled
+		ui.autostartCheck.SetChecked(enabled && err == nil)
+		ui.autostartOrigState = enabled && err == nil
 		ui.autostartStatus.Hide()
 	})
 }

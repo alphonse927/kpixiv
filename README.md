@@ -197,7 +197,7 @@ kpixivctl wallpaper next --all           # Apply on all monitors
 kpixivctl account login                  # Log in to Pixiv
 kpixivctl bookmarks sync                 # Sync bookmarked images
 kpixivctl autostart enable               # Enable automatic startup via systemd
-kpixivctl autostart disable              # Disable and remove systemd service
+kpixivctl autostart disable              # Remove from automatic startup
 kpixivctl status                         # Show full application status
 ```
 
