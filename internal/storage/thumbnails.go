@@ -19,7 +19,7 @@ func (s *Storage) GenerateThumbnail(srcPath, id string) error {
 		return fmt.Errorf("open source: %w", err)
 	}
 
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 
 	src, _, err := image.Decode(f)
 	if err != nil {
@@ -32,7 +32,7 @@ func (s *Storage) GenerateThumbnail(srcPath, id string) error {
 		return fmt.Errorf("create thumbnail: %w", err)
 	}
 
-	defer out.Close()
+	defer out.Close() //nolint:errcheck
 
 	if err = jpeg.Encode(out, thumb, &jpeg.Options{Quality: 75}); err != nil {
 		return fmt.Errorf("encode thumbnail: %w", err)
