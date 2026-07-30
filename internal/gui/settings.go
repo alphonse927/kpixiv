@@ -19,6 +19,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/alphonse927/kpixiv/internal/assets"
+	"github.com/alphonse927/kpixiv/internal/auth"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
@@ -45,6 +46,12 @@ type numericalEntry struct {
 func newNumericalEntry() *numericalEntry {
 	e := &numericalEntry{}
 	e.ExtendBaseWidget(e)
+	return e
+}
+
+func newNumericalWithText(text string) *numericalEntry {
+	e := newNumericalEntry()
+	e.SetText(text)
 	return e
 }
 
@@ -137,6 +144,7 @@ type settingsUI struct {
 	accountLogoutBtn *widget.Button
 	loginInProgress  bool
 	loginStatus      *widget.Label
+	loginURL         *widget.Entry
 	loginCancel      context.CancelFunc
 }
 
@@ -169,17 +177,10 @@ func (ui *settingsUI) createWidgets() {
 	ui.downloadPath.SetText(cfg.DownloadPath)
 	ui.downloadPath.PlaceHolder = "~/Pictures/KPixiv"
 
-	ui.setInterval = newNumericalEntry()
-	ui.setInterval.SetText(strconv.Itoa(cfg.Wallpaper.SetInterval))
-
-	ui.fetchInterval = newNumericalEntry()
-	ui.fetchInterval.SetText(strconv.Itoa(cfg.Wallpaper.FetchInterval))
-
-	ui.historyLimit = newNumericalEntry()
-	ui.historyLimit.SetText(strconv.Itoa(cfg.Wallpaper.HistoryLimit))
-
-	ui.cleanupDays = newNumericalEntry()
-	ui.cleanupDays.SetText(strconv.Itoa(cfg.Wallpaper.CleanupDays))
+	ui.setInterval = newNumericalWithText(strconv.Itoa(cfg.Wallpaper.SetInterval))
+	ui.fetchInterval = newNumericalWithText(strconv.Itoa(cfg.Wallpaper.FetchInterval))
+	ui.historyLimit = newNumericalWithText(strconv.Itoa(cfg.Wallpaper.HistoryLimit))
+	ui.cleanupDays = newNumericalWithText(strconv.Itoa(cfg.Wallpaper.CleanupDays))
 
 	ui.rotationEnabled = widget.NewCheck("Enable Wallpaper Rotation", nil)
 	ui.rotationEnabled.SetChecked(cfg.Wallpaper.RotationEnabled)
@@ -203,18 +204,14 @@ func (ui *settingsUI) createWidgets() {
 	})
 	ui.feedSource.SetSelected(feedSourceDisplay(cfg))
 
-	ui.minWidth = newNumericalEntry()
-	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
-
-	ui.minHeight = newNumericalEntry()
-	ui.minHeight.SetText(strconv.Itoa(cfg.Pixiv.MinHeight))
+	ui.minWidth = newNumericalWithText(strconv.Itoa(cfg.Pixiv.MinWidth))
+	ui.minHeight = newNumericalWithText(strconv.Itoa(cfg.Pixiv.MinHeight))
 
 	ui.lockScreen = widget.NewCheck("Set Lock Screen", nil)
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
 	ui.createMonitorWidgets()
 
-	ui.bookmarksSyncInterval = newNumericalEntry()
-	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
+	ui.bookmarksSyncInterval = newNumericalWithText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
 
 	ui.bookmarksAutoCleanup = widget.NewCheck("Remove unbookmarked images", nil)
 	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
@@ -257,13 +254,31 @@ func (ui *settingsUI) createWidgets() {
 	ui.accountStatus = widget.NewLabel("")
 	ui.loginStatus = widget.NewLabel("")
 	ui.loginStatus.Wrapping = fyne.TextWrapWord
-	ui.accountLoginBtn = widget.NewButton("Login to Pixiv", func() {
+	ui.loginURL = widget.NewEntry()
+	ui.loginURL.Hide()
+	ui.loginURL.Disable()
+	ui.loginURL.Wrapping = fyne.TextWrapWord
+	ui.accountLoginBtn = ui.newLoginButton()
+	ui.accountLogoutBtn = ui.newLogoutButton()
+}
+
+func (ui *settingsUI) newLoginButton() *widget.Button {
+	return widget.NewButton("Login to Pixiv", func() {
 		ui.loginInProgress = true
 		ui.rebuildAccountPage()
 		ctx, cancel := context.WithCancel(context.Background())
 		ui.loginCancel = cancel
+		loginCfg := auth.LoginConfig{
+			OnAuthURL: func(url string) {
+				fyne.Do(func() {
+					ui.loginStatus.SetText("Waiting for authentication...")
+					ui.loginURL.SetText(url)
+					ui.loginURL.Show()
+				})
+			},
+		}
 		go func() {
-			err := ui.ctrl.AutoLogin(ctx)
+			err := ui.ctrl.AutoLogin(ctx, loginCfg)
 			fyne.Do(func() {
 				if err != nil {
 					if !errors.Is(err, context.Canceled) {
@@ -279,14 +294,11 @@ func (ui *settingsUI) createWidgets() {
 				ui.rebuildAccountPage()
 			})
 		}()
-		go func() {
-			time.Sleep(2 * time.Second)
-			fyne.Do(func() {
-				ui.loginStatus.SetText("Waiting for authentication...")
-			})
-		}()
 	})
-	ui.accountLogoutBtn = widget.NewButton("Logout", func() {
+}
+
+func (ui *settingsUI) newLogoutButton() *widget.Button {
+	return widget.NewButton("Logout", func() {
 		if err := ui.ctrl.LogoutFromPixiv(); err != nil {
 			dialog.ShowError(err, ui.w)
 			return

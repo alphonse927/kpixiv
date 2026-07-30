@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"fmt"
-	"html"
 	"net"
-	"net/http"
-	"sync"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -14,251 +16,136 @@ import (
 
 const (
 	defaultTimeout = 5 * time.Minute
-	callbackPath   = "/callback"
-	healthPath     = "/"
+	socketDir      = "kpixiv"
+	socketFile     = "auth.sock"
+	socketFallback = ".local/state/kpixiv"
 )
 
-type callbackServer struct {
-	srv      *http.Server
-	ln       net.Listener
-	port     int
-	resultCh chan string
-	errCh    chan error
-	done     chan struct{}
-	mu       sync.Mutex
-	started  bool
-	received bool
+type CallbackReceiver interface {
+	Wait(ctx context.Context) (string, error)
 }
 
-func newCallbackServer() *callbackServer {
-	return &callbackServer{
-		resultCh: make(chan string, 1),
-		errCh:    make(chan error, 1),
-		done:     make(chan struct{}),
-	}
+type socketReceiver struct {
+	path   string
+	ln     net.Listener
+	result chan string
 }
 
-func (cs *callbackServer) Start(ctx context.Context) (int, error) {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	if cs.started {
-		return 0, fmt.Errorf("callback server already running")
+func socketPath() (string, error) {
+	runtimeDir := os.Getenv("XDG_RUNTIME_DIR")
+	if runtimeDir != "" {
+		return filepath.Join(runtimeDir, socketDir, socketFile), nil
 	}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return 0, fmt.Errorf("failed to start callback listener: %w", err)
+		return "", err
 	}
-
-	cs.ln = ln
-	addr := ln.Addr().(*net.TCPAddr) //nolint:errcheck // listener addr is always TCP on 127.0.0.1
-	cs.port = addr.Port
-
-	mux := http.NewServeMux()
-	mux.HandleFunc(callbackPath, cs.handleCallback)
-	mux.HandleFunc(healthPath, cs.handleHealth)
-
-	cs.srv = &http.Server{
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  30 * time.Second,
-	}
-
-	go func() {
-		err := cs.srv.Serve(ln)
-		if err != nil && err != http.ErrServerClosed {
-			select {
-			case cs.errCh <- err:
-			default:
-			}
-		}
-	}()
-
-	cs.started = true
-
-	logger.WithComponent("auth").Debug("callback server started", "port", cs.port)
-
-	go cs.watchContext(ctx)
-
-	return cs.port, nil
+	return filepath.Join(home, socketFallback, socketFile), nil
 }
 
-func (cs *callbackServer) watchContext(ctx context.Context) {
-	select {
-	case <-ctx.Done():
-		cs.mu.Lock()
-		if !cs.received {
-			select {
-			case cs.errCh <- ctx.Err():
-			default:
-			}
-		}
-		cs.mu.Unlock()
-		cs.shutdown() //nolint:contextcheck // fresh context created inside shutdown for graceful timeout
-	case <-cs.done:
+func newSocketReceiver() (*socketReceiver, error) {
+	sockPath, err := socketPath()
+	if err != nil {
+		return nil, err
 	}
+
+	dir := filepath.Dir(sockPath)
+	if mErr := os.MkdirAll(dir, 0750); mErr != nil {
+		return nil, fmt.Errorf("cannot create state dir: %w", mErr)
+	}
+
+	os.Remove(sockPath) //nolint:errcheck,gosec // best-effort cleanup of stale socket
+
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot listen on auth socket: %w", err)
+	}
+
+	sr := &socketReceiver{
+		path:   sockPath,
+		ln:     ln,
+		result: make(chan string, 1),
+	}
+
+	go sr.acceptOnce()
+
+	logger.WithComponent(authComponent).Debug("auth socket listening", "path", sockPath)
+
+	return sr, nil
 }
 
-func (cs *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+func (sr *socketReceiver) acceptOnce() {
+	conn, err := sr.ln.Accept()
+	if err != nil {
+		select {
+		case sr.result <- "":
+		default:
+		}
+		return
+	}
+	defer conn.Close() //nolint:errcheck // best-effort close
+
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
 		return
 	}
 
-	redirectURL := r.URL.Query().Get("url")
-	if redirectURL == "" {
-		cs.writeErrorPage(w, "Missing callback URL parameter.")
+	url := strings.TrimSpace(line)
+	if url == "" {
 		return
 	}
 
-	cs.mu.Lock()
-	if cs.received {
-		cs.mu.Unlock()
-		cs.writeErrorPage(w, "Callback already received.")
-		return
-	}
-	cs.received = true
-	cs.mu.Unlock()
-
-	logger.WithComponent("auth").Info("callback received via scheme handler")
+	logger.WithComponent(authComponent).Info("callback received via socket")
 
 	select {
-	case cs.resultCh <- redirectURL:
+	case sr.result <- url:
 	default:
 	}
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, successPage) //nolint:errcheck // response write failure is not actionable
+	fmt.Fprintf(conn, "ok\n") //nolint:errcheck // failure to ack is not actionable
 }
 
-func (cs *callbackServer) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusOK)
-
-	cs.mu.Lock()
-	received := cs.received
-	cs.mu.Unlock()
-
-	if received {
-		fmt.Fprint(w, successPage) //nolint:errcheck // response write failure is not actionable
-	} else {
-		fmt.Fprint(w, waitingPage) //nolint:errcheck // response write failure is not actionable
-	}
-}
-
-func (cs *callbackServer) writeErrorPage(w http.ResponseWriter, msg string) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusBadRequest)
-	fmt.Fprintf(w, errorPageHTML, html.EscapeString(msg)) //nolint:errcheck // response write failure is not actionable
-}
-
-func (cs *callbackServer) WaitForResult(ctx context.Context) (string, error) {
+func (sr *socketReceiver) Wait(ctx context.Context) (string, error) {
 	select {
-	case url := <-cs.resultCh:
+	case url := <-sr.result:
+		if url == "" {
+			return "", errors.New("failed to receive callback")
+		}
 		return url, nil
-	case err := <-cs.errCh:
-		return "", err
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
 }
 
-func (cs *callbackServer) Port() int {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-	return cs.port
+func (sr *socketReceiver) Close() {
+	sr.ln.Close()      //nolint:errcheck,gosec // best-effort close
+	os.Remove(sr.path) //nolint:errcheck,gosec // best-effort cleanup
 }
 
-func (cs *callbackServer) shutdown() {
-	cs.mu.Lock()
-	defer cs.mu.Unlock()
-
-	if !cs.started {
-		return
+// SendCallback connects to the running Login flow and delivers a URL.
+// Used when kpixiv is invoked with a pixiv:// URI.
+func SendCallback(url string) error {
+	path, err := socketPath()
+	if err != nil {
+		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return fmt.Errorf("no authentication in progress")
+	}
+	defer conn.Close() //nolint:errcheck // best-effort close
 
-	if err := cs.srv.Shutdown(ctx); err != nil {
-		logger.WithComponent("auth").Warn("callback server shutdown error", "error", err)
+	fmt.Fprintf(conn, "%s\n", url) //nolint:errcheck // write failure caught by subsequent read
+
+	response, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("authentication flow closed before completing")
+	}
+	if strings.TrimSpace(response) != "ok" {
+		return fmt.Errorf("unexpected response from auth socket: %s", strings.TrimSpace(response))
 	}
 
-	if cs.ln != nil {
-		cs.ln.Close() //nolint:errcheck,gosec // best-effort close on listener
-	}
-
-	cs.started = false
-	logger.WithComponent("auth").Info("callback server shut down")
+	return nil
 }
-
-const waitingPage = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>kPixiv – Waiting for Authentication</title>
-<style>
-body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #2d3444; color: #dce4f5; }
-.box { text-align: center; padding: 2rem; }
-.spinner { border: 4px solid #4a5568; border-top: 4px solid #7c9bff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 1rem auto; }
-@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-h2 { margin-bottom: 0.5rem; }
-p { color: #a0aec0; }
-</style>
-</head>
-<body>
-<div class="box">
-<div class="spinner"></div>
-<h2>Waiting for Pixiv Authentication</h2>
-<p>Complete the login in your browser to continue.</p>
-</div>
-</body>
-</html>`
-
-const successPage = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>kPixiv – Authentication Successful</title>
-<style>
-body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #2d3444; color: #dce4f5; }
-.box { text-align: center; padding: 2rem; }
-.icon { font-size: 3rem; margin-bottom: 0.5rem; color: #68d391; }
-h2 { margin-bottom: 0.5rem; }
-p { color: #a0aec0; }
-</style>
-</head>
-<body>
-<div class="box">
-<div class="icon">&#10003;</div>
-<h2>Authentication Successful</h2>
-<p>You may now close this window.</p>
-</div>
-</body>
-</html>`
-
-const errorPageHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>kPixiv – Authentication Failed</title>
-<style>
-body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #2d3444; color: #dce4f5; }
-.box { text-align: center; padding: 2rem; }
-.icon { font-size: 3rem; margin-bottom: 0.5rem; color: #fc8181; }
-h2 { margin-bottom: 0.5rem; }
-p { color: #a0aec0; }
-</style>
-</head>
-<body>
-<div class="box">
-<div class="icon">&#10007;</div>
-<h2>Authentication Failed</h2>
-<p>%s</p>
-</div>
-</body>
-</html>`
