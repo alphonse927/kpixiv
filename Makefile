@@ -6,6 +6,7 @@ KPIXIV_BIN     = $(HOME)/.local/bin/kpixiv
 KPIXIVCTL_BIN  = $(HOME)/.local/bin/kpixivctl
 APPS_DIR       = $(HOME)/.local/share/applications
 ICONS_DIR      = $(HOME)/.local/share/icons/hicolor/scalable/apps
+QT6_BIN        = /usr/lib/qt6/bin
 
 VERSION      ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 PKG          = github.com/alphonse927/kpixiv/internal/build
@@ -25,18 +26,27 @@ install-desktop:
 	sed "s|@HOME@|$(HOME)|g" configs/kpixiv.desktop > $(APPS_DIR)/kpixiv.desktop
 	cp internal/tray/assets/kpixiv-symbolic.svg $(ICONS_DIR)/kpixiv.svg
 
+register-scheme: install-desktop
+	PATH="$(PATH):$(QT6_BIN)" xdg-mime default kpixiv.desktop x-scheme-handler/pixiv
+	PATH="$(PATH):$(QT6_BIN)" xdg-desktop-menu forceupdate
+
 install: build install-desktop
 	rm -f $(KPIXIV_BIN) $(KPIXIVCTL_BIN)
 	cp $(BIN_DIR)/kpixiv $(KPIXIV_BIN)
 	cp $(BIN_DIR)/kpixivctl $(KPIXIVCTL_BIN)
+	PATH="$(PATH):$(QT6_BIN)" xdg-mime default kpixiv.desktop x-scheme-handler/pixiv
+	PATH="$(PATH):$(QT6_BIN)" xdg-desktop-menu forceupdate
 
 dev-install: build install-desktop
 	ln -sf $(BIN_DIR)/kpixiv $(KPIXIV_BIN)
 	ln -sf $(BIN_DIR)/kpixivctl $(KPIXIVCTL_BIN)
+	PATH="$(PATH):$(QT6_BIN)" xdg-mime default kpixiv.desktop x-scheme-handler/pixiv
+	PATH="$(PATH):$(QT6_BIN)" xdg-desktop-menu forceupdate
 
 uninstall:
 	rm -f $(KPIXIV_BIN) $(KPIXIVCTL_BIN)
 	rm -f $(APPS_DIR)/kpixiv.desktop
+	-xdg-mime default "" x-scheme-handler/pixiv 2>/dev/null
 	rm -f $(ICONS_DIR)/kpixiv.svg
 	rm -f $(HOME)/.config/systemd/user/kpixiv.service
 	-systemctl --user daemon-reload 2>/dev/null

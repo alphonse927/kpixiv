@@ -64,6 +64,10 @@ func (ui *settingsUI) buildAccountAuthSection() fyne.CanvasObject {
 
 func (ui *settingsUI) buildLoginForm() fyne.CanvasObject {
 	ui.loginStatus.SetText("Opening browser...")
+	ui.loginURL.Hide()
+
+	note := widget.NewLabelWithStyle("If the browser didn't open automatically, copy and paste the URL below:", fyne.TextAlignLeading, fyne.TextStyle{})
+	note.Wrapping = fyne.TextWrapWord
 
 	cancelBtn := widget.NewButton("Cancel", func() {
 		if ui.loginCancel != nil {
@@ -75,6 +79,8 @@ func (ui *settingsUI) buildLoginForm() fyne.CanvasObject {
 
 	return container.NewVBox(
 		ui.loginStatus,
+		note,
+		ui.loginURL,
 		cancelBtn,
 	)
 }

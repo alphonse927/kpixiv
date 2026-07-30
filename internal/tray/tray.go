@@ -18,7 +18,6 @@ type Controller interface {
 	ResumeRotation()
 	PixivLoggedIn() bool
 	PixivUserName() string
-	LoginToPixiv() error
 	LogoutFromPixiv() error
 	CopyCurrentArtwork() error
 	BookmarkCurrentArtwork() error

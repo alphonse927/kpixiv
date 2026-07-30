@@ -31,6 +31,7 @@ type Controller struct {
 	cancel      context.CancelFunc
 	mu          sync.Mutex
 	rebuildMenu func()
+	rebuildGUI  func()
 }
 
 const trayComponentName = "tray"
@@ -356,18 +357,33 @@ func (c *Controller) PixivUserName() string {
 	return c.pixiv.AuthUserName()
 }
 
+// SetGUIRefresher registers a callback invoked when auth state changes.
+func (c *Controller) SetGUIRefresher(fn func()) {
+	c.rebuildGUI = fn
+}
+
+// refreshUI signals both tray and GUI to rebuild after auth state changes.
+func (c *Controller) refreshUI() {
+	if c.rebuildMenu != nil {
+		c.rebuildMenu()
+	}
+	if c.rebuildGUI != nil {
+		c.rebuildGUI()
+	}
+}
+
 // AutoLogin performs the complete OAuth login flow automatically.
-func (c *Controller) AutoLogin(ctx context.Context) error {
+func (c *Controller) AutoLogin(ctx context.Context, cfg auth.LoginConfig) error {
 	if c.pixiv == nil {
 		return fmt.Errorf("pixiv account actions are unavailable in dry-run mode")
 	}
-	_, err := auth.Login(ctx, auth.LoginConfig{}, &pixiv.AuthProvider{Client: c.pixiv})
-	return err
-}
 
-// LoginToPixiv starts the automatic Pixiv account login flow.
-func (c *Controller) LoginToPixiv() error {
-	return c.AutoLogin(c.ctx)
+	_, err := auth.Login(ctx, cfg, &pixiv.AuthProvider{Client: c.pixiv})
+	if err == nil {
+		c.refreshUI()
+	}
+
+	return err
 }
 
 // LogoutFromPixiv removes the stored Pixiv session.
@@ -379,6 +395,8 @@ func (c *Controller) LogoutFromPixiv() error {
 	if err := c.pixiv.Logout(); err != nil {
 		return err
 	}
+
+	c.refreshUI()
 
 	return nil
 }

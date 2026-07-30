@@ -8,6 +8,7 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/theme"
 
+	"github.com/alphonse927/kpixiv/internal/auth"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/storage"
@@ -29,8 +30,7 @@ type AppController interface {
 	FetchNow() error
 	PixivLoggedIn() bool
 	PixivUserName() string
-	AutoLogin(ctx context.Context) error
-	LoginToPixiv() error
+	AutoLogin(ctx context.Context, cfg auth.LoginConfig) error
 	LogoutFromPixiv() error
 	SchedulerRunning() bool
 	CurrentWallpaper() (*storage.ImageMeta, error)
@@ -52,9 +52,19 @@ var (
 func Run(ctrl AppController, ctx context.Context, quitCh <-chan struct{}) {
 	a := app.NewWithID("kpixiv")
 	a.Settings().SetTheme(&tintedBG{theme.DefaultTheme()})
-	guiApp = a
 
+	guiApp = a
 	settingsW = newSettingsUI(a, ctrl, logger.WithComponent("settings")) //nolint:contextcheck // settingsUI does not require a context
+
+	if r, ok := ctrl.(interface{ SetGUIRefresher(func()) }); ok {
+		r.SetGUIRefresher(func() {
+			fyne.Do(func() {
+				if settingsW != nil {
+					settingsW.rebuildAccountPage()
+				}
+			})
+		})
+	}
 
 	go func() {
 		select {

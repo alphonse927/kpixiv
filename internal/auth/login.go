@@ -4,11 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"net/url"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,12 +13,6 @@ import (
 )
 
 const authComponent = "auth"
-
-type SchemeHandler struct {
-	desktopDir  string
-	desktopFile string
-	scriptPath  string
-}
 
 // Provider supplies the Pixiv OAuth steps that auth.Login orchestrates.
 type Provider interface {
@@ -36,16 +27,17 @@ type LoginConfig struct {
 	// Timeout is the maximum time to wait for authentication.
 	// Defaults to 5 minutes if zero.
 	Timeout time.Duration
+	// OnAuthURL is called with the Pixiv authorization URL before the
+	// browser is opened, so the caller can display it in the UI.
+	OnAuthURL func(url string)
 }
 
 // Login performs the complete OAuth login flow:
 //  1. Generates PKCE verifier and challenge
-//  2. Starts a localhost callback server
-//  3. Registers a temporary pixiv:// scheme handler
-//  4. Opens the browser to the Pixiv authorization URL
-//  5. Waits for the callback with the authorization code
-//  6. Exchanges the code for tokens
-//  7. Cleans up all temporary resources
+//  2. Starts a Unix socket receiver for the pixiv:// callback
+//  3. Opens the browser to the Pixiv authorization URL
+//  4. Waits for the callback with the authorization code
+//  5. Exchanges the code for tokens
 func Login(ctx context.Context, cfg LoginConfig, provider Provider) (userName string, err error) {
 	timeout := cfg.Timeout
 	if timeout <= 0 {
@@ -60,28 +52,21 @@ func Login(ctx context.Context, cfg LoginConfig, provider Provider) (userName st
 		return "", fmt.Errorf("failed to start login: %w", err)
 	}
 
-	cs := newCallbackServer()
-	port, err := cs.Start(loginCtx)
-	if err != nil {
-		return "", fmt.Errorf("failed to start callback server: %w", err)
+	if cfg.OnAuthURL != nil {
+		cfg.OnAuthURL(authURL)
 	}
 
-	handler, err := registerSchemeHandler(port)
+	sr, err := newSocketReceiver()
 	if err != nil {
-		cs.shutdown() //nolint:contextcheck // fresh context created inside shutdown
-		return "", fmt.Errorf("failed to register scheme handler: %w", err)
+		return "", fmt.Errorf("failed to start callback receiver: %w", err)
 	}
-
-	defer handler.cleanup()
+	defer sr.Close()
 
 	if browserErr := openBrowser(authURL); browserErr != nil {
-		cs.shutdown() //nolint:contextcheck // fresh context created inside shutdown
 		return "", fmt.Errorf("failed to open browser: %w", browserErr)
 	}
 
-	rawURL, err := cs.WaitForResult(loginCtx)
-	cs.shutdown() //nolint:contextcheck // fresh context created inside shutdown
-
+	rawURL, err := sr.Wait(loginCtx)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return "", fmt.Errorf("authentication timed out after %v", timeout)
@@ -110,7 +95,7 @@ func Login(ctx context.Context, cfg LoginConfig, provider Provider) (userName st
 }
 
 func openBrowser(targetURL string) error {
-	logger.WithComponent(authComponent).Debug("opening browser", "url", targetURL)
+	logger.WithComponent(authComponent).Info("Opening browser...", "url", targetURL)
 	cmd := exec.Command("xdg-open", targetURL) //nolint:gosec // URL is generated internally by PKCE flow
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
@@ -134,66 +119,4 @@ func extractCodeFromPixivURL(rawURL string) (string, error) {
 	}
 
 	return code, nil
-}
-
-func registerSchemeHandler(port int) (*SchemeHandler, error) {
-	tmpDir := filepath.Join(os.TempDir(), "kpixiv-auth")
-	if err := os.MkdirAll(tmpDir, 0700); err != nil {
-		return nil, fmt.Errorf("failed to create temp dir: %w", err)
-	}
-
-	scriptPath := filepath.Join(tmpDir, fmt.Sprintf("handler-%d.sh", port))
-	script := fmt.Sprintf(`#!/bin/sh
-curl -sf "http://127.0.0.1:%d/callback?url=%s" >/dev/null 2>&1
-`, port, "%s")
-
-	if err := os.WriteFile(scriptPath, []byte(script), 0700); err != nil { //nolint:gosec // script must be executable for scheme handler
-		return nil, fmt.Errorf("failed to write handler script: %w", err)
-	}
-
-	desktopFilePath := filepath.Join(tmpDir, fmt.Sprintf("kpixiv-auth-%d.desktop", port))
-	desktopContent := fmt.Sprintf(`[Desktop Entry]
-Type=Application
-Name=kPixiv Auth Handler
-Exec=%s %%u
-NoDisplay=true
-MimeType=x-scheme-handler/pixiv
-`, html.EscapeString(scriptPath))
-
-	if err := os.WriteFile(desktopFilePath, []byte(desktopContent), 0600); err != nil {
-		os.Remove(scriptPath) //nolint:errcheck,gosec // best-effort cleanup
-		return nil, fmt.Errorf("failed to write desktop file: %w", err)
-	}
-
-	cmd := exec.Command("xdg-mime", "default", filepath.Base(desktopFilePath), "x-scheme-handler/pixiv") //nolint:gosec // paths are generated internally
-	cmd.Dir = tmpDir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.Remove(scriptPath)      //nolint:errcheck,gosec // best-effort cleanup
-		os.Remove(desktopFilePath) //nolint:errcheck,gosec // best-effort cleanup
-		return nil, fmt.Errorf("failed to register pixiv:// scheme handler: %w\n%s", err, string(out))
-	}
-
-	logger.WithComponent(authComponent).Debug("pixiv:// scheme handler registered", "port", port)
-
-	return &SchemeHandler{
-		desktopDir:  tmpDir,
-		desktopFile: desktopFilePath,
-		scriptPath:  scriptPath,
-	}, nil
-}
-
-func (h *SchemeHandler) cleanup() {
-	if h.desktopFile != "" {
-		if err := exec.Command("xdg-mime", "default", "", "x-scheme-handler/pixiv").Run(); err != nil {
-			logger.WithComponent(authComponent).Warn("failed to unregister scheme handler", "error", err)
-		}
-		os.Remove(h.desktopFile) //nolint:errcheck,gosec // best-effort cleanup
-	}
-	if h.scriptPath != "" {
-		os.Remove(h.scriptPath) //nolint:errcheck,gosec // best-effort cleanup
-	}
-	if h.desktopDir != "" {
-		os.Remove(h.desktopDir) //nolint:errcheck,gosec // best-effort cleanup
-	}
-	logger.WithComponent(authComponent).Info("scheme handler cleaned up")
 }
