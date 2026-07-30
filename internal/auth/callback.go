@@ -78,7 +78,7 @@ func (cs *callbackServer) Start(ctx context.Context) (int, error) {
 
 	cs.started = true
 
-	logger.WithComponent("auth").Info("callback server started", "port", cs.port)
+	logger.WithComponent("auth").Debug("callback server started", "port", cs.port)
 
 	go cs.watchContext(ctx)
 
