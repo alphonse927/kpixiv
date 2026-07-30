@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/alphonse927/kpixiv/internal/app"
+	"github.com/alphonse927/kpixiv/internal/auth"
 	"github.com/alphonse927/kpixiv/internal/build"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/gui"
@@ -102,6 +104,16 @@ func init() {
 }
 
 func main() {
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, "pixiv://") {
+			if err := auth.SendCallback(arg); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+	}
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
