@@ -14,14 +14,24 @@
 
 KPixiv turns Pixiv into a first-class wallpaper source on Linux. Instead of supporting dozens of generic providers, it focuses exclusively on Pixiv — fetching ranking feeds, managing local artwork, and applying wallpapers to your KDE Plasma desktop.
 
-Designed for unattended operation. Run it once, and it fetches wallpapers on a schedule, rotates them automatically, and keeps your screens looking fresh. Multi-monitor setups get independent wallpaper queues with per-screen orientation filters.
+Designed to run unattended. Run it once, and it fetches wallpapers on a schedule, rotates them automatically, and keeps your screens looking fresh. Multi-monitor setups get independent wallpaper queues with per-screen orientation filters.
 
 KPixiv ships as two binaries: a desktop daemon with tray and GUI (`kpixiv`), and a headless CLI (`kpixivctl`) for scripting.
+
+## Disclaimer
+
+kPixiv is an unofficial client for Pixiv.
+
+This project is not affiliated with, endorsed by, or sponsored by Pixiv.
+
+All artwork remains the property of its respective artists.
+Users are responsible for complying with Pixiv's Terms of Service.
 
 ### Why kPixiv?
 
 I created kPixiv because I switched to Arch Linux (KDE Plasma) and couldn't find a wallpaper rotator that fit the way I wanted to. 
 This project started as a tool for my own desktop and continues to evolve based on my personal workflow. If it happens to be useful to others, even better.
+
 ## Quick Start
 
 ```bash
@@ -77,6 +87,11 @@ For detailed installation options, see [Installation](#installation).
 <img src="docs/screenshots/settings_multi_monitor.png" width="400" alt="Multi-monitor settings">
 <img src="docs/screenshots/multi_monitor_support.png" width="400" alt="Multi-monitor wallpapers">
 
+## Requirements
+- Linux
+- KDE Plasma 6 (Only tested on Arch Linux with KDE Plasma 6.6.x)
+- `qdbus`
+
 ## Installation
 
 ### Download a release
@@ -93,10 +108,6 @@ cp kpixiv kpixivctl ~/.local/bin/
 # Enable automatic startup (optional)
 kpixivctl autostart enable
 ```
-
-### Build from source
-
-Requirements: Go 1.26+, KDE Plasma, qdbus.
 
 ```bash
 make install
@@ -290,12 +301,3 @@ However, contributors are expected to:
 - and remain responsible for the correctness of their contributions.
 
 Submissions consisting solely of unreviewed AI-generated code may be rejected.
-
-## Disclaimer
-
-kPixiv is an unofficial client for Pixiv.
-
-This project is not affiliated with, endorsed by, or sponsored by Pixiv.
-
-All artwork remains the property of its respective artists.
-Users are responsible for complying with Pixiv's Terms of Service.
