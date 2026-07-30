@@ -22,12 +22,14 @@ jobs:
       - name: Generate release title
         id: title
         run: |
-          TITLE=$(git tag -l --format='%(contents:subject)' "${{ github.ref_name }}" 2>/dev/null || echo "${{ github.ref_name }}")
-          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          TITLE=$(git tag -l --format='%(contents:subject)' "${{ github.ref_name }}" 2>/dev/null) || TITLE="${{ github.ref_name }}"
+          echo "title<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$TITLE" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
       - name: Generate release notes
         id: notes
         run: |
-          TAG_BODY=$(git tag -l --format='%(contents:body)' "${{ github.ref_name }}" 2>/dev/null || true)
+          TAG_BODY=$(git tag -l --format='%(contents:body)' "${{ github.ref_name }}" 2>/dev/null) || TAG_BODY=""
           if [ -n "$TAG_BODY" ]; then
             printf '%s\n' "$TAG_BODY" > /tmp/release-notes.md
           else
