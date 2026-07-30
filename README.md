@@ -264,11 +264,12 @@ From the desktop, use the tray menu or the Account tab in Settings.
 
 ## Favorites
 
-The **Copy to Favorites** tray action saves the current wallpaper to `~/.local/share/kpixiv/Favorites/`. Favorites are excluded from automatic cleanup.
+The **Copy to Favorites** tray action saves the current wallpaper to `$HOME/Pictures/KPixiv/` or the configured download path. 
+Favorites are excluded from automatic cleanup.
 
 ## Bookmark Sync
 
-When `bookmarks.enabled` is `true`, KPixiv periodically syncs your Pixiv bookmarks into the Favorites directory. Synced images are tagged as `favorites` in metadata and excluded from cleanup. When `auto_cleanup` is enabled, images that are no longer bookmarked are removed.
+When `bookmarks.enabled` is `true`, KPixiv periodically syncs your Pixiv bookmarks into the Favorites directory. Synced images are tagged as `bookmarks` in metadata and excluded from cleanup. When `auto_cleanup` is enabled, images that are no longer bookmarked are removed.
 
 Manual sync: `kpixivctl bookmarks sync`
 
