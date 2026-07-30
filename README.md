@@ -18,6 +18,10 @@ Designed for unattended operation. Run it once, and it fetches wallpapers on a s
 
 KPixiv ships as two binaries: a desktop daemon with tray and GUI (`kpixiv`), and a headless CLI (`kpixivctl`) for scripting.
 
+### Why kPixiv?
+
+I created kPixiv because I switched to Arch Linux (KDE Plasma) and couldn't find a wallpaper rotator that fit the way I wanted to. 
+This project started as a tool for my own desktop and continues to evolve based on my personal workflow. If it happens to be useful to others, even better.
 ## Quick Start
 
 ```bash
