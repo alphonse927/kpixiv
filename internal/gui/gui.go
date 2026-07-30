@@ -29,9 +29,8 @@ type AppController interface {
 	FetchNow() error
 	PixivLoggedIn() bool
 	PixivUserName() string
+	AutoLogin(ctx context.Context) error
 	LoginToPixiv() error
-	BeginLogin() (string, error)
-	FinishLogin(callbackCode string) error
 	LogoutFromPixiv() error
 	SchedulerRunning() bool
 	CurrentWallpaper() (*storage.ImageMeta, error)
@@ -55,7 +54,7 @@ func Run(ctrl AppController, ctx context.Context, quitCh <-chan struct{}) {
 	a.Settings().SetTheme(&tintedBG{theme.DefaultTheme()})
 	guiApp = a
 
-	settingsW = newSettingsUI(a, ctrl, logger.WithComponent("settings"))
+	settingsW = newSettingsUI(a, ctrl, logger.WithComponent("settings")) //nolint:contextcheck // settingsUI does not require a context
 
 	go func() {
 		select {
