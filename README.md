@@ -1,7 +1,7 @@
 <div style="text-align: center">
   <img src="docs/logo.svg" width="128" alt="KPixiv logo">
   <h1>KPixiv</h1>
-  <em>Native KDE Plasma wallpaper manager for Pixiv.</em>
+  <em>KDE Plasma–focused wallpaper manager for Pixiv.</em>
   <br>
 
   <a href="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml"><img src="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
@@ -74,7 +74,7 @@ For detailed installation options, see [Installation](#installation).
 
 ### Desktop Integration
 
-- KDE Plasma native wallpaper setting
+- KDE Plasma–focused wallpaper manager
 - Systemd user service for an autostart and supervision
 - System tray with wallpaper controls
 - GUI settings window (Home, Monitors, Settings, Account, About)
@@ -275,7 +275,7 @@ Manual sync: `kpixivctl bookmarks sync`
 ## Design Goals
 
 - Focus exclusively on Pixiv as a wallpaper source
-- Native KDE Plasma integration without compromises
+- KDE Plasma integration without compromises
 - Lightweight Go application with minimal dependencies
 - Scriptable through a complete CLI
 - Reliable unattended operation via systemd
