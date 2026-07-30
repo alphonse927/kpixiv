@@ -1,6 +1,8 @@
 package gui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"image/color"
 	"log/slog"
@@ -134,8 +136,8 @@ type settingsUI struct {
 	accountLoginBtn  *widget.Button
 	accountLogoutBtn *widget.Button
 	loginInProgress  bool
-	loginURL         string
-	loginEntry       *widget.Entry
+	loginStatus      *widget.Label
+	loginCancel      context.CancelFunc
 }
 
 func newSettingsUI(a fyne.App, ctrl AppController, log *slog.Logger) *settingsUI {
@@ -253,24 +255,34 @@ func (ui *settingsUI) createWidgets() {
 	ui.autostartStatus.Hide()
 
 	ui.accountStatus = widget.NewLabel("")
-	ui.loginEntry = widget.NewEntry()
-	ui.loginEntry.PlaceHolder = "Paste the callback URL here"
+	ui.loginStatus = widget.NewLabel("")
+	ui.loginStatus.Wrapping = fyne.TextWrapWord
 	ui.accountLoginBtn = widget.NewButton("Login to Pixiv", func() {
 		ui.loginInProgress = true
 		ui.rebuildAccountPage()
+		ctx, cancel := context.WithCancel(context.Background())
+		ui.loginCancel = cancel
 		go func() {
-			url, err := ui.ctrl.BeginLogin()
-			if err != nil {
-				fyne.Do(func() {
-					dialog.ShowError(err, ui.w)
-					ui.loginInProgress = false
-					ui.rebuildAccountPage()
-				})
-				return
-			}
+			err := ui.ctrl.AutoLogin(ctx)
 			fyne.Do(func() {
-				ui.loginURL = url
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						dialog.ShowError(err, ui.w)
+					}
+					ui.loginInProgress = false
+					ui.loginCancel = nil
+					ui.rebuildAccountPage()
+					return
+				}
+				ui.loginInProgress = false
+				ui.loginCancel = nil
 				ui.rebuildAccountPage()
+			})
+		}()
+		go func() {
+			time.Sleep(2 * time.Second)
+			fyne.Do(func() {
+				ui.loginStatus.SetText("Waiting for authentication...")
 			})
 		}()
 	})

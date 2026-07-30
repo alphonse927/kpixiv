@@ -1,11 +1,8 @@
 package gui
 
 import (
-	"os/exec"
-
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -66,45 +63,19 @@ func (ui *settingsUI) buildAccountAuthSection() fyne.CanvasObject {
 }
 
 func (ui *settingsUI) buildLoginForm() fyne.CanvasObject {
-	description := widget.NewLabel("To connect your Pixiv account:\n\n1. Click the link below to open the Pixiv login page in your browser\n2. Sign in to your Pixiv account\n3. Copy the final redirect URL from the address bar\n4. Paste it in the field below and click Submit")
-	description.Wrapping = fyne.TextWrapWord
-
-	openBtn := widget.NewButton("Open Pixiv Login Page", func() {
-		//nolint:gosec,errcheck // URL is generated internally; fire-and-forget browser open
-		exec.Command("xdg-open", ui.loginURL).Start()
-	})
-
-	ui.loginEntry.SetText("")
+	ui.loginStatus.SetText("Opening browser...")
 
 	cancelBtn := widget.NewButton("Cancel", func() {
+		if ui.loginCancel != nil {
+			ui.loginCancel()
+		}
 		ui.loginInProgress = false
 		ui.rebuildAccountPage()
 	})
 
-	submitBtn := widget.NewButton("Submit", func() {
-		code := ui.loginEntry.Text
-		if code == "" {
-			return
-		}
-		go func() {
-			if err := ui.ctrl.FinishLogin(code); err != nil {
-				fyne.Do(func() {
-					dialog.ShowError(err, ui.w)
-				})
-				return
-			}
-			fyne.Do(func() {
-				ui.loginInProgress = false
-				ui.rebuildAccountPage()
-			})
-		}()
-	})
-
 	return container.NewVBox(
-		description,
-		openBtn,
-		ui.loginEntry,
-		container.NewHBox(submitBtn, cancelBtn),
+		ui.loginStatus,
+		cancelBtn,
 	)
 }
 

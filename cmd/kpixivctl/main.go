@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphonse927/kpixiv/internal/auth"
 	"github.com/alphonse927/kpixiv/internal/bookmarks"
 	"github.com/alphonse927/kpixiv/internal/build"
 	"github.com/alphonse927/kpixiv/internal/config"
@@ -536,27 +536,9 @@ var accountLoginCmd = &cobra.Command{
 			return fmt.Errorf("failed to initialize pixiv client: %w", err)
 		}
 
-		flow, err := pixivClient.BeginLogin()
+		fmt.Println("Opening browser for Pixiv authentication...")
+		_, err = auth.Login(context.Background(), auth.LoginConfig{}, &pixiv.AuthProvider{Client: pixivClient})
 		if err != nil {
-			return fmt.Errorf("failed to start login: %w", err)
-		}
-
-		fmt.Println("Open this URL in your browser:")
-		fmt.Println()
-		fmt.Println(flow.URL)
-		fmt.Println()
-		fmt.Println("After authorizing, copy the final redirect URL and paste it below.")
-
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Callback URL: ")
-		code, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read input: %w", err)
-		}
-		code = strings.TrimSpace(code)
-
-		ctx := context.Background()
-		if _, err := pixivClient.FinishLogin(ctx, flow.CodeVerifier, code); err != nil {
 			return fmt.Errorf("login failed: %w", err)
 		}
 

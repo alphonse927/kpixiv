@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alphonse927/kpixiv/internal/auth"
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
@@ -21,16 +22,15 @@ import (
 const componentName = "app"
 
 type Controller struct {
-	cfg          *config.Config
-	st           *storage.Storage
-	sch          *scheduler.Scheduler
-	setter       wallpaper.Setter
-	pixiv        *pixiv.Client
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.Mutex
-	pendingLogin *pixiv.LoginFlow
-	rebuildMenu  func()
+	cfg         *config.Config
+	st          *storage.Storage
+	sch         *scheduler.Scheduler
+	setter      wallpaper.Setter
+	pixiv       *pixiv.Client
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	rebuildMenu func()
 }
 
 const trayComponentName = "tray"
@@ -356,58 +356,18 @@ func (c *Controller) PixivUserName() string {
 	return c.pixiv.AuthUserName()
 }
 
-// BeginLogin starts the Pixiv account login flow and returns the authorization URL.
-func (c *Controller) BeginLogin() (string, error) {
+// AutoLogin performs the complete OAuth login flow automatically.
+func (c *Controller) AutoLogin(ctx context.Context) error {
 	if c.pixiv == nil {
-		return "", fmt.Errorf("pixiv account actions are unavailable in dry-run mode")
+		return fmt.Errorf("pixiv account actions are unavailable in dry-run mode")
 	}
-
-	flow, err := c.pixiv.BeginLogin()
-	if err != nil {
-		return "", err
-	}
-
-	c.pendingLogin = flow
-	return flow.URL, nil
+	_, err := auth.Login(ctx, auth.LoginConfig{}, &pixiv.AuthProvider{Client: c.pixiv})
+	return err
 }
 
-// FinishLogin completes the login flow with the callback code from Pixiv.
-func (c *Controller) FinishLogin(callbackCode string) error {
-	if c.pendingLogin == nil {
-		return fmt.Errorf("no login flow in progress")
-	}
-
-	_, err := c.pixiv.FinishLogin(c.ctx, c.pendingLogin.CodeVerifier, callbackCode)
-	c.pendingLogin = nil
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// LoginToPixiv starts the Pixiv account login flow using desktop dialogs (kdialog/zenity).
+// LoginToPixiv starts the automatic Pixiv account login flow.
 func (c *Controller) LoginToPixiv() error {
-	url, err := c.BeginLogin()
-	if err != nil {
-		return err
-	}
-
-	if err = openExternal(url); err != nil {
-		return fmt.Errorf("failed to open pixiv login page: %w", err)
-	}
-
-	instructions := "Pixiv login opened in your browser. After signing in, copy the final redirect URL from the address bar. Pixiv may end on either app-api callback URL or a pixiv://account/login URL. If the page errors, copy that full URL and paste it into the next dialog."
-	if err = showInfoDialog("Pixiv Login", instructions); err != nil {
-		return err
-	}
-
-	code, err := promptForInput("Pixiv Login", "Paste the Pixiv callback URL or code:")
-	if err != nil {
-		return err
-	}
-
-	return c.FinishLogin(code)
+	return c.AutoLogin(c.ctx)
 }
 
 // LogoutFromPixiv removes the stored Pixiv session.
@@ -681,8 +641,4 @@ func (c *Controller) EnableService() error {
 
 func (c *Controller) DisableService() error {
 	return platform.DisableService("kpixiv.service")
-}
-
-func openExternal(target string) error {
-	return exec.Command("xdg-open", target).Start() //nolint:gosec // target is generated internally or a local path.
 }
