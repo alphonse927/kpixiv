@@ -110,7 +110,7 @@ func Login(ctx context.Context, cfg LoginConfig, provider Provider) (userName st
 }
 
 func openBrowser(targetURL string) error {
-	logger.WithComponent(authComponent).Info("opening browser", "url", targetURL)
+	logger.WithComponent(authComponent).Debug("opening browser", "url", targetURL)
 	cmd := exec.Command("xdg-open", targetURL) //nolint:gosec // URL is generated internally by PKCE flow
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to launch browser: %w", err)
@@ -173,7 +173,7 @@ MimeType=x-scheme-handler/pixiv
 		return nil, fmt.Errorf("failed to register pixiv:// scheme handler: %w\n%s", err, string(out))
 	}
 
-	logger.WithComponent(authComponent).Info("pixiv:// scheme handler registered", "port", port)
+	logger.WithComponent(authComponent).Debug("pixiv:// scheme handler registered", "port", port)
 
 	return &SchemeHandler{
 		desktopDir:  tmpDir,

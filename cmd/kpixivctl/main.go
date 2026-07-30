@@ -536,7 +536,7 @@ var accountLoginCmd = &cobra.Command{
 			return fmt.Errorf("failed to initialize pixiv client: %w", err)
 		}
 
-		fmt.Println("Opening browser for Pixiv authentication...")
+		logger.Info("Opening browser for Pixiv authentication...")
 		_, err = auth.Login(context.Background(), auth.LoginConfig{}, &pixiv.AuthProvider{Client: pixivClient})
 		if err != nil {
 			return fmt.Errorf("login failed: %w", err)
