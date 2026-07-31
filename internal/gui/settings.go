@@ -7,6 +7,7 @@ import (
 	"image/color"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -121,6 +122,8 @@ type settingsUI struct {
 
 	logLevel *widget.Select
 
+	notificationsEnabled *widget.Check
+
 	bookmarksEnabled      *widget.Check
 	bookmarksSyncInterval *numericalEntry
 	bookmarksAutoCleanup  *widget.Check
@@ -134,6 +137,17 @@ type settingsUI struct {
 	currentWallpaperSection *fyne.Container
 	monitorWallpaperSection *fyne.Container
 	lastWallpaperID         string
+
+	statusDaemon    *widget.Label
+	statusAuth      *widget.Label
+	statusCache     *widget.Label
+	statusHistory   *widget.Label
+	statusNextWall  *widget.Label
+	statusWarnings  *widget.Label
+	firstRunBox     *fyne.Container
+	firstRunTitle   *widget.Label
+	firstRunDetail  *widget.Label
+	firstRunActions *fyne.Container
 
 	autostartCheck     *widget.Check
 	autostartStatus    *widget.Label
@@ -170,6 +184,18 @@ func (ui *settingsUI) build(a fyne.App) {
 	w.SetContent(ui.buildLayout())
 }
 
+func (ui *settingsUI) createDashboardStatusWidgets() {
+	ui.statusDaemon = widget.NewLabel("")
+	ui.statusAuth = widget.NewLabel("")
+	ui.statusCache = widget.NewLabel("")
+	ui.statusHistory = widget.NewLabel("")
+	ui.statusNextWall = widget.NewLabel("")
+	ui.statusNextWall.Wrapping = fyne.TextWrapWord
+	ui.statusWarnings = widget.NewLabel("")
+	ui.statusWarnings.Wrapping = fyne.TextWrapWord
+	ui.statusWarnings.Hide()
+}
+
 func (ui *settingsUI) createWidgets() {
 	cfg := ui.ctrl.Config()
 
@@ -189,7 +215,7 @@ func (ui *settingsUI) createWidgets() {
 	ui.fetchEnabled.SetChecked(cfg.Wallpaper.FetchEnabled)
 
 	ui.rankingSub = widget.NewSelect([]string{rankingSubDaily, rankingSubWeekly, rankingSubMonthly}, nil)
-	ui.rankingSub.SetSelected(cfg.Pixiv.Ranking.String())
+	ui.rankingSub.SetSelected(rankingSubDisplay(cfg.Pixiv.Ranking))
 	if cfg.Wallpaper.QueueSource != config.QueueSourceAll {
 		ui.rankingSub.Hide()
 	}
@@ -237,6 +263,7 @@ func (ui *settingsUI) createWidgets() {
 	ui.statusCached = widget.NewLabel("")
 	ui.statusLastRot = widget.NewLabel("")
 	ui.statusNextRot = widget.NewLabel("")
+	ui.createDashboardStatusWidgets()
 
 	ui.statusThumbnail = canvas.NewImageFromFile("")
 	ui.statusThumbnail.FillMode = canvas.ImageFillContain
@@ -245,6 +272,9 @@ func (ui *settingsUI) createWidgets() {
 
 	ui.logLevel = widget.NewSelect([]string{"info", "debug"}, nil)
 	ui.logLevel.SetSelected(cfg.LogLevel)
+
+	ui.notificationsEnabled = widget.NewCheck("Show desktop notifications", nil)
+	ui.notificationsEnabled.SetChecked(cfg.Notifications.Enabled)
 
 	ui.autostartCheck = widget.NewCheck("Start KPixiv automatically when I log in", nil)
 	ui.autostartCheck.Disable()
@@ -448,7 +478,7 @@ func (ui *settingsUI) update() {
 	ui.historyLimit.SetText(strconv.Itoa(cfg.Wallpaper.HistoryLimit))
 	ui.cleanupDays.SetText(strconv.Itoa(cfg.Wallpaper.CleanupDays))
 	ui.feedSource.SetSelected(feedSourceDisplay(cfg))
-	ui.rankingSub.SetSelected(cfg.Pixiv.Ranking.String())
+	ui.rankingSub.SetSelected(rankingSubDisplay(cfg.Pixiv.Ranking))
 	if cfg.Wallpaper.QueueSource == config.QueueSourceAll {
 		ui.rankingSub.Show()
 	} else {
@@ -475,6 +505,7 @@ func (ui *settingsUI) update() {
 	}
 
 	ui.logLevel.SetSelected(cfg.LogLevel)
+	ui.notificationsEnabled.SetChecked(cfg.Notifications.Enabled)
 }
 
 func (ui *settingsUI) applySettings() {
@@ -537,8 +568,14 @@ func (ui *settingsUI) applySettings() {
 	}
 
 	cfg.LogLevel = ui.logLevel.Selected
+	cfg.Notifications.Enabled = ui.notificationsEnabled.Checked
 
-	cfg.Validate()
+	issues := cfg.Validate()
+	if len(issues) > 0 {
+		dialog.ShowInformation("Configuration adjusted",
+			"Some settings were outside the supported range and have been adjusted:\n\n• "+strings.Join(issues, "\n• "),
+			ui.w)
+	}
 
 	if err := config.Save(cfg.ConfigPath, cfg); err != nil {
 		dialog.ShowError(err, ui.w)
@@ -726,6 +763,8 @@ func (ui *settingsUI) refreshStatus() {
 		ui.currentWallpaperSection.Show()
 		ui.monitorWallpaperSection.Hide()
 	}
+	ui.refreshOverview()
+	ui.refreshFirstRun()
 	meta, err := ui.ctrl.CurrentWallpaper()
 	if err != nil {
 		ui.log.Error("Failed to get current wallpaper", "error", err)
@@ -733,7 +772,7 @@ func (ui *settingsUI) refreshStatus() {
 
 	if meta != nil && meta.ID != "" && meta.ID != ui.lastWallpaperID {
 		ui.lastWallpaperID = meta.ID
-		thumbPath := ui.ctrl.ThumbnailPath(meta.ID)
+		thumbPath := ui.ctrl.EnsureThumbnail(meta.ID)
 		ui.statusThumbnail.File = thumbPath
 		ui.statusThumbnail.Refresh()
 	}
@@ -810,6 +849,18 @@ func (ui *settingsUI) formatNextRotation() string {
 		return "Next change: in " + strconv.Itoa(mins) + "m " + strconv.Itoa(secs) + "s"
 	}
 	return "Next change: in " + strconv.Itoa(secs) + "s"
+}
+
+// rankingSubDisplay maps a ranking mode to its GUI select option.
+func rankingSubDisplay(mode config.RankingMode) string {
+	switch mode {
+	case config.RankingWeeklyMode:
+		return rankingSubWeekly
+	case config.RankingMonthlyMode:
+		return rankingSubMonthly
+	default:
+		return rankingSubDaily
+	}
 }
 
 func feedSourceDisplay(cfg *config.Config) string {

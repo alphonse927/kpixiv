@@ -13,9 +13,29 @@
 
 ## Commands
 
+### `kpixivctl version`
+
+Show version and build information:
+
+```text
+kpixivctl 0.9.0
+Commit:        7ded4bb
+Build date:    2026-07-31T08:00:00Z
+Go version:    go1.26.4
+```
+
+Build metadata (commit, date) is injected at build time by the Makefile.
+Fyne version is shown when the build links it (GUI daemon builds).
+
 ### `kpixivctl wallpaper fetch`
 
-Download wallpapers from the configured Pixiv ranking feed.
+Download wallpapers from the configured Pixiv ranking feed. With `--dry-run`,
+fetches the feed without downloading anything:
+
+```text
+Fetched from Daily ranking.
+Total: 36, Downloaded: 6, Filtered: 12, Skipped: 18, Failed: 0
+```
 
 ### `kpixivctl wallpaper next`
 
@@ -62,22 +82,42 @@ Rebuild the rotation queue from local images.
 
 ### `kpixivctl cache`
 
-| Subcommand | Description                 |
-|------------|-----------------------------|
-| `stats`    | Show downloaded image count |
-| `clear`    | Remove all cached images    |
+| Subcommand | Description                                        |
+|------------|----------------------------------------------------|
+| `stats`    | Show cache statistics (count, disk usage, oldest/newest, queue size) |
+| `clear`    | Remove all cached images and report freed space    |
+
+Example `cache stats` output:
+
+```text
+Downloaded images: 124
+Disk usage:        482 MB
+Oldest image:      2026-07-20 09:12:03
+Newest image:      2026-07-30 21:40:11
+In queue:          18
+```
 
 ### `kpixivctl config`
 
-| Subcommand          | Description                     |
-|---------------------|---------------------------------|
-| `show`              | Print the current configuration |
-| `set <key> <value>` | Set a configuration value       |
+| Subcommand          | Description                                 |
+|---------------------|---------------------------------------------|
+| `show`              | Print the current configuration             |
+| `set <key> <value>` | Set a configuration value                   |
+| `reset`             | Restore the configuration to default values |
+
+`config set` validates the value, clamps below-minimum settings, and prints a
+note for every adjustment:
+
+```text
+Set wallpaper.set_interval = 3
+Note: Wallpaper change interval is below 5 minutes; using 5.
+```
 
 Supported config keys for `set`:
 
 | Key                               | Type | Description                               |
 |-----------------------------------|------|-------------------------------------------|
+| `log_level`                       | enum | `debug`, `info`, `warn`, or `error`       |
 | `pixiv.r18`                       | bool | Include R-18 content                      |
 | `pixiv.ranking`                   | int  | 0=daily, 1=weekly, 2=monthly              |
 | `pixiv.min_width`                 | int  | Minimum image width (min 1280)            |
@@ -94,16 +134,70 @@ Supported config keys for `set`:
 | `bookmarks.enabled`               | bool | Enable periodic bookmark sync             |
 | `bookmarks.sync_interval`         | int  | Minutes between sync cycles (min 60)      |
 | `bookmarks.auto_cleanup`          | bool | Remove unbookmarked images                |
+| `notifications.enabled`           | bool | Enable desktop notifications              |
 
 ### `kpixivctl monitors`
 
 List active KDE Plasma screens with connector names, model names, and rotation status.
 
 ```bash
-[0] DP-1 (LG ULTRAGEAR/DP-1)	enabled
-[1] DP-2 (DELL S2721QS/DP-2)	disabled
+[0] DP-1 (LG ULTRAGEAR/DP-1)	rotation=enabled	orientation=any
+[1] DP-2 (DELL S2721QS/DP-2)	rotation=disabled	orientation=any
 ```
 
 ### `kpixivctl status`
 
-Show full application status: config, storage, current wallpaper, monitor info, and queue size.
+Show a dashboard of the current state: configuration, wallpaper settings,
+daemon status, cache statistics, and per-monitor info.
+
+```text
+KPixiv Status
+─────────────
+
+Configuration
+──────────────────────
+  Version:               0.9.0
+  Config file:           ~/.config/kpixiv/config.yaml
+  Download dir:          ~/Pictures/KPixiv
+  ...
+
+Current State
+─────────────
+  Daemon:                running
+  Pixiv:                 connected (expires in 12 hours)
+  Current wallpaper:     ~/Pictures/KPixiv/rank/1234.jpg
+  ...
+```
+
+### `kpixivctl doctor`
+
+Run a series of diagnostic checks over the KPixiv installation: configuration,
+directory permissions, cache health, Pixiv authentication and API reachability,
+DBus session, Plasma presence, wallpaper backend, and systemd autostart.
+
+```text
+kPixiv Doctor
+────────────────────────────────────────
+✓ Configuration
+    /home/user/.config/kpixiv/config.yaml
+✓ Directories
+    data: /home/user/.local/share/kpixiv
+      state: /home/user/.local/state/kpixiv
+✓ Cache
+    124 cached image(s), 482 MB
+! Authentication
+    not logged in to Pixiv
+    fix: Run 'kpixivctl account login' to enable bookmarks and sync.
+...
+7 passed, 2 warnings, 0 failed
+```
+
+Each failing check ends with an actionable `fix:` hint. The command exits with
+a nonzero status when any check fails, which makes it suitable for scripts.
+
+## Exit codes
+
+| Code | Meaning                                                         |
+|------|-----------------------------------------------------------------|
+| `0`  | Success, or `doctor` ran with no failures                       |
+| `1`  | Command failed, or `doctor` found failing checks                |

@@ -12,6 +12,7 @@ import (
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/gui"
 	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/platform"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
@@ -20,6 +21,11 @@ import (
 )
 
 const componentName = "app"
+
+// cacheStatsTTL bounds how often cache statistics are recomputed. The GUI
+// refreshes status every few seconds, so results are reused within the TTL
+// to avoid repeated filesystem stats.
+const cacheStatsTTL = 30 * time.Second
 
 type Controller struct {
 	cfg         *config.Config
@@ -32,6 +38,15 @@ type Controller struct {
 	mu          sync.Mutex
 	rebuildMenu func()
 	rebuildGUI  func()
+
+	// multiMonitorEnabled tracks the last known multi-monitor state. The GUI
+	// mutates the shared config pointer in place before ApplyConfig, so the
+	// toggle cannot be detected by comparing the old and new configs.
+	multiMonitorEnabled bool
+
+	statsMu      sync.Mutex
+	cachedStats  storage.CacheStats
+	statsUpdated time.Time
 }
 
 const trayComponentName = "tray"
@@ -63,10 +78,17 @@ func New(cfg *config.Config, dryRun bool, reset bool) (*Controller, error) {
 		cleanupDays = 0
 	}
 
-	if removed, cleanupErr := st.CleanupImagesOlderThanDays(cleanupDays); cleanupErr != nil {
+	notify.SetEnabled(cfg.Notifications.Enabled)
+
+	if result, cleanupErr := st.CleanupImagesOlderThanDays(cleanupDays); cleanupErr != nil {
 		logger.WithComponent(componentName).Warn("Failed to cleanup old images", "error", cleanupErr)
-	} else {
-		logger.WithComponent(componentName).Info("Image cleanup complete", "removed", removed, "days", cleanupDays)
+	} else if result.Removed > 0 {
+		logger.WithComponent(componentName).Info(
+			"Removed unused wallpapers",
+			"removed", result.Removed,
+			"freedBytes", result.FreedBytes,
+			"days", cleanupDays,
+		)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -77,13 +99,14 @@ func New(cfg *config.Config, dryRun bool, reset bool) (*Controller, error) {
 	}
 
 	return &Controller{
-		cfg:    cfg,
-		st:     st,
-		sch:    sch,
-		setter: setter,
-		pixiv:  client,
-		ctx:    ctx,
-		cancel: cancel,
+		cfg:                 cfg,
+		st:                  st,
+		sch:                 sch,
+		setter:              setter,
+		pixiv:               client,
+		ctx:                 ctx,
+		cancel:              cancel,
+		multiMonitorEnabled: cfg.Wallpaper.MultiMonitorEnabled,
 	}, nil
 }
 
@@ -113,6 +136,7 @@ func (c *Controller) MonitorWallpapers() (map[string]*storage.ImageMeta, error) 
 	if err != nil {
 		return nil, err
 	}
+
 	result := make(map[string]*storage.ImageMeta)
 	globalID, _ := c.st.GetCurrentWallpaper() //nolint:errcheck // monitor status has a best-effort fallback
 	for _, screen := range screens {
@@ -120,11 +144,24 @@ func (c *Controller) MonitorWallpapers() (map[string]*storage.ImageMeta, error) 
 		if id == "" {
 			id = globalID
 		}
-		if id != "" {
-			if meta, ok := metadata[id]; ok {
-				result[screen.ID] = meta
-			}
+
+		if id == "" {
+			continue
 		}
+
+		if meta, ok := metadata[id]; ok {
+			result[screen.ID] = meta
+			continue
+		}
+
+		// Metadata missing (e.g., after cleanup or queue refill). Fall back to
+		// finding the file on disk so the GUI can still display a wallpaper is set.
+		path, exists := c.st.GetImagePath(id)
+		if !exists {
+			continue
+		}
+
+		result[screen.ID] = &storage.ImageMeta{ID: id, Path: path}
 	}
 
 	return result, nil
@@ -328,6 +365,7 @@ func (c *Controller) ExcludeWallpaper(artworkID string) error {
 	}
 
 	c.sch.ResetRotationTimer()
+	notify.SendDefault("KPixiv", fmt.Sprintf("The image %s has been excluded from the normal rotation.", c.artworkTitle(artworkID)))
 	return nil
 }
 
@@ -451,7 +489,23 @@ func (c *Controller) BookmarkWallpaper(artworkID string) error {
 	if err = c.st.AddBookmark(artworkID); err != nil {
 		logger.WithComponent(componentName).Warn("bookmarked on Pixiv but failed to save locally", "id", artworkID, "error", err)
 	}
+
+	notify.SendDefault("KPixiv", fmt.Sprintf("The image %s has been bookmarked on Pixiv.", c.artworkTitle(artworkID)))
 	return nil
+}
+
+// artworkTitle returns the stored title for an artwork, falling back to its ID.
+func (c *Controller) artworkTitle(id string) string {
+	metadata, err := c.st.LoadMetadata()
+	if err != nil {
+		return id
+	}
+
+	if meta, ok := metadata[id]; ok && meta.Title != "" {
+		return meta.Title
+	}
+
+	return id
 }
 
 // BookmarkCurrentArtwork bookmarks the current artwork in Pixiv.
@@ -490,11 +544,23 @@ func (c *Controller) Shutdown() {
 // ApplyConfig applies a new config to the scheduler without restarting it.
 func (c *Controller) ApplyConfig(cfg *config.Config) {
 	c.mu.Lock()
+	multiToggled := c.multiMonitorEnabled != cfg.Wallpaper.MultiMonitorEnabled
+	c.multiMonitorEnabled = cfg.Wallpaper.MultiMonitorEnabled
 	c.cfg = cfg
 	c.mu.Unlock()
+
+	notify.SetEnabled(cfg.Notifications.Enabled)
 	if c.sch != nil {
 		c.sch.ApplyConfig(cfg)
+		if multiToggled {
+			// Restore the last wallpaper used on each screen (or globally)
+			// when multi-monitor mode is switched on or off.
+			if err := c.sch.ApplyCurrentOrNext(); err != nil {
+				logger.WithComponent(componentName).Warn("Failed to change wallpaper after multi-monitor toggle", "error", err)
+			}
+		}
 	}
+
 	if c.rebuildMenu != nil {
 		c.rebuildMenu()
 	}
@@ -602,11 +668,92 @@ func (c *Controller) CurrentWallpaper() (*storage.ImageMeta, error) {
 
 // CachedCount returns the number of images in the metadata store.
 func (c *Controller) CachedCount() int {
-	meta, err := c.st.LoadMetadata()
+	stats, err := c.CacheStats()
 	if err != nil {
 		return 0
 	}
-	return len(meta)
+	return stats.Count
+}
+
+// CacheStats returns statistics about the downloaded wallpaper cache.
+// Results are reused for cacheStatsTTL to keep status refreshes cheap.
+func (c *Controller) CacheStats() (storage.CacheStats, error) {
+	c.statsMu.Lock()
+	defer c.statsMu.Unlock()
+
+	if !c.statsUpdated.IsZero() && time.Since(c.statsUpdated) < cacheStatsTTL {
+		return c.cachedStats, nil
+	}
+
+	stats, err := c.st.CacheStats()
+	if err != nil {
+		return storage.CacheStats{}, err
+	}
+	c.cachedStats = stats
+	c.statsUpdated = time.Now()
+	return stats, nil
+}
+
+// HistoryCount returns the number of remembered wallpaper history entries.
+func (c *Controller) HistoryCount() int {
+	history, err := c.st.LoadHistory()
+	if err != nil {
+		return 0
+	}
+	count := len(history.Images)
+	if history.Current != "" {
+		count++
+	}
+	return count
+}
+
+// NextWallpaperID returns the ID of the next wallpaper in the rotation queue.
+func (c *Controller) NextWallpaperID() string {
+	q := storage.NewQueue(c.st.StateDir())
+	if err := q.Load(); err != nil {
+		return ""
+	}
+	id, ok := q.Peek()
+	if !ok {
+		return ""
+	}
+	return id
+}
+
+// MonitorNextWallpapers returns the next queued wallpaper ID for each active
+// screen when multi-monitor rotation is enabled.
+func (c *Controller) MonitorNextWallpapers() map[string]string {
+	result := make(map[string]string)
+	screens, err := c.Monitors()
+	if err != nil {
+		return result
+	}
+
+	for _, screen := range screens {
+		mq := storage.NewMonitorQueue(c.st.StateDir(), screen.ID)
+		if err = mq.Load(); err != nil {
+			continue
+		}
+
+		if id, ok := mq.Peek(); ok {
+			result[screen.ID] = id
+		}
+	}
+
+	return result
+}
+
+// WallpaperMeta returns metadata for a specific artwork ID, or nil when the
+// artwork is not in the metadata store.
+func (c *Controller) WallpaperMeta(id string) (*storage.ImageMeta, error) {
+	if id == "" {
+		return nil, nil //nolint:nilnil // empty id is not an error
+	}
+	meta, err := c.st.LoadMetadata()
+	if err != nil {
+		return nil, err
+	}
+	return meta[id], nil
 }
 
 // LastRotation returns the timestamp of the last wallpaper rotation.
@@ -616,6 +763,26 @@ func (c *Controller) LastRotation() time.Time {
 		return time.Time{}
 	}
 	return history.UpdatedAt
+}
+
+// ConfigPath returns the path of the active configuration file.
+func (c *Controller) ConfigPath() string {
+	return c.cfg.ConfigPath
+}
+
+// DataDir returns the application data directory (wallpaper cache).
+func (c *Controller) DataDir() string {
+	return c.st.DataDir()
+}
+
+// StateDir returns the application state directory (queue, history, session).
+func (c *Controller) StateDir() string {
+	return c.st.StateDir()
+}
+
+// DownloadDir returns the user-facing download directory.
+func (c *Controller) DownloadDir() string {
+	return c.st.DownloadDir()
 }
 
 // SyncBookmarks triggers an immediate bookmark sync.
@@ -647,6 +814,26 @@ func (c *Controller) ShowAccountSettings() error {
 
 func (c *Controller) ThumbnailPath(id string) string {
 	return c.st.ThumbnailPath(id)
+}
+
+// EnsureThumbnail returns the thumbnail path for an artwork, generating it on
+// demand when the cached copy is missing.
+func (c *Controller) EnsureThumbnail(id string) string {
+	path := c.st.ThumbnailPath(id)
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+
+	meta, err := c.WallpaperMeta(id)
+	if err != nil || meta == nil || meta.Path == "" {
+		return path
+	}
+
+	if err = c.st.GenerateThumbnail(meta.Path, id); err != nil {
+		logger.WithComponent(componentName).Warn("Failed to generate thumbnail", "id", id, "error", err)
+	}
+
+	return path
 }
 
 func (c *Controller) ServiceEnabled() (bool, error) {

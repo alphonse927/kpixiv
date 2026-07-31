@@ -4,10 +4,12 @@ import (
 	"net/url"
 
 	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/alphonse927/kpixiv/internal/assets"
 	"github.com/alphonse927/kpixiv/internal/build"
 )
 
@@ -15,9 +17,14 @@ func (ui *settingsUI) buildAboutPage() fyne.CanvasObject {
 	bold := fyne.TextStyle{Bold: true}
 	gitURL, _ := url.Parse("https://github.com/alphonse927/kpixiv") //nolint:errcheck // hardcoded URL
 
+	icon := canvas.NewImageFromResource(fyne.NewStaticResource("kpixiv", assets.IconPNG))
+	icon.FillMode = canvas.ImageFillContain
+	icon.SetMinSize(fyne.NewSize(96, 96))
+
 	content := container.NewVBox(
 		container.NewPadded(
 			container.NewVBox(
+				icon,
 				widget.NewLabelWithStyle("kPixiv", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
 				widget.NewLabelWithStyle("Version "+build.Version, fyne.TextAlignCenter, fyne.TextStyle{}),
 			),

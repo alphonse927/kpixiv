@@ -224,6 +224,8 @@ kpixivctl bookmarks sync                 # Sync bookmarked images
 kpixivctl autostart enable               # Enable automatic startup via systemd
 kpixivctl autostart disable              # Remove from automatic startup
 kpixivctl status                         # Show full application status
+kpixivctl doctor                         # Diagnose installation problems
+kpixivctl cache stats                    # Show cache statistics
 ```
 
 See `kpixivctl help` or the [full CLI reference](docs/cli.md) for all commands.

@@ -88,9 +88,9 @@ func (s *Storage) LoadHistory() (*History, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			h := NewHistory()
-			h.UpdatedAt = time.Now()
-			return h, nil
+			// No rotation history yet: UpdatedAt stays zero so callers can
+			// distinguish "never changed" from "changed just now".
+			return NewHistory(), nil
 		}
 
 		return nil, err
@@ -137,7 +137,6 @@ func (s *Storage) SaveMonitorHistory(monitors map[string]string, historyLimit in
 func (s *Storage) AddToMonitorHistory(screenID, imageID string, historyLimit int) error {
 	return s.updateHistory(func(h *History) error {
 		h.SetMonitor(screenID, imageID)
-		h.SetCurrent(imageID)
 		h.Trim(historyLimit)
 		return nil
 	})
