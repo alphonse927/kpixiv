@@ -942,6 +942,7 @@ var statusCmd = &cobra.Command{
 		fmt.Println("Wallpaper")
 		fmt.Println("─────────")
 		fmt.Println(keyValue(width, "Feed source", feedSourceLabel(cfg)))
+		fmt.Println(keyValue(width, "Orientation", cfg.Wallpaper.Orientation.String()))
 		fmt.Println(keyValue(width, "Rotation", boolLabel(cfg.Wallpaper.RotationEnabled)))
 		fmt.Println(keyValue(width, "Change interval", fmt.Sprintf("%d minutes", cfg.Wallpaper.SetInterval)))
 		fmt.Println(keyValue(width, "Fetch interval", fmt.Sprintf("%d minutes", cfg.Wallpaper.FetchInterval)))
