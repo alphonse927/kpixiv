@@ -134,10 +134,10 @@ pixiv:
   r18: false
   min_width: 1280
   min_height: 720
-  landscape_only: true
 
 wallpaper:
   mode: "fill"
+  orientation: "any"
   history_limit: 10
   set_interval: 5
   fetch_interval: 30
@@ -160,25 +160,25 @@ kde:
   set_lock_screen: false
 ```
 
-| Option                                       | Default             | Description                                       |
-|----------------------------------------------|---------------------|---------------------------------------------------|
-| `download_path`                              | `~/Pictures/KPixiv` | Where to store wallpapers                         |
-| `pixiv.ranking`                              | `daily`             | Ranking feed (`daily`/`weekly`/`monthly`)         |
-| `pixiv.r18`                                  | `false`             | Include R-18 content                              |
-| `pixiv.min_width` / `min_height`             | `1280` / `720`      | Minimum image dimensions                          |
-| `pixiv.landscape_only`                       | `true`              | Only download landscape images                    |
-| `wallpaper.mode`                             | `fill`              | Scaling mode (`fill`/`cover`/`fit`)               |
-| `wallpaper.multi_monitor_enabled`            | `false`             | Enable per-monitor wallpaper assignment           |
-| `wallpaper.monitors.<conn>.rotation_enabled` | `true`              | Enable rotation for this monitor                  |
-| `wallpaper.monitors.<conn>.orientation`      | `any`               | Orientation filter (`any`/`landscape`/`portrait`) |
-| `wallpaper.history_limit`                    | `10`                | Max wallpapers in rotation history                |
-| `wallpaper.set_interval`                     | `5`                 | Minutes between wallpaper changes                 |
-| `wallpaper.fetch_interval`                   | `30`                | Minutes between Pixiv fetch cycles                |
-| `wallpaper.cleanup_days`                     | `7`                 | Remove cached wallpapers older than N days        |
-| `bookmarks.enabled`                          | `false`             | Enable periodic bookmark sync                     |
-| `bookmarks.sync_interval`                    | `60`                | Minutes between bookmark sync cycles              |
-| `bookmarks.auto_cleanup`                     | `true`              | Remove unbookmarked images from favorites         |
-| `kde.set_lock_screen`                        | `false`             | Also apply wallpaper to the lock screen           |
+| Option                                       | Default             | Description                                               |
+|----------------------------------------------|---------------------|-----------------------------------------------------------|
+| `download_path`                              | `~/Pictures/KPixiv` | Where to store wallpapers                                 |
+| `pixiv.ranking`                              | `daily`             | Ranking feed (`daily`/`weekly`/`monthly`)                 |
+| `pixiv.r18`                                  | `false`             | Include R-18 content                                      |
+| `pixiv.min_width` / `min_height`             | `1280` / `720`      | Minimum image dimensions                                  |
+| `wallpaper.mode`                             | `fill`              | Scaling mode (`fill`/`cover`/`fit`)                       |
+| `wallpaper.orientation`                      | `any`               | Single-monitor orientation (`any`/`landscape`/`portrait`) |
+| `wallpaper.multi_monitor_enabled`            | `false`             | Enable per-monitor wallpaper assignment                   |
+| `wallpaper.monitors.<conn>.rotation_enabled` | `true`              | Enable rotation for this monitor                          |
+| `wallpaper.monitors.<conn>.orientation`      | `any`               | Orientation filter (`any`/`landscape`/`portrait`)         |
+| `wallpaper.history_limit`                    | `10`                | Max wallpapers in rotation history                        |
+| `wallpaper.set_interval`                     | `5`                 | Minutes between wallpaper changes                         |
+| `wallpaper.fetch_interval`                   | `30`                | Minutes between Pixiv fetch cycles                        |
+| `wallpaper.cleanup_days`                     | `7`                 | Remove cached wallpapers older than N days                |
+| `bookmarks.enabled`                          | `false`             | Enable periodic bookmark sync                             |
+| `bookmarks.sync_interval`                    | `60`                | Minutes between bookmark sync cycles                      |
+| `bookmarks.auto_cleanup`                     | `true`              | Remove unbookmarked images from favorites                 |
+| `kde.set_lock_screen`                        | `false`             | Also apply wallpaper to the lock screen                   |
 
 Use `kpixivctl config set <key> <value>` to change settings from the command line.
 

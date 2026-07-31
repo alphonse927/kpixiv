@@ -34,6 +34,7 @@ func (ui *settingsUI) buildSettingsPage() fyne.CanvasObject {
 		container.NewVBox(
 			field("Wallpaper Change (min)", ui.setInterval),
 			ui.rotationEnabled,
+			field("Orientation", ui.wallpaperOrientation),
 		),
 		container.NewVBox(
 			field("Download New Images (min)", ui.fetchInterval),

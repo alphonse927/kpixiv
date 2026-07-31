@@ -103,29 +103,44 @@ func (f *Fetcher) Fetch(ctx context.Context) (*FetchResult, error) {
 }
 
 func (f *Fetcher) filterImages(images []pixiv.Image, blacklist map[string]struct{}) []pixiv.Image {
+	orientation := f.fetchOrientation()
 	var filtered []pixiv.Image
 	for _, img := range images {
 		if _, excluded := blacklist[img.ID]; excluded {
 			continue
 		}
+
 		if img.Width < f.cfg.Pixiv.MinWidth || img.Height < f.cfg.Pixiv.MinHeight {
 			continue
 		}
-		landscapeOnly := f.cfg.Pixiv.LandscapeOnly
-		if landscapeOnly && f.cfg.Wallpaper.MultiMonitorEnabled {
-			for _, monitor := range f.cfg.Wallpaper.Monitors {
-				if monitor.Orientation != config.WallpaperLandscapeOrientation {
-					landscapeOnly = false
-					break
-				}
-			}
-		}
-		if landscapeOnly && img.Height > img.Width {
+
+		if !orientation.Matches(img.Width, img.Height) {
 			continue
 		}
+
 		filtered = append(filtered, img)
 	}
+
 	return filtered
+}
+
+// fetchOrientation returns the orientation used when downloading new images.
+// Single-monitor mode uses the global wallpaper orientation. Multi-monitor
+// mode keeps the legacy behavior: downloads are restricted to landscape only
+// when every configured monitor requires landscape, otherwise anything is
+// accepted, and per-monitor filtering happens during rotation.
+func (f *Fetcher) fetchOrientation() config.WallpaperOrientation {
+	if !f.cfg.Wallpaper.MultiMonitorEnabled {
+		return f.cfg.Wallpaper.Orientation
+	}
+
+	for _, monitor := range f.cfg.Wallpaper.Monitors {
+		if monitor.Orientation != config.WallpaperLandscapeOrientation {
+			return config.WallpaperAnyOrientation
+		}
+	}
+
+	return config.WallpaperLandscapeOrientation
 }
 
 func (f *Fetcher) prepareDownloads(filteredImages []pixiv.Image) ([]pixiv.Image, map[string]*storage.ImageMeta, error) {
