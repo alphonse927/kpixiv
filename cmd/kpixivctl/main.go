@@ -39,11 +39,14 @@ var rootCmd = &cobra.Command{
 	Version: build.Version,
 	Short:   "KPixiv CLI - Pixiv wallpaper manager",
 	Long:    `kpixivctl is the command-line interface for KPixiv, a Pixiv wallpaper manager for KDE Plasma.`,
+	CompletionOptions: cobra.CompletionOptions{
+		DisableDefaultCmd: true,
+	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		var err error
 		cfg, err = config.Load(cfgPath)
 		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
+			return fmt.Errorf("could not load configuration:\n  %w", err)
 		}
 
 		cfg.Validate()
@@ -51,6 +54,28 @@ var rootCmd = &cobra.Command{
 		logger.Init(verbose)
 		if !verbose {
 			logger.SetLevel(cfg.LogLevel)
+		}
+		return nil
+	},
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Show version and build information",
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return nil // version must work even with a broken config
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Printf("kpixivctl %s\n", build.Version)
+		if build.Commit != "" {
+			fmt.Printf("Commit:        %s\n", build.Commit)
+		}
+		if build.Date != "" {
+			fmt.Printf("Build date:    %s\n", build.Date)
+		}
+		fmt.Printf("Go version:    %s\n", build.GoVersion)
+		if fyneVersion := build.FyneVersion(); fyneVersion != "" {
+			fmt.Printf("Fyne version:  %s\n", fyneVersion)
 		}
 		return nil
 	},
@@ -67,34 +92,35 @@ var wallpaperFetchCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+			return fmt.Errorf("could not initialize pixiv client:\n  %w", err)
 		}
 
 		ctx := context.Background()
 		f := fetcher.NewFetcher(cfg, st, pixivClient)
 		if err = f.LoadPage(); err != nil {
-			return fmt.Errorf("failed to load ranking page: %w", err)
+			return fmt.Errorf("could not load ranking page:\n  %w", err)
 		}
 
 		if dryRun {
 			if _, err = f.DryRun(ctx); err != nil {
-				return fmt.Errorf("failed to fetch: %w", err)
+				return fmt.Errorf("fetch failed:\n  %w", err)
 			}
 			return nil
 		}
 
 		result, err := f.Fetch(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to fetch: %w", err)
+			return fmt.Errorf("fetch failed:\n  %w", err)
 		}
 
-		fmt.Println("Fetch complete!")
-		fmt.Printf("Total: %d, Downloaded: %d, Filtered: %d, Skipped: %d, Failed: %d\n", result.Total, result.Downloaded, result.Filtered, result.Skipped, result.Failed)
+		fmt.Printf("Fetched from %s ranking.\n", capitalize(cfg.Pixiv.Ranking.String()))
+		fmt.Printf("Total: %d, Downloaded: %d, Filtered: %d, Skipped: %d, Failed: %d\n",
+			result.Total, result.Downloaded, result.Filtered, result.Skipped, result.Failed)
 		return nil
 	},
 }
@@ -107,7 +133,7 @@ var wallpaperNextCmd = &cobra.Command{
 
 		s, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		var setter wallpaper.Setter
@@ -119,7 +145,7 @@ var wallpaperNextCmd = &cobra.Command{
 
 		q := storage.NewQueue(s.StateDir())
 		if err := q.Load(); err != nil {
-			return fmt.Errorf("failed to load queue: %w", err)
+			return fmt.Errorf("could not load queue:\n  %w", err)
 		}
 
 		log.Debug("Setting wallpaper")
@@ -160,22 +186,21 @@ var wallpaperQueueBookmarksCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		q := storage.NewQueue(st.StateDir())
 		if err = q.Load(); err != nil {
-			return fmt.Errorf("failed to load queue: %w", err)
+			return fmt.Errorf("could not load queue:\n  %w", err)
 		}
 
 		if err = q.Clear(); err != nil {
-			return fmt.Errorf("failed to clear queue: %w", err)
+			return fmt.Errorf("could not clear queue:\n  %w", err)
 		}
 
-		var blacklist map[string]struct{}
-		blacklist, err = st.LoadBlacklistSet()
+		blacklist, err := st.LoadBlacklistSet()
 		if err != nil {
-			return fmt.Errorf("failed to load blacklist: %w", err)
+			return fmt.Errorf("could not load blacklist:\n  %w", err)
 		}
 
 		ids := scanDirForImages(st.BookmarksDir(), blacklist)
@@ -185,11 +210,11 @@ var wallpaperQueueBookmarksCmd = &cobra.Command{
 		}
 
 		if err := st.AddBookmarks(ids); err != nil {
-			return fmt.Errorf("failed to update bookmarks: %w", err)
+			return fmt.Errorf("could not update bookmarks:\n  %w", err)
 		}
 
 		if err := q.AppendRandom(ids); err != nil {
-			return fmt.Errorf("failed to populate queue: %w", err)
+			return fmt.Errorf("could not populate queue:\n  %w", err)
 		}
 
 		fmt.Printf("Queue rebuilt: %d images loaded from Bookmarks\n", len(ids))
@@ -203,22 +228,21 @@ var wallpaperQueueRankingCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		q := storage.NewQueue(st.StateDir())
 		if err = q.Load(); err != nil {
-			return fmt.Errorf("failed to load queue: %w", err)
+			return fmt.Errorf("could not load queue:\n  %w", err)
 		}
 
 		if err = q.Clear(); err != nil {
-			return fmt.Errorf("failed to clear queue: %w", err)
+			return fmt.Errorf("could not clear queue:\n  %w", err)
 		}
 
-		var blacklist map[string]struct{}
-		blacklist, err = st.LoadBlacklistSet()
+		blacklist, err := st.LoadBlacklistSet()
 		if err != nil {
-			return fmt.Errorf("failed to load blacklist: %w", err)
+			return fmt.Errorf("could not load blacklist:\n  %w", err)
 		}
 
 		ids := scanDirForImages(st.RankingDir(), blacklist)
@@ -228,7 +252,7 @@ var wallpaperQueueRankingCmd = &cobra.Command{
 		}
 
 		if err := q.AppendRandom(ids); err != nil {
-			return fmt.Errorf("failed to populate queue: %w", err)
+			return fmt.Errorf("could not populate queue:\n  %w", err)
 		}
 
 		fmt.Printf("Queue rebuilt: %d images loaded from Ranking\n", len(ids))
@@ -242,22 +266,21 @@ var wallpaperQueueAllCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		q := storage.NewQueue(st.StateDir())
 		if err = q.Load(); err != nil {
-			return fmt.Errorf("failed to load queue: %w", err)
+			return fmt.Errorf("could not load queue:\n  %w", err)
 		}
 
 		if err = q.Clear(); err != nil {
-			return fmt.Errorf("failed to clear queue: %w", err)
+			return fmt.Errorf("could not clear queue:\n  %w", err)
 		}
 
-		var blacklist map[string]struct{}
-		blacklist, err = st.LoadBlacklistSet()
+		blacklist, err := st.LoadBlacklistSet()
 		if err != nil {
-			return fmt.Errorf("failed to load blacklist: %w", err)
+			return fmt.Errorf("could not load blacklist:\n  %w", err)
 		}
 
 		rankingIDs := scanDirForImages(st.RankingDir(), blacklist)
@@ -265,7 +288,7 @@ var wallpaperQueueAllCmd = &cobra.Command{
 
 		if len(bookmarksIDs) > 0 {
 			if err := st.AddBookmarks(bookmarksIDs); err != nil {
-				return fmt.Errorf("failed to update bookmarks: %w", err)
+				return fmt.Errorf("could not update bookmarks:\n  %w", err)
 			}
 		}
 
@@ -290,7 +313,7 @@ var wallpaperQueueAllCmd = &cobra.Command{
 		}
 
 		if err := q.AppendRandom(all); err != nil {
-			return fmt.Errorf("failed to populate queue: %w", err)
+			return fmt.Errorf("could not populate queue:\n  %w", err)
 		}
 
 		fmt.Printf("Queue rebuilt: %d images loaded from Ranking and Bookmarks\n", len(all))
@@ -309,27 +332,31 @@ var bookmarksSyncCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+			return fmt.Errorf("could not initialize pixiv client:\n  %w", err)
 		}
 
 		if !pixivClient.LoggedIn() {
-			return fmt.Errorf("you must be logged in to sync your bookmarks")
+			return fmt.Errorf("you must be logged in to sync your bookmarks — run 'kpixivctl account login'")
 		}
 
 		ctx := context.Background()
 		syncer := bookmarks.NewSyncer(cfg, st, pixivClient)
 		result, err := syncer.Sync(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to sync bookmarks: %w", err)
+			if errors.Is(err, pixiv.ErrAuthSessionInvalid) {
+				return fmt.Errorf("pixiv login has expired — run 'kpixivctl account login' to reconnect:\n  %w", err)
+			}
+			return fmt.Errorf("could not sync bookmarks:\n  %w", err)
 		}
 
-		fmt.Println("Bookmark sync complete!")
-		fmt.Printf("Total: %d, Downloaded: %d, Deleted: %d, Skipped: %d, Failed: %d\n", result.Total, result.Downloaded, result.Deleted, result.Skipped, result.Failed)
+		fmt.Printf("Bookmark sync complete!\n")
+		fmt.Printf("Total: %d, Downloaded: %d, Deleted: %d, Skipped: %d, Failed: %d\n",
+			result.Total, result.Downloaded, result.Deleted, result.Skipped, result.Failed)
 		return nil
 	},
 }
@@ -340,17 +367,17 @@ var bookmarksListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		bookmarkIDs, err := st.LoadBookmarks()
 		if err != nil {
-			return fmt.Errorf("failed to load bookmarks: %w", err)
+			return fmt.Errorf("could not load bookmarks:\n  %w", err)
 		}
 
 		metadata, err := st.LoadMetadata()
 		if err != nil {
-			return fmt.Errorf("failed to load metadata: %w", err)
+			return fmt.Errorf("could not load metadata:\n  %w", err)
 		}
 
 		if len(bookmarkIDs) == 0 {
@@ -358,12 +385,21 @@ var bookmarksListCmd = &cobra.Command{
 			return nil
 		}
 
-		fmt.Println("=== Bookmarked Images ===")
+		fmt.Println("Bookmarked Images")
+		fmt.Println("─────────────────")
 		for id := range bookmarkIDs {
 			if meta, ok := metadata[id]; ok {
-				fmt.Printf("  %s - %s by %s [%dx%d]\n", id, meta.Title, meta.Artist, meta.Width, meta.Height)
+				title := meta.Title
+				if title == "" {
+					title = "(untitled)"
+				}
+				artist := meta.Artist
+				if artist == "" {
+					artist = "(unknown artist)"
+				}
+				fmt.Printf("  %s  %s by %s [%dx%d]\n", id, title, artist, meta.Width, meta.Height)
 			} else {
-				fmt.Printf("  %s (not downloaded)\n", id)
+				fmt.Printf("  %s  (not downloaded)\n", id)
 			}
 		}
 		fmt.Printf("\nTotal bookmarks: %d\n", len(bookmarkIDs))
@@ -383,25 +419,25 @@ var bookmarksAddCmd = &cobra.Command{
 
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+			return fmt.Errorf("could not initialize pixiv client:\n  %w", err)
 		}
 
 		if !pixivClient.LoggedIn() {
-			return fmt.Errorf("you must be logged in to bookmark artwork")
+			return fmt.Errorf("you must be logged in to bookmark artwork — run 'kpixivctl account login'")
 		}
 
 		ctx := context.Background()
 		if err := pixivClient.BookmarkIllust(ctx, illustID); err != nil {
-			return fmt.Errorf("failed to bookmark on pixiv: %w", err)
+			return fmt.Errorf("could not bookmark on pixiv:\n  %w", err)
 		}
 
 		if err := st.AddBookmark(illustID); err != nil {
-			return fmt.Errorf("failed to save local bookmark: %w", err)
+			return fmt.Errorf("could not save local bookmark:\n  %w", err)
 		}
 
 		fmt.Printf("Artwork %s bookmarked successfully\n", illustID)
@@ -419,16 +455,16 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+			return fmt.Errorf("could not initialize pixiv client:\n  %w", err)
 		}
 
 		if !pixivClient.LoggedIn() {
-			return fmt.Errorf("you must be logged in to bookmark artwork")
+			return fmt.Errorf("you must be logged in to bookmark artwork — run 'kpixivctl account login'")
 		}
 
 		ctx := context.Background()
@@ -449,7 +485,7 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 
 			monitors, err := st.LoadMonitorHistory()
 			if err != nil {
-				return fmt.Errorf("failed to load monitor history: %w", err)
+				return fmt.Errorf("could not load monitor history:\n  %w", err)
 			}
 
 			id, ok := monitors[monitorID]
@@ -463,12 +499,12 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 			setter := wallpaper.NewKDESetter(false)
 			screens, err := setter.Screens()
 			if err != nil {
-				return fmt.Errorf("failed to list monitors: %w", err)
+				return fmt.Errorf("could not list monitors:\n  %w", err)
 			}
 
 			monitors, err := st.LoadMonitorHistory()
 			if err != nil {
-				return fmt.Errorf("failed to load monitor history: %w", err)
+				return fmt.Errorf("could not load monitor history:\n  %w", err)
 			}
 
 			globalID, err := st.GetCurrentWallpaper()
@@ -493,7 +529,7 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 		default:
 			currentID, err := st.GetCurrentWallpaper()
 			if err != nil {
-				return fmt.Errorf("failed to get current wallpaper: %w", err)
+				return fmt.Errorf("could not get current wallpaper:\n  %w", err)
 			}
 			if currentID == "" {
 				return fmt.Errorf("no current wallpaper")
@@ -503,11 +539,11 @@ With --all, bookmarks the current wallpaper on every active screen.`,
 
 		for _, id := range currentIDs {
 			if err := pixivClient.BookmarkIllust(ctx, id); err != nil {
-				return fmt.Errorf("failed to bookmark artwork %s on pixiv: %w", id, err)
+				return fmt.Errorf("could not bookmark artwork %s on pixiv:\n  %w", id, err)
 			}
 
 			if err := st.AddBookmark(id); err != nil {
-				return fmt.Errorf("failed to save local bookmark for %s: %w", id, err)
+				return fmt.Errorf("could not save local bookmark for %s:\n  %w", id, err)
 			}
 
 			fmt.Printf("Artwork %s bookmarked successfully\n", id)
@@ -528,18 +564,18 @@ var accountLoginCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+			return fmt.Errorf("could not initialize pixiv client:\n  %w", err)
 		}
 
 		logger.Info("Opening browser for Pixiv authentication...")
 		_, err = auth.Login(context.Background(), auth.LoginConfig{}, &pixiv.AuthProvider{Client: pixivClient})
 		if err != nil {
-			return fmt.Errorf("login failed: %w", err)
+			return fmt.Errorf("login failed:\n  %w", err)
 		}
 
 		fmt.Println("Login successful!")
@@ -553,16 +589,16 @@ var accountLogoutCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+			return fmt.Errorf("could not initialize pixiv client:\n  %w", err)
 		}
 
 		if err := pixivClient.Logout(); err != nil {
-			return fmt.Errorf("failed to log out: %w", err)
+			return fmt.Errorf("could not log out:\n  %w", err)
 		}
 
 		fmt.Println("Logged out.")
@@ -576,12 +612,12 @@ var accountStatusCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		pixivClient, err := pixiv.NewClient(st.StateDir())
 		if err != nil {
-			return fmt.Errorf("failed to initialize pixiv client: %w", err)
+			return fmt.Errorf("could not initialize pixiv client:\n  %w", err)
 		}
 
 		if pixivClient.LoggedIn() {
@@ -591,8 +627,13 @@ var accountStatusCmd = &cobra.Command{
 			} else {
 				fmt.Println("Logged in to Pixiv")
 			}
+
+			if expiry := pixivClient.AuthExpiry(); !expiry.IsZero() {
+				fmt.Printf("Token valid until: %s\n", expiry.Format(time.DateTime))
+			}
 		} else {
 			fmt.Println("Not logged in")
+			fmt.Println("Run 'kpixivctl account login' to connect your Pixiv account.")
 		}
 
 		return nil
@@ -610,19 +651,28 @@ var cacheStatsCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
-		metadata, err := st.LoadMetadata()
+		stats, err := st.CacheStats()
 		if err != nil {
-			return fmt.Errorf("failed to load metadata: %w", err)
+			return fmt.Errorf("could not read cache statistics:\n  %w", err)
 		}
 
-		fmt.Printf("Downloaded images: %d\n", len(metadata))
+		fmt.Printf("Downloaded images: %d\n", stats.Count)
+		if stats.Size > 0 {
+			fmt.Printf("Disk usage:        %s\n", formatBytes(stats.Size))
+		}
+		if !stats.Oldest.IsZero() {
+			fmt.Printf("Oldest image:      %s\n", stats.Oldest.Format(time.DateTime))
+		}
+		if !stats.Newest.IsZero() {
+			fmt.Printf("Newest image:      %s\n", stats.Newest.Format(time.DateTime))
+		}
 
 		q := storage.NewQueue(st.StateDir())
 		if err := q.Load(); err == nil {
-			fmt.Printf("In queue: %d\n", q.Len())
+			fmt.Printf("In queue:          %d\n", q.Len())
 		}
 
 		return nil
@@ -635,15 +685,19 @@ var cacheClearCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
-		removed, err := st.CleanupImagesOlderThanDays(0)
+		result, err := st.CleanupImagesOlderThanDays(0)
 		if err != nil {
-			return fmt.Errorf("failed to clear cache: %w", err)
+			return fmt.Errorf("could not clear cache:\n  %w", err)
 		}
 
-		fmt.Printf("Removed %d images\n", removed)
+		fmt.Printf("Removed %d images", result.Removed)
+		if result.FreedBytes > 0 {
+			fmt.Printf(" (%s freed)", formatBytes(result.FreedBytes))
+		}
+		fmt.Println()
 		return nil
 	},
 }
@@ -696,7 +750,7 @@ var configShowCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		data, err := os.ReadFile(cfg.ConfigPath)
 		if err != nil {
-			return fmt.Errorf("failed to read config: %w", err)
+			return fmt.Errorf("could not read configuration file:\n  %w", err)
 		}
 
 		fmt.Print(string(data))
@@ -711,6 +765,7 @@ var configSetCmd = &cobra.Command{
 
 Supported keys:
   log_level                   (string: info/debug/warn/error)
+  notifications.enabled       (bool)
   pixiv.r18                   (bool)
   pixiv.ranking               (int: 0=daily, 1=weekly, 2=monthly)
   pixiv.min_width             (int, minimum 1280)
@@ -730,140 +785,50 @@ Supported keys:
 `,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		key := args[0]
-		value := args[1]
-
-		switch key {
-		case "log_level":
-			switch value {
-			case "debug", "info", "warn", "error":
-			default:
-				return fmt.Errorf("invalid log level: %s (must be one of: debug, info, warn, error)", value)
-			}
-			cfg.LogLevel = value
-
-		case "pixiv.r18":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.Pixiv.R18 = v
-
-		case "pixiv.landscape_only":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.Pixiv.LandscapeOnly = v
-
-		case "pixiv.ranking":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Pixiv.Ranking = config.RankingMode(v)
-
-		case "pixiv.min_width":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Pixiv.MinWidth = v
-
-		case "pixiv.min_height":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Pixiv.MinHeight = v
-
-		case "wallpaper.set_interval":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Wallpaper.SetInterval = v
-
-		case "wallpaper.fetch_interval":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Wallpaper.FetchInterval = v
-
-		case "wallpaper.history_limit":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Wallpaper.HistoryLimit = v
-
-		case "wallpaper.cleanup_days":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Wallpaper.CleanupDays = v
-
-		case "wallpaper.rotation_enabled":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.Wallpaper.RotationEnabled = v
-
-		case "wallpaper.fetch_enabled":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.Wallpaper.FetchEnabled = v
-
-		case "wallpaper.multi_monitor_enabled":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.Wallpaper.MultiMonitorEnabled = v
-
-		case "kde.set_lock_screen":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.KDE.SetLockScreen = v
-
-		case "bookmarks.enabled":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.Bookmarks.Enabled = v
-
-		case "bookmarks.sync_interval":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				return fmt.Errorf("invalid int value for %s: %s", key, value)
-			}
-			cfg.Bookmarks.SyncInterval = v
-
-		case "bookmarks.auto_cleanup":
-			v, err := strconv.ParseBool(value)
-			if err != nil {
-				return fmt.Errorf("invalid bool value for %s: %s", key, value)
-			}
-			cfg.Bookmarks.AutoCleanup = v
-
-		default:
-			return fmt.Errorf("unknown config key: %s", key)
+		if err := cfg.Set(args[0], args[1]); err != nil {
+			return err
 		}
 
-		cfg.Validate()
+		issues := cfg.Validate()
 		if err := config.Save(cfg.ConfigPath, cfg); err != nil {
-			return fmt.Errorf("failed to save config: %w", err)
+			return fmt.Errorf("could not save configuration:\n  %w", err)
 		}
 
-		fmt.Printf("Set %s = %s\n", key, value)
+		fmt.Printf("Set %s = %s\n", args[0], args[1])
+		for _, issue := range issues {
+			fmt.Printf("Note: %s\n", issue)
+		}
+		return nil
+	},
+}
+
+var configResetCmd = &cobra.Command{
+	Use:   "reset",
+	Short: "Reset the configuration to default values",
+	Long: `Resets the configuration file to the default values.
+
+This overwrites the current configuration, restoring stock defaults for every
+setting. Custom values such as the download directory and log level are
+forgotten.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return nil // reset must work even with a broken config file
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path := cfgPath
+		if path == "" {
+			path = config.DefaultPath()
+			if path == "" {
+				return fmt.Errorf("cannot determine home directory")
+			}
+		}
+
+		reset := config.Default()
+		reset.ConfigPath = path
+		if err := config.Save(path, reset); err != nil {
+			return fmt.Errorf("could not reset configuration:\n  %w", err)
+		}
+
+		fmt.Printf("Configuration reset to defaults: %s\n", path)
 		return nil
 	},
 }
@@ -879,7 +844,7 @@ var monitorsCmd = &cobra.Command{
 
 		screens, err := wallpaper.NewKDESetter(cfg.KDE.SetLockScreen).Screens()
 		if err != nil {
-			return err
+			return fmt.Errorf("could not query Plasma screens:\n  %w", err)
 		}
 
 		if len(screens) == 0 {
@@ -887,6 +852,8 @@ var monitorsCmd = &cobra.Command{
 			return nil
 		}
 
+		fmt.Println("Active Plasma Screens")
+		fmt.Println("─────────────────────")
 		for _, screen := range screens {
 			state := "enabled"
 			if settings, ok := cfg.Wallpaper.Monitors[screen.ID]; ok && !settings.RotationEnabled {
@@ -898,11 +865,17 @@ var monitorsCmd = &cobra.Command{
 				name = "Screen " + screen.ID
 			}
 
-			fmt.Printf("[%s] ", screen.Index)
+			orientation := "any"
+			if settings, ok := cfg.Wallpaper.Monitors[screen.ID]; ok && settings.Orientation != "" {
+				orientation = string(settings.Orientation)
+			}
+
 			if screen.Model != "" {
-				fmt.Printf("%s (%s/%s)\t%s\n", name, screen.Model, screen.ID, state)
+				fmt.Printf("  [%s] %s (%s/%s)\trotation=%s\torientation=%s\n",
+					screen.Index, name, screen.Model, screen.ID, state, orientation)
 			} else {
-				fmt.Printf("%s (%s)\t%s\n", name, screen.ID, state)
+				fmt.Printf("  [%s] %s (%s)\trotation=%s\torientation=%s\n",
+					screen.Index, name, screen.ID, state, orientation)
 			}
 		}
 
@@ -918,108 +891,206 @@ var statusCmd = &cobra.Command{
 
 		st, err := storage.New("", cfg.DownloadPath)
 		if err != nil {
-			return fmt.Errorf("failed to initialize storage: %w", err)
+			return fmt.Errorf("could not initialize storage:\n  %w", err)
 		}
 
 		history, err := st.LoadHistory()
 		if err != nil {
-			return fmt.Errorf("failed to load history: %w", err)
+			return fmt.Errorf("could not load history:\n  %w", err)
 		}
 		monitorHistory, monitorHistoryErr := st.LoadMonitorHistory()
 
-		metadata, err := st.LoadMetadata()
+		stats, err := st.CacheStats()
 		if err != nil {
-			return fmt.Errorf("failed to load metadata: %w", err)
+			return fmt.Errorf("could not read cache statistics:\n  %w", err)
 		}
 
-		rankingEntries, err := os.ReadDir(st.RankingDir())
-		if err != nil {
-			return fmt.Errorf("failed to read ranking directory: %w", err)
-		}
-
-		totalWallpapers := 0
-		for _, entry := range rankingEntries {
-			if entry.IsDir() {
-				continue
+		q := storage.NewQueue(st.StateDir())
+		queueLen := 0
+		nextID := ""
+		if qErr := q.Load(); qErr == nil {
+			queueLen = q.Len()
+			if id, ok := q.Peek(); ok {
+				nextID = id
 			}
-			totalWallpapers++
 		}
 
-		fmt.Println("=== KPixiv Status ===")
-		fmt.Printf("Config file: %s\n", cfgPath)
-		fmt.Printf("Download directory: %s\n", st.DownloadDir())
-		fmt.Printf("Data directory: %s\n", st.DataDir())
-		fmt.Printf("Ranking feed: %s\n", cfg.Pixiv.Ranking)
-		fmt.Printf("Set interval: %d minutes\n", cfg.Wallpaper.SetInterval)
-		fmt.Printf("Fetch interval: %d minutes\n", cfg.Wallpaper.FetchInterval)
-		fmt.Printf("Min image size: %dx%d\n", cfg.Pixiv.MinWidth, cfg.Pixiv.MinHeight)
-		fmt.Printf("R-18: %t\n", cfg.Pixiv.R18)
-		fmt.Printf("Wallpaper history: %d\n", cfg.Wallpaper.HistoryLimit)
-		fmt.Printf("Cleanup images older than: %d days\n", cfg.Wallpaper.CleanupDays)
-		fmt.Printf("Lock screen: %t\n", cfg.KDE.SetLockScreen)
-		fmt.Printf("Multi-monitor: %t\n", cfg.Wallpaper.MultiMonitorEnabled)
+		displayPath := func(p string) string {
+			home, _ := os.UserHomeDir() //nolint:errcheck // cosmetic display only
+			if home != "" && strings.HasPrefix(p, home) {
+				return "~" + strings.TrimPrefix(p, home)
+			}
+			return p
+		}
 
+		fmt.Println("KPixiv Status")
+		fmt.Println("─────────────")
+
+		// Configuration.
+		width := 22
+		fmt.Println()
+		fmt.Println("Configuration")
+		fmt.Printf("%s\n", strings.Repeat("─", 22))
+		fmt.Println(keyValue(width, "Version", build.Version))
+		fmt.Println(keyValue(width, "Config file", displayPath(cfg.ConfigPath)))
+		fmt.Println(keyValue(width, "Download dir", displayPath(st.DownloadDir())))
+		fmt.Println(keyValue(width, "Data dir", displayPath(st.DataDir())))
+		fmt.Println(keyValue(width, "State dir", displayPath(st.StateDir())))
+
+		// Wallpaper settings.
+		fmt.Println()
+		fmt.Println("Wallpaper")
+		fmt.Println("─────────")
+		fmt.Println(keyValue(width, "Feed source", feedSourceLabel(cfg)))
+		fmt.Println(keyValue(width, "Rotation", boolLabel(cfg.Wallpaper.RotationEnabled)))
+		fmt.Println(keyValue(width, "Change interval", fmt.Sprintf("%d minutes", cfg.Wallpaper.SetInterval)))
+		fmt.Println(keyValue(width, "Fetch interval", fmt.Sprintf("%d minutes", cfg.Wallpaper.FetchInterval)))
+		fmt.Println(keyValue(width, "Cleanup age", fmt.Sprintf("%d days", cfg.Wallpaper.CleanupDays)))
+		fmt.Println(keyValue(width, "Multi-monitor", boolLabel(cfg.Wallpaper.MultiMonitorEnabled)))
+		fmt.Println(keyValue(width, "Lock screen", boolLabel(cfg.KDE.SetLockScreen)))
+
+		// Current state.
+		fmt.Println()
+		fmt.Println("Current State")
+		fmt.Println("─────────────")
+		fmt.Println(keyValue(width, "Daemon", platformStateLabel()))
+		fmt.Println(keyValue(width, "Pixiv", authStateLabel(st)))
+		fmt.Println(keyValue(width, "Current wallpaper", orNone(history.Current)))
+		fmt.Println(keyValue(width, "Next wallpaper", orNone(nextID)))
+		fmt.Println(keyValue(width, "Last change", lastChangeLabel(history.UpdatedAt)))
+		fmt.Println(keyValue(width, "Next change", nextChangeLabel(cfg, history.UpdatedAt)))
+
+		// Cache.
+		fmt.Println()
+		fmt.Println("Cache")
+		fmt.Println("─────")
+		fmt.Println(keyValue(width, "Wallpapers", cacheCountLabel(stats)))
+		fmt.Println(keyValue(width, "Disk usage", formatBytes(stats.Size)))
+		fmt.Println(keyValue(width, "In queue", queueLen))
+		fmt.Println(keyValue(width, "History entries", historyEntriesLabel(history)))
+		if !stats.Oldest.IsZero() {
+			fmt.Println(keyValue(width, "Oldest image", stats.Oldest.Format(time.DateTime)))
+		}
+		if !stats.Newest.IsZero() {
+			fmt.Println(keyValue(width, "Newest image", stats.Newest.Format(time.DateTime)))
+		}
+
+		// Monitors.
 		screens, err := wallpaper.NewKDESetter(false).Screens()
 		if err != nil {
 			screens = nil
 		}
-
-		fmt.Printf("\n=== Wallpaper History ===\n")
-		fmt.Printf("Total wallpapers: %d\n", totalWallpapers)
-		if cfg.Wallpaper.MultiMonitorEnabled {
-			if monitorHistoryErr == nil {
-				for _, s := range screens {
-					imageID, ok := monitorHistory[s.ID]
-					if !ok {
-						imageID = "none"
-					}
-
-					fmt.Printf("Current [%s]: %s\n", s.ID, imageID)
-				}
-			}
-		} else {
-			fmt.Printf("Current: %s\n", history.Current)
-			if len(history.Images) > 0 {
-				fmt.Printf("Previous: %s\n", history.Images[len(history.Images)-1])
-			} else {
-				fmt.Printf("Previous: none\n")
-			}
-		}
-
-		fmt.Printf("Last updated: %s\n", history.UpdatedAt.Format(time.DateTime))
 		if len(screens) > 0 {
-			fmt.Printf("\n=== Monitors ===\n")
+			fmt.Println()
+			fmt.Println("Monitors")
+			fmt.Println("────────")
 			for _, s := range screens {
 				model := s.Model
 				if model == "" {
 					model = "(unknown)"
 				}
-
-				settings, configured := cfg.Wallpaper.Monitors[s.ID]
 				rotation := "enabled"
-				if configured && !settings.RotationEnabled {
+				if settings, configured := cfg.Wallpaper.Monitors[s.ID]; configured && !settings.RotationEnabled {
 					rotation = "disabled"
 				}
-
-				orientation := settings.Orientation
-				if orientation == "" {
-					orientation = "any"
+				orientation := "any"
+				if settings, configured := cfg.Wallpaper.Monitors[s.ID]; configured && settings.Orientation != "" {
+					orientation = string(settings.Orientation)
 				}
 
-				fmt.Printf("  [%s] %s (%s)\trotation=%s\torientation=%s\n", s.Index, s.ID, model, rotation, orientation)
-			}
-		}
-		fmt.Printf("\n=== Storage ===\n")
-		fmt.Printf("Downloaded images: %d\n", len(metadata))
+				current := ""
+				if monitorHistoryErr == nil {
+					current = monitorHistory[s.ID]
+				}
 
-		q := storage.NewQueue(st.StateDir())
-		if err := q.Load(); err == nil {
-			fmt.Printf("In queue: %d\n", q.Len())
+				fmt.Printf("  [%s] %s (%s)\trotation=%s\torientation=%s\tcurrent=%s\n",
+					s.Index, s.ID, model, rotation, orientation, orNone(current))
+			}
 		}
 
 		log.Debug("Status displayed")
 		return nil
 	},
+}
+
+func feedSourceLabel(cfg *config.Config) string {
+	switch cfg.Wallpaper.QueueSource {
+	case config.QueueSourceBookmarks:
+		return "Bookmarks"
+	case config.QueueSourceAll:
+		return cfg.Pixiv.Ranking.String() + " Ranking + Bookmarks"
+	default:
+		return cfg.Pixiv.Ranking.String() + " Ranking"
+	}
+}
+
+func boolLabel(b bool) string {
+	if b {
+		return "enabled"
+	}
+	return "disabled"
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+func platformStateLabel() string {
+	if platform.IsInstanceRunning() {
+		return "running"
+	}
+	return "not running"
+}
+
+func authStateLabel(st *storage.Storage) string {
+	client, err := pixiv.NewClient(st.StateDir())
+	if err != nil {
+		return "unknown"
+	}
+	if !client.LoggedIn() {
+		return "not connected"
+	}
+	if user := client.AuthUserName(); user != "" {
+		return "connected (" + user + ")"
+	}
+	return "connected"
+}
+
+func cacheCountLabel(stats storage.CacheStats) string {
+	if stats.Count == 0 {
+		return "empty"
+	}
+	return strconv.Itoa(stats.Count)
+}
+
+func historyEntriesLabel(h *storage.History) string {
+	count := len(h.Images)
+	if h.Current != "" {
+		count++
+	}
+	return strconv.Itoa(count)
+}
+
+func lastChangeLabel(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return t.Format(time.DateTime) + " (" + formatDuration(time.Since(t)) + " ago)"
+}
+
+func nextChangeLabel(cfg *config.Config, last time.Time) string {
+	if last.IsZero() {
+		return "not scheduled"
+	}
+	interval := time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
+	remaining := time.Until(last.Add(interval))
+	if remaining <= 0 {
+		return "any moment now"
+	}
+	return "in " + formatDuration(remaining)
 }
 
 func scanDirForImages(dir string, blacklist map[string]struct{}) []string {
@@ -1088,6 +1159,7 @@ func init() {
 
 	configCmd.AddCommand(configShowCmd)
 	configCmd.AddCommand(configSetCmd)
+	configCmd.AddCommand(configResetCmd)
 
 	autostartCmd.AddCommand(autostartEnableCmd)
 	autostartCmd.AddCommand(autostartDisableCmd)
@@ -1100,10 +1172,14 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(monitorsCmd)
 	rootCmd.AddCommand(statusCmd)
-
+	rootCmd.AddCommand(versionCmd)
+	rootCmd.AddCommand(doctorCmd)
 }
 
 func main() {
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

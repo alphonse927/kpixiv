@@ -69,6 +69,14 @@ func IsServiceEnabled(service string) (bool, error) {
 	return output == "enabled", nil
 }
 
+// IsServiceActive reports whether the given systemd user service is currently
+// active. It returns false when systemd reports an unknown/not-found state.
+func IsServiceActive(service string) bool {
+	//nolint:gosec // service name is controlled by the application, not user input
+	out, err := exec.Command("systemctl", "--user", "is-active", service).Output()
+	return err == nil && strings.TrimSpace(string(out)) == "active"
+}
+
 func EnableService(service string) error {
 	if err := InstallServiceUnit(); err != nil {
 		return err

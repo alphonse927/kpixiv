@@ -47,3 +47,19 @@ func TryAcquire() (net.Listener, error) {
 
 	return listener, nil
 }
+
+// IsInstanceRunning reports whether another kPixiv instance is currently
+// holding the single-instance socket.
+func IsInstanceRunning() bool {
+	path, err := instanceSocketPath()
+	if err != nil {
+		return false
+	}
+
+	conn, err := net.Dial("unix", path)
+	if err != nil {
+		return false
+	}
+	conn.Close() //nolint:errcheck,gosec // best-effort cleanup
+	return true
+}

@@ -17,9 +17,11 @@ QT6_BIN        = /usr/lib/qt6/bin
 XDG_ENV        = PATH="$(PATH):$(QT6_BIN)"
 
 VERSION       ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+DATE          ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 PKG            = github.com/alphonse927/kpixiv/internal/build
-LDFLAGS        = -ldflags "-X $(PKG).Version=$(VERSION)"
-DIST_LDFLAGS   = -ldflags "-X $(PKG).Version=$(VERSION) -s -w"
+LDFLAGS        = -ldflags "-X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)"
+DIST_LDFLAGS   = -ldflags "-X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE) -s -w"
 
 help:
 	@echo 'Usage: make <target>'

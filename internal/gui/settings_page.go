@@ -93,6 +93,12 @@ func (ui *settingsUI) buildSettingsPage() fyne.CanvasObject {
 		),
 		container.NewPadded(
 			container.NewVBox(
+				section("Notifications"),
+				ui.notificationsEnabled,
+			),
+		),
+		container.NewPadded(
+			container.NewVBox(
 				section("Logging"),
 				field("Log Level", ui.logLevel),
 			),

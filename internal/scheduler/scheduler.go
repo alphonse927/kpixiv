@@ -14,6 +14,7 @@ import (
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/fetcher"
 	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
@@ -205,6 +206,11 @@ func (sch *Scheduler) fetchImages(ctx context.Context, cname string) error {
 
 	sch.page = result.NextPage
 	log.Debug("Advanced ranking page", "nextPage", sch.page, "downloaded", result.Downloaded, "filtered", result.Filtered)
+	if result.Downloaded > 0 {
+		notify.SendDefault("KPixiv", fmt.Sprintf("Downloaded %d new wallpaper%s.", result.Downloaded, pluralize(result.Downloaded)))
+	} else if result.Failed > 0 {
+		notify.SendDefault("KPixiv", fmt.Sprintf("Wallpaper fetch had %d failure%s.", result.Failed, pluralize(result.Failed)))
+	}
 	return nil
 }
 
@@ -240,10 +246,16 @@ func (sch *Scheduler) syncBookmarks(ctx context.Context, cname string) error {
 	result, err := syncer.Sync(ctx)
 	if err != nil {
 		log.Error("Bookmark sync failed", "error", err)
+		if errors.Is(err, pixiv.ErrAuthSessionInvalid) {
+			notify.SendDefault("KPixiv", "Pixiv login expired. Run 'kpixivctl account login' to reconnect.")
+		}
 		return err
 	}
 
 	log.Debug("Bookmark sync complete", "downloaded", result.Downloaded, "deleted", result.Deleted)
+	if result.Downloaded > 0 || result.Deleted > 0 {
+		notify.SendDefault("KPixiv", fmt.Sprintf("Bookmark sync: downloaded %d, removed %d.", result.Downloaded, result.Deleted))
+	}
 	return nil
 }
 
@@ -404,6 +416,7 @@ func (sch *Scheduler) ApplyConfig(cfg *config.Config) {
 	sch.setInterval = time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
 	sch.fetchInterval = time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute
 	sch.bookmarkSyncInterval = time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute
+	notify.SetEnabled(cfg.Notifications.Enabled)
 	running := sch.running
 	sch.mu.Unlock()
 
@@ -602,6 +615,13 @@ func (sch *Scheduler) setNextWallpaper(q *storage.Queue, screenID, screenIndex, 
 	}
 
 	return nil
+}
+
+func pluralize(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 func (sch *Scheduler) applyWallpaperSet(screenIndex, path string) error {
