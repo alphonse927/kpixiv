@@ -35,13 +35,23 @@ type AppController interface {
 	SchedulerRunning() bool
 	CurrentWallpaper() (*storage.ImageMeta, error)
 	CachedCount() int
+	CacheStats() (storage.CacheStats, error)
+	HistoryCount() int
+	NextWallpaperID() string
+	WallpaperMeta(id string) (*storage.ImageMeta, error)
 	LastRotation() time.Time
 	ServiceEnabled() (bool, error)
 	EnableService() error
 	DisableService() error
 	ThumbnailPath(id string) string
+	EnsureThumbnail(id string) string
 	Monitors() ([]wallpaper.Screen, error)
 	MonitorWallpapers() (map[string]*storage.ImageMeta, error)
+	MonitorNextWallpapers() map[string]string
+	ConfigPath() string
+	DataDir() string
+	StateDir() string
+	DownloadDir() string
 }
 
 var (

@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,21 @@ const (
 	pixivAuthUserAgent   = "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)"
 	pixivClientHashSalt  = "28c1fdd170a5204386cb1313c7077b34f83e4aaf4aa829ce78c231e05b0bae2c"
 )
+
+// ErrAuthSessionInvalid reports that the persisted Pixiv session can no
+// longer be refreshed and must be recreated by logging in again.
+var ErrAuthSessionInvalid = errors.New("pixiv session is invalid or expired")
+
+// authError carries the HTTP status of a failed token exchange so callers can
+// distinguish rejected sessions from transient network problems.
+type authError struct {
+	status int
+	body   string
+}
+
+func (e *authError) Error() string {
+	return fmt.Sprintf("pixiv auth failed: status %d: %s", e.status, e.body)
+}
 
 type AuthState struct {
 	AccessToken  string    `json:"access_token"`
@@ -75,6 +91,20 @@ func (c *Client) AuthUserName() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.auth.UserName
+}
+
+// AuthExpiry returns when the current access token expires. A zero time
+// means no session exists or the expiry is unknown.
+func (c *Client) AuthExpiry() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.auth.RefreshToken == "" {
+		return time.Time{}
+	}
+	if c.auth.ExpiresAt.IsZero() {
+		return time.Time{}
+	}
+	return c.auth.ExpiresAt
 }
 
 // AuthUserID returns the logged-in user's Pixiv user ID.
@@ -222,6 +252,15 @@ func (c *Client) ensureAccessToken(ctx context.Context) (string, error) {
 		"refresh_token":  {refreshToken},
 	})
 	if err != nil {
+		// A 400 from the token endpoint means the refresh token itself was
+		// rejected (invalid_grant): the session is dead. Clear it so the app
+		// stops treating the account as connected, and surface a distinct
+		// error so callers can prompt for a new login.
+		var authErr *authError
+		if errors.As(err, &authErr) && authErr.status == http.StatusBadRequest {
+			_ = c.Logout() //nolint:errcheck // best-effort cleanup of an invalid session
+			return "", ErrAuthSessionInvalid
+		}
 		return "", err
 	}
 
@@ -272,7 +311,7 @@ func (c *Client) exchangeToken(ctx context.Context, form url.Values) (*authToken
 	logger.WithComponent("pixiv").Debug("token response", "status", resp.StatusCode, "body", string(body))
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("pixiv auth failed: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &authError{status: resp.StatusCode, body: strings.TrimSpace(string(body))}
 	}
 
 	var token authTokenResponse

@@ -9,42 +9,134 @@ import (
 	"github.com/alphonse927/kpixiv/internal/sets"
 )
 
-func (s *Storage) CleanupImagesOlderThanDays(days int) (int, error) {
+// CleanupResult reports what a cleanup pass removed.
+type CleanupResult struct {
+	Removed    int   // number of image files deleted
+	FreedBytes int64 // total bytes freed
+}
+
+// CleanupImagesOlderThanDays removes cached wallpapers older than the given
+// number of days. A non-positive value removes everything. Bookmarked images
+// are never removed. The returned result reports how many files were deleted
+// and how much disk space was freed.
+func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 	images, err := s.LoadMetadata()
 	if err != nil {
-		return 0, err
+		return CleanupResult{}, err
 	}
 
 	cutoff, removeAll := cleanupCutoff(days)
-	removedIDs, removedFiles, removedFromMetadata, mrErr := s.cleanupMetadata(images, cutoff, removeAll)
+	removedIDs, removedFiles, metaRemoved, metaFreed, mrErr := s.cleanupMetadata(images, cutoff, removeAll)
 	if mrErr != nil {
-		return 0, mrErr
+		return CleanupResult{}, mrErr
 	}
 
 	if err = s.SaveMetadata(images); err != nil {
-		return 0, err
+		return CleanupResult{}, err
 	}
 
-	removedFromRanking, crErr := s.cleanupRankingFiles(cutoff, removeAll, removedFiles)
+	fileRemoved, fileFreed, crErr := s.cleanupRankingFiles(cutoff, removeAll, removedFiles)
 	if crErr != nil {
-		return 0, crErr
+		return CleanupResult{}, crErr
 	}
 
 	if err = s.cleanupHistory(removedIDs); err != nil {
-		return 0, err
+		return CleanupResult{}, err
 	}
 
 	if err = s.cleanupQueue(removedIDs); err != nil {
-		return removedFromMetadata + removedFromRanking, err
+		return CleanupResult{Removed: metaRemoved + fileRemoved, FreedBytes: metaFreed + fileFreed}, err
 	}
 
-	return removedFromMetadata + removedFromRanking, nil
+	thumbRemoved, thumbFreed, thErr := s.cleanupThumbnails(removedIDs, removeAll)
+	if thErr != nil {
+		return CleanupResult{Removed: metaRemoved + fileRemoved, FreedBytes: metaFreed + fileFreed}, thErr
+	}
+
+	return CleanupResult{Removed: metaRemoved + fileRemoved + thumbRemoved, FreedBytes: metaFreed + fileFreed + thumbFreed}, nil
 }
 
-func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time, removeAll bool) (sets.Set[string], sets.Set[string], int, error) {
+// cleanupThumbnails removes cached thumbnails. When removeAll is true, the
+// entire thumbnail directory is cleared; otherwise, only thumbnails whose
+// artwork was removed are deleted.
+func (s *Storage) cleanupThumbnails(removedIDs sets.Set[string], removeAll bool) (int, int64, error) {
+	targets, err := s.cleanupThumbnailTargets(removedIDs, removeAll)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	var removedCount int
+	var freedBytes int64
+	for _, path := range targets {
+		size, removed, err := removeThumbnail(path)
+		if err != nil {
+			return removedCount, freedBytes, err
+		}
+		if removed {
+			freedBytes += size
+			removedCount++
+		}
+	}
+
+	return removedCount, freedBytes, nil
+}
+
+// cleanupThumbnailTargets resolves the list of thumbnail paths to remove,
+// either the full thumbnail directory or the thumbnails for removed IDs.
+func (s *Storage) cleanupThumbnailTargets(removedIDs sets.Set[string], removeAll bool) ([]string, error) {
+	if !removeAll {
+		targets := make([]string, 0, len(removedIDs))
+		for id := range removedIDs {
+			targets = append(targets, s.ThumbnailPath(id))
+		}
+
+		return targets, nil
+	}
+
+	entries, err := os.ReadDir(s.ThumbnailDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+
+		return nil, fmt.Errorf("failed to read thumbnail directory: %w", err)
+	}
+
+	targets := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		targets = append(targets, filepath.Join(s.ThumbnailDir(), entry.Name()))
+	}
+
+	return targets, nil
+}
+
+// removeThumbnail deletes a single thumbnail file, reporting its size.
+func removeThumbnail(path string) (int64, bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, nil
+		}
+
+		return 0, false, err
+	}
+
+	if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
+		return 0, false, rmErr
+	}
+
+	return info.Size(), true, nil
+}
+
+func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time, removeAll bool) (sets.Set[string], sets.Set[string], int, int64, error) {
 	removedIDs := sets.New[string]()
 	removedFiles := sets.New[string]()
 	removedCount := 0
+	var freedBytes int64
 
 	for id, meta := range images {
 		if meta.Source == "bookmarks" {
@@ -56,8 +148,11 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 		}
 
 		if meta.Path != "" {
+			if info, rmErr := os.Stat(meta.Path); rmErr == nil {
+				freedBytes += info.Size()
+			}
 			if rmErr := os.Remove(meta.Path); rmErr != nil && !os.IsNotExist(rmErr) {
-				return nil, nil, removedCount, fmt.Errorf("failed to remove image file %s: %w", meta.Path, rmErr)
+				return nil, nil, removedCount, freedBytes, fmt.Errorf("failed to remove image file %s: %w", meta.Path, rmErr)
 			}
 			removedFiles.Add(meta.Path)
 		}
@@ -67,16 +162,17 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 		removedCount++
 	}
 
-	return removedIDs, removedFiles, removedCount, nil
+	return removedIDs, removedFiles, removedCount, freedBytes, nil
 }
 
-func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles sets.Set[string]) (int, error) {
+func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles sets.Set[string]) (int, int64, error) {
 	rankingEntries, readErr := os.ReadDir(s.RankingDir())
 	if readErr != nil {
-		return 0, fmt.Errorf("failed to read ranking directory: %w", readErr)
+		return 0, 0, fmt.Errorf("failed to read ranking directory: %w", readErr)
 	}
 
 	removedCount := 0
+	var freedBytes int64
 	for _, entry := range rankingEntries {
 		if entry.IsDir() {
 			continue
@@ -97,13 +193,14 @@ func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedF
 		}
 
 		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
-			return removedCount, fmt.Errorf("failed to remove ranking image %s: %w", path, rmErr)
+			return removedCount, freedBytes, fmt.Errorf("failed to remove ranking image %s: %w", path, rmErr)
 		}
 
+		freedBytes += info.Size()
 		removedCount++
 	}
 
-	return removedCount, nil
+	return removedCount, freedBytes, nil
 }
 
 func (s *Storage) cleanupHistory(removedIDs sets.Set[string]) error {

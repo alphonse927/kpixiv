@@ -41,12 +41,15 @@ func TestCleanupImagesOlderThanDays(t *testing.T) {
 		t.Fatalf("SaveHistory() returned error: %v", err)
 	}
 
-	removed, err := s.CleanupImagesOlderThanDays(7)
+	result, err := s.CleanupImagesOlderThanDays(7)
 	if err != nil {
 		t.Fatalf("CleanupImagesOlderThanDays() returned error: %v", err)
 	}
-	if removed < 1 {
-		t.Fatalf("expected at least one removed image, got %d", removed)
+	if result.Removed < 1 {
+		t.Fatalf("expected at least one removed image, got %d", result.Removed)
+	}
+	if result.FreedBytes < 3 {
+		t.Fatalf("expected freed bytes for the removed image, got %d", result.FreedBytes)
 	}
 
 	if _, statErr := os.Stat(oldPath); !os.IsNotExist(statErr) {
@@ -86,12 +89,12 @@ func TestCleanupImagesOlderThanDaysResetRemovesAll(t *testing.T) {
 		t.Fatalf("SaveMetadata() returned error: %v", err)
 	}
 
-	removed, err := s.CleanupImagesOlderThanDays(0)
+	result, err := s.CleanupImagesOlderThanDays(0)
 	if err != nil {
 		t.Fatalf("CleanupImagesOlderThanDays(0) returned error: %v", err)
 	}
-	if removed < 1 {
-		t.Fatalf("expected all images to be removed, got %d", removed)
+	if result.Removed < 1 {
+		t.Fatalf("expected all images to be removed, got %d", result.Removed)
 	}
 
 	if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {

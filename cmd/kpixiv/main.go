@@ -81,14 +81,19 @@ var rootCmd = &cobra.Command{
 	Short:   "KPixiv - Pixiv wallpaper manager for KDE Plasma",
 	Long:    `KPixiv fetches wallpapers from Pixiv and sets them as your KDE Plasma desktop wallpaper.`,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		logger.Init(verbose)
+
 		var err error
 		cfg, err = config.Load(cfgPath)
 		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
+			return fmt.Errorf("could not load configuration:\n  %w", err)
 		}
 
-		cfg.Validate()
-		logger.Init(verbose)
+		issues := cfg.Validate()
+		for _, issue := range issues {
+			logger.WithComponent("config").Warn("Configuration adjusted", "detail", issue)
+		}
+
 		if !verbose {
 			logger.SetLevel(cfg.LogLevel)
 		}

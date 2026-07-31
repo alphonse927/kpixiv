@@ -159,7 +159,7 @@ func (c *Client) FetchRanking(ctx context.Context, rankingMode string, page int,
 	}
 
 	log := logger.WithComponent("pixiv")
-	log.Info("Fetching ranking", "page", page, "mode", mode, "r18", r18)
+	log.Debug("Fetching ranking", "page", page, "mode", mode, "r18", r18)
 
 	targetURL := fmt.Sprintf("%s?format=json&mode=%s&content=illust&p=%d", pixivRankingURL, mode, page)
 	log.Debug("Request URL", "url", targetURL)

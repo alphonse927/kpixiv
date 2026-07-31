@@ -34,6 +34,9 @@ func TestMonitorHistoryRoundTrip(t *testing.T) {
 	if mainHistory.Monitors["1"] != "wallpaper-a" {
 		t.Fatalf("monitor history was not stored in history.json: %#v", mainHistory.Monitors)
 	}
+	if mainHistory.Current != "" {
+		t.Errorf("AddToMonitorHistory() must not update the global current: got %q, want empty", mainHistory.Current)
+	}
 }
 
 func TestLoadHistoryEmpty(t *testing.T) {
