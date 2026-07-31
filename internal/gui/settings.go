@@ -40,6 +40,12 @@ const (
 	rankingSubMonthly = "Monthly"
 )
 
+var orientationLabels = []string{
+	config.WallpaperAnyOrientation.Label(),
+	config.WallpaperLandscapeOrientation.Label(),
+	config.WallpaperPortraitOrientation.Label(),
+}
+
 type numericalEntry struct {
 	widget.Entry
 }
@@ -103,22 +109,23 @@ type settingsUI struct {
 	currentPage   int
 	statusRefresh chan struct{}
 
-	downloadPath        *widget.Entry
-	setInterval         *numericalEntry
-	fetchInterval       *numericalEntry
-	historyLimit        *numericalEntry
-	cleanupDays         *numericalEntry
-	feedSource          *widget.Select
-	rankingSub          *widget.Select
-	rotationEnabled     *widget.Check
-	fetchEnabled        *widget.Check
-	minWidth            *numericalEntry
-	minHeight           *numericalEntry
-	lockScreen          *widget.Check
-	multiMonitor        *widget.Check
-	monitorSettings     *fyne.Container
-	monitorChecks       map[string]*widget.Check
-	monitorOrientations map[string]*widget.Select
+	downloadPath         *widget.Entry
+	setInterval          *numericalEntry
+	fetchInterval        *numericalEntry
+	historyLimit         *numericalEntry
+	cleanupDays          *numericalEntry
+	feedSource           *widget.Select
+	rankingSub           *widget.Select
+	rotationEnabled      *widget.Check
+	fetchEnabled         *widget.Check
+	wallpaperOrientation *widget.Select
+	minWidth             *numericalEntry
+	minHeight            *numericalEntry
+	lockScreen           *widget.Check
+	multiMonitor         *widget.Check
+	monitorSettings      *fyne.Container
+	monitorChecks        map[string]*widget.Check
+	monitorOrientations  map[string]*widget.Select
 
 	logLevel *widget.Select
 
@@ -213,6 +220,8 @@ func (ui *settingsUI) createWidgets() {
 
 	ui.fetchEnabled = widget.NewCheck("Enable Ranking Fetch", nil)
 	ui.fetchEnabled.SetChecked(cfg.Wallpaper.FetchEnabled)
+
+	ui.createWallpaperOrientationWidget(cfg)
 
 	ui.rankingSub = widget.NewSelect([]string{rankingSubDaily, rankingSubWeekly, rankingSubMonthly}, nil)
 	ui.rankingSub.SetSelected(rankingSubDisplay(cfg.Pixiv.Ranking))
@@ -335,6 +344,11 @@ func (ui *settingsUI) newLogoutButton() *widget.Button {
 		}
 		ui.rebuildAccountPage()
 	})
+}
+
+func (ui *settingsUI) createWallpaperOrientationWidget(cfg *config.Config) {
+	ui.wallpaperOrientation = widget.NewSelect(orientationLabels, nil)
+	ui.wallpaperOrientation.SetSelected(orientationDisplay(cfg.Wallpaper.Orientation))
 }
 
 func (ui *settingsUI) createMonitorWidgets() {
@@ -486,6 +500,7 @@ func (ui *settingsUI) update() {
 	}
 	ui.rotationEnabled.SetChecked(cfg.Wallpaper.RotationEnabled)
 	ui.fetchEnabled.SetChecked(cfg.Wallpaper.FetchEnabled)
+	ui.wallpaperOrientation.SetSelected(orientationDisplay(cfg.Wallpaper.Orientation))
 	ui.minWidth.SetText(strconv.Itoa(cfg.Pixiv.MinWidth))
 	ui.minHeight.SetText(strconv.Itoa(cfg.Pixiv.MinHeight))
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
@@ -530,6 +545,7 @@ func (ui *settingsUI) applySettings() {
 
 	cfg.Wallpaper.RotationEnabled = ui.rotationEnabled.Checked
 	cfg.Wallpaper.FetchEnabled = ui.fetchEnabled.Checked
+	cfg.Wallpaper.Orientation = orientationValue(ui.wallpaperOrientation.Selected)
 
 	if v, err := strconv.Atoi(ui.minWidth.Text); err == nil {
 		cfg.Pixiv.MinWidth = v
@@ -657,7 +673,7 @@ func (ui *settingsUI) refreshMonitorSettings() {
 			}
 		}
 		check.SetChecked(enabled)
-		orientation := widget.NewSelect([]string{"Any", "Landscape", "Portrait"}, nil)
+		orientation := widget.NewSelect(orientationLabels, nil)
 		selectedOrientation := settings.Orientation
 		if selectedOrientation == "" || selectedOrientation == config.WallpaperAnyOrientation {
 			selectedOrientation = config.WallpaperAnyOrientation
@@ -672,6 +688,14 @@ func (ui *settingsUI) refreshMonitorSettings() {
 }
 
 func (ui *settingsUI) setMonitorControlsEnabled(enabled bool) {
+	if ui.wallpaperOrientation != nil {
+		if enabled {
+			ui.wallpaperOrientation.Disable()
+		} else {
+			ui.wallpaperOrientation.Enable()
+		}
+	}
+
 	for _, check := range ui.monitorChecks {
 		if enabled {
 			check.Enable()
@@ -689,21 +713,14 @@ func (ui *settingsUI) setMonitorControlsEnabled(enabled bool) {
 }
 
 func orientationDisplay(orientation config.WallpaperOrientation) string {
-	switch orientation {
-	case config.WallpaperLandscapeOrientation:
-		return "Landscape"
-	case config.WallpaperPortraitOrientation:
-		return "Portrait"
-	default:
-		return "Any"
-	}
+	return orientation.Label()
 }
 
 func orientationValue(display string) config.WallpaperOrientation {
 	switch display {
-	case "Landscape":
+	case config.WallpaperLandscapeOrientation.Label():
 		return config.WallpaperLandscapeOrientation
-	case "Portrait":
+	case config.WallpaperPortraitOrientation.Label():
 		return config.WallpaperPortraitOrientation
 	default:
 		return config.WallpaperAnyOrientation

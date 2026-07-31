@@ -40,6 +40,9 @@ func testFetcherConfig() *config.Config {
 			MinHeight: 720,
 			Ranking:   config.RankingDailyMode,
 		},
+		Wallpaper: config.WallpaperConfig{
+			Orientation: config.WallpaperAnyOrientation,
+		},
 	}
 }
 
@@ -83,7 +86,6 @@ func TestDownloadAndSaveSkipsMissingOutputFiles(t *testing.T) {
 
 func TestFilterImagesAllowsPortraitForPortraitMonitor(t *testing.T) {
 	cfg := testFetcherConfig()
-	cfg.Pixiv.LandscapeOnly = true
 	cfg.Wallpaper.MultiMonitorEnabled = true
 	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{
 		"0": {Orientation: config.WallpaperPortraitOrientation},
@@ -101,7 +103,6 @@ func TestFilterImagesAllowsPortraitForPortraitMonitor(t *testing.T) {
 
 func TestFilterImagesAllowsPortraitForAnyMonitor(t *testing.T) {
 	cfg := testFetcherConfig()
-	cfg.Pixiv.LandscapeOnly = true
 	cfg.Wallpaper.MultiMonitorEnabled = true
 	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{
 		"0": {Orientation: config.WallpaperAnyOrientation},
@@ -114,5 +115,22 @@ func TestFilterImagesAllowsPortraitForAnyMonitor(t *testing.T) {
 	}, map[string]struct{}{})
 	if len(images) != 2 {
 		t.Fatalf("filterImages() returned %d images, want both orientations", len(images))
+	}
+}
+
+func TestFilterImagesSingleMonitorUsesWallpaperOrientation(t *testing.T) {
+	cfg := testFetcherConfig()
+	cfg.Wallpaper.Orientation = config.WallpaperPortraitOrientation
+	f := NewFetcher(cfg, testFetcherStorage(t), &mockImageClient{})
+
+	images := f.filterImages([]pixiv.Image{
+		{ID: "portrait", Width: 1280, Height: 2000},
+		{ID: "landscape", Width: 2000, Height: 1280},
+	}, map[string]struct{}{})
+	if len(images) != 1 {
+		t.Fatalf("filterImages() returned %d images, want 1 portrait image", len(images))
+	}
+	if images[0].ID != "portrait" {
+		t.Fatalf("filterImages() returned %q, want portrait", images[0].ID)
 	}
 }

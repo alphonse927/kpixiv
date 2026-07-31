@@ -25,6 +25,7 @@ func (w WallpaperMode) String() string {
 type WallpaperConfig struct {
 	Mode                WallpaperMode            `yaml:"mode"`
 	QueueSource         QueueSource              `yaml:"queue_source"`
+	Orientation         WallpaperOrientation     `yaml:"orientation"`
 	RotationEnabled     bool                     `yaml:"rotation_enabled"`
 	FetchEnabled        bool                     `yaml:"fetch_enabled"`
 	HistoryLimit        int                      `yaml:"history_limit"`
@@ -48,6 +49,31 @@ func (o WallpaperOrientation) String() string {
 		return string(WallpaperAnyOrientation)
 	}
 	return string(o)
+}
+
+// Label returns a human-readable orientation name for UI elements.
+func (o WallpaperOrientation) Label() string {
+	switch o {
+	case WallpaperLandscapeOrientation:
+		return "Landscape"
+	case WallpaperPortraitOrientation:
+		return "Portrait"
+	default:
+		return "Any"
+	}
+}
+
+// Matches reports whether image dimensions fit this orientation. Any (or
+// unknown) dimensions always match.
+func (o WallpaperOrientation) Matches(width, height int) bool {
+	switch o {
+	case WallpaperLandscapeOrientation:
+		return width >= height
+	case WallpaperPortraitOrientation:
+		return height > width
+	default:
+		return true
+	}
 }
 
 // MonitorConfig controls rotation for a configured Plasma screen. An absent

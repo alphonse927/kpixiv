@@ -770,7 +770,7 @@ Supported keys:
   pixiv.ranking               (int: 0=daily, 1=weekly, 2=monthly)
   pixiv.min_width             (int, minimum 1280)
   pixiv.min_height            (int, minimum 720)
-  pixiv.landscape_only        (bool)
+  wallpaper.orientation       (string: any/landscape/portrait)
   wallpaper.set_interval      (int, minutes, minimum 5)
   wallpaper.fetch_interval    (int, minutes, minimum 30)
   wallpaper.history_limit     (int, minimum 1)
@@ -865,7 +865,7 @@ var monitorsCmd = &cobra.Command{
 				name = "Screen " + screen.ID
 			}
 
-			orientation := "any"
+			orientation := config.WallpaperAnyOrientation.String()
 			if settings, ok := cfg.Wallpaper.Monitors[screen.ID]; ok && settings.Orientation != "" {
 				orientation = string(settings.Orientation)
 			}
@@ -993,7 +993,7 @@ var statusCmd = &cobra.Command{
 				if settings, configured := cfg.Wallpaper.Monitors[s.ID]; configured && !settings.RotationEnabled {
 					rotation = "disabled"
 				}
-				orientation := "any"
+				orientation := config.WallpaperAnyOrientation.String()
 				if settings, configured := cfg.Wallpaper.Monitors[s.ID]; configured && settings.Orientation != "" {
 					orientation = string(settings.Orientation)
 				}
