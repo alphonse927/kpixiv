@@ -795,17 +795,11 @@ func selectTargetWallpaperIDForOrientation(images map[string]*storage.ImageMeta,
 }
 
 func matchesOrientation(meta *storage.ImageMeta, orientation config.WallpaperOrientation) bool {
-	if orientation == "" || orientation == config.WallpaperAnyOrientation || meta == nil || meta.Width <= 0 || meta.Height <= 0 {
-		return orientation == "" || orientation == config.WallpaperAnyOrientation
+	if meta == nil || meta.Width <= 0 || meta.Height <= 0 {
+		return orientation == config.WallpaperAnyOrientation || orientation == ""
 	}
-	switch orientation {
-	case config.WallpaperLandscapeOrientation:
-		return meta.Width >= meta.Height
-	case config.WallpaperPortraitOrientation:
-		return meta.Height > meta.Width
-	default:
-		return true
-	}
+
+	return orientation.Matches(meta.Width, meta.Height)
 }
 
 func wallpaperAvailable(images map[string]*storage.ImageMeta, blacklist map[string]struct{}, id string) bool {
@@ -855,7 +849,13 @@ func (sch *Scheduler) rotateWallpaper(cname string) error {
 	return nil
 }
 
+// monitorOrientation returns the orientation filter for a rotation. The
+// shared queue (single-monitor mode) uses the global wallpaper orientation;
+// per-screen rotations use each monitor's own orientation setting.
 func (sch *Scheduler) monitorOrientation(screenID string) config.WallpaperOrientation {
+	if screenID == "" {
+		return sch.cfg.Wallpaper.Orientation
+	}
 	if settings, ok := sch.cfg.Wallpaper.Monitors[screenID]; ok && settings.Orientation != "" {
 		return settings.Orientation
 	}

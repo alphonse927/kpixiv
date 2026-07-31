@@ -122,7 +122,7 @@ Supported config keys for `set`:
 | `pixiv.ranking`                   | int  | 0=daily, 1=weekly, 2=monthly              |
 | `pixiv.min_width`                 | int  | Minimum image width (min 1280)            |
 | `pixiv.min_height`                | int  | Minimum image height (min 720)            |
-| `pixiv.landscape_only`            | bool | Only download landscape images            |
+| `wallpaper.orientation`           | enum | `any`, `landscape`, or `portrait`         |
 | `wallpaper.set_interval`          | int  | Minutes between wallpaper changes (min 5) |
 | `wallpaper.fetch_interval`        | int  | Minutes between fetch cycles (min 30)     |
 | `wallpaper.history_limit`         | int  | Max wallpapers in history (min 1)         |
