@@ -168,8 +168,10 @@ func parseKScreenOutputsFull(output string) []KScreenOutputInfo {
 		case trimmed == "disabled":
 			cur.Enabled = false
 			flushCur()
-		case strings.HasPrefix(strings.ToLower(trimmed), "priority:"):
-			prioStr := strings.TrimSpace(trimmed[9:])
+		case strings.HasPrefix(strings.ToLower(trimmed), "priority"):
+			// kscreen-doctor prints "priority 1" (space separator) on some
+			// versions and "priority: 1" on others — accept both.
+			prioStr := strings.TrimLeft(strings.TrimPrefix(strings.ToLower(trimmed), "priority"), ": ")
 			prio := atoiDefault(prioStr, 0)
 			cur.Primary = prio == 1
 		case strings.HasPrefix(strings.ToLower(trimmed), "geometry:"):

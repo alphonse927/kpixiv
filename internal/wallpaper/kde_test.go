@@ -105,6 +105,37 @@ func TestParseKScreenOutputsFullUnorderedIDs(t *testing.T) {
 	}
 }
 
+func TestParseKScreenOutputsFullPrioritySpaceFormat(t *testing.T) {
+	// Some kscreen-doctor versions print "priority 1" (space, no colon)
+	// instead of "priority: 1". The primary flag must be detected either way.
+	output := "Output: 1 DP-1 uuid\n\tenabled\n\tpriority 1\n\tgeometry: 0,0 2560x1440\nOutput: 2 DP-2 uuid\n\tenabled\n\tpriority 2\n\tgeometry: 2560,0 1920x1080\n"
+	outputs := parseKScreenOutputsFull(output)
+	if len(outputs) != 2 {
+		t.Fatalf("expected 2 outputs, got %d", len(outputs))
+	}
+
+	if !outputs[0].Primary {
+		t.Fatalf("output 0 should be primary: %#v", outputs[0])
+	}
+
+	if outputs[1].Primary {
+		t.Fatalf("output 1 should not be primary: %#v", outputs[1])
+	}
+}
+
+func TestParseKScreenOutputsFullPriorityColonFormat(t *testing.T) {
+	// Older kscreen-doctor versions print "priority: 1".
+	output := "Output: 1 DP-1 uuid\n\tenabled\n\tpriority: 1\n\tgeometry: 0,0 2560x1440\n"
+	outputs := parseKScreenOutputsFull(output)
+	if len(outputs) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(outputs))
+	}
+
+	if !outputs[0].Primary {
+		t.Fatalf("output 0 should be primary: %#v", outputs[0])
+	}
+}
+
 func TestParseKScreenOutputsFullDisabled(t *testing.T) {
 	output := "Output: 1 DP-1 uuid\n\tenabled\n\tgeometry: 0,0 1920x1080\nOutput: 2 eDP-1 uuid\n\tdisabled\n\tgeometry: 1920,0 2560x1440\nOutput: 3 DP-2 uuid\n\tenabled\n\tgeometry: 1920,0 2560x1440\n"
 	outputs := parseKScreenOutputsFull(output)
