@@ -13,6 +13,21 @@ type Screen struct {
 	Primary bool // true if this is the primary (main) display
 }
 
+// Label returns a human-readable display name for the screen, e.g. "DP-2 (Model)".
+// It falls back to "Screen " + ID when no display name is known.
+func (s Screen) Label() string {
+	name := s.Name
+	if name == "" {
+		name = "Screen " + s.ID
+	}
+
+	if s.Model != "" {
+		name = name + " (" + s.Model + ")"
+	}
+
+	return name
+}
+
 type Setter interface {
 	Set(path string) error
 }

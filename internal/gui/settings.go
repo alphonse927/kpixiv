@@ -635,6 +635,7 @@ func (ui *settingsUI) refreshMonitorSettings() {
 	if ui.monitorSettings == nil {
 		return
 	}
+
 	ui.monitorSettings.Objects = nil
 	ui.monitorChecks = make(map[string]*widget.Check)
 	ui.monitorOrientations = make(map[string]*widget.Select)
@@ -644,6 +645,7 @@ func (ui *settingsUI) refreshMonitorSettings() {
 		ui.monitorSettings.Refresh()
 		return
 	}
+
 	cfg := ui.ctrl.Config()
 	for _, screen := range screens {
 		settings, configured := cfg.Wallpaper.Monitors[screen.ID]
@@ -651,14 +653,8 @@ func (ui *settingsUI) refreshMonitorSettings() {
 		if configured {
 			enabled = settings.RotationEnabled
 		}
-		name := screen.Name
-		if name == "" {
-			name = "Screen " + screen.ID
-		}
-		if screen.Model != "" {
-			name = name + " (" + screen.Model + ")"
-		}
-		check := widget.NewCheck(name, nil)
+
+		check := widget.NewCheck(screen.Label(), nil)
 		check.OnChanged = func(checked bool) {
 			if !checked {
 				active := 0
@@ -672,17 +668,20 @@ func (ui *settingsUI) refreshMonitorSettings() {
 				}
 			}
 		}
+
 		check.SetChecked(enabled)
 		orientation := widget.NewSelect(orientationLabels, nil)
 		selectedOrientation := settings.Orientation
 		if selectedOrientation == "" || selectedOrientation == config.WallpaperAnyOrientation {
 			selectedOrientation = config.WallpaperAnyOrientation
 		}
+
 		orientation.SetSelected(orientationDisplay(selectedOrientation))
 		ui.monitorChecks[screen.ID] = check
 		ui.monitorOrientations[screen.ID] = orientation
 		ui.monitorSettings.Add(container.NewGridWithColumns(2, check, orientation))
 	}
+
 	ui.monitorSettings.Refresh()
 	ui.setMonitorControlsEnabled(ui.multiMonitor.Checked)
 }
