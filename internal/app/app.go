@@ -520,19 +520,28 @@ func (c *Controller) BookmarkCurrentArtwork() error {
 	return c.BookmarkWallpaper(currentID)
 }
 
-// IsArtworkBookmarked returns whether the current artwork has been locally bookmarked.
-func (c *Controller) IsArtworkBookmarked() bool {
-	currentID, err := c.st.GetCurrentWallpaper()
-	if err != nil || currentID == "" {
+// IsWallpaperBookmarked returns whether the given artwork has been locally bookmarked.
+func (c *Controller) IsWallpaperBookmarked(artworkID string) bool {
+	if artworkID == "" {
 		return false
 	}
 
-	ok, err := c.st.IsArtworkBookmarked(currentID)
+	ok, err := c.st.IsArtworkBookmarked(artworkID)
 	if err != nil {
 		return false
 	}
 
 	return ok
+}
+
+// CurrentWallpaperID returns the ID of the currently active wallpaper, or ""
+// when none is set.
+func (c *Controller) CurrentWallpaperID() string {
+	currentID, err := c.st.GetCurrentWallpaper()
+	if err != nil {
+		return ""
+	}
+	return currentID
 }
 
 // Shutdown cancels running work and stops the scheduler.

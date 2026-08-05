@@ -5,7 +5,31 @@ All notable changes to KPixiv are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - v0.9.0
+## [Unreleased] - v0.9.2
+
+Multi-monitor control from the system tray.
+
+### Added
+
+- Multi-monitor support in the system tray: when multi-monitor rotation is
+  enabled, the "current wallpaper" actions are replaced with one submenu per
+  monitor, letting you rotate, copy, open, bookmark, or exclude the wallpaper
+  on each screen independently. The top-level Next Wallpaper action rotates
+  every monitor at once. A per-artwork bookmark lookup underpins the per-screen
+  bookmark state.
+
+## [v0.9.1] – True Orientation
+
+### What's Changed
+
+- Config: replace `pixiv.landscape_only` with `wallpaper.orientation`
+  (`any`, `landscape`, `portrait`).
+- Status: display the active wallpaper orientation in `kpixivctl` output.
+- Build: add build metadata and improve CLI functionality.
+- CI: enable Go module caching, run `go test ./...`, and add explicit
+  permissions to workflows.
+
+## [v0.9.0] – Orienting the Doctor
 
 Polish sprint focused on diagnostics, CLI ergonomics, notifications, and GUI
 clarity.
@@ -63,7 +87,7 @@ clarity.
 - A fresh installation reports "never" for the last rotation instead of a
   misleading current timestamp.
 
-## [v0.8.0] - Every Monitor
+## [v0.8.0] – Smooth Operator
 
 ### What's Changed
 
@@ -73,7 +97,7 @@ clarity.
 - fix: refresh GUI account page when logout originates from tray
 - fix: suppress funlen lint warning in createWidgets
 
-## [v0.7.0] - Bookmark This
+## [v0.7.0] – Clean Slate
 
 This release introduces a new **kpixivctl** CLI companion for service
 management, full multi-monitor wallpaper support, Pixiv bookmark
@@ -112,7 +136,7 @@ synchronization, and a modular storage backend.
 - This release rewrites history with correct author attribution. Tags have been
   re-mapped accordingly.
 
-## [v0.6.0]
+## [v0.6.0] – Every Monitor
 
 This release adds full multi-monitor support, per-screen wallpaper rotation,
 and deeper KDE integration. KPixiv now manages independent wallpaper queues
@@ -131,7 +155,7 @@ for each connected display.
 - Queue-Based Rotation — migrated from single global queue to per-monitor
   queues with rebuild and cleanup
 
-## [v0.5.0]
+## [v0.5.0] – Bookmark This
 
 This release introduces Pixiv bookmark management, a fully redesigned settings
 window, and deeper system integration. KPixiv now acts as a full Pixiv
@@ -157,11 +181,11 @@ modern tabbed GUI.
 - Favorites directory moved — now stored under ~/.local/share/kpixiv/Favorites/
   separated from ranking downloads
 
-## [v0.4.0]
+## [v0.4.0] – Connected Canvas
 
 This release brings Pixiv account integration, a GUI settings window, and a
 fully redesigned tray experience. KPixiv is no longer just a wallpaper
-rotator — it's now a proper Pixiv client living in your system tray.
+rotator — it is now a proper Pixiv client living in your system tray.
 
 - Pixiv OAuth Login — browser-based PKCE authentication with automatic token
   refresh
@@ -173,7 +197,7 @@ rotator — it's now a proper Pixiv client living in your system tray.
   and queue count
 - New config options — cleanup_days, set_lock_screen, history_limit
 
-## [v0.3.0]
+## [v0.3.0] – Plasma in Motion
 
 kPixiv has now several options and even now has his own tray icon with some
 options like:
@@ -183,7 +207,7 @@ options like:
 - Open Current Artwork
 - Exclude Current Wallpaper
 
-## [v0.2.0]
+## [v0.2.0] – Running in Background
 
 This release improves the daemon, adds persistent state handling, introduces a
 cleaner filesystem layout, and continues polishing the KDE Plasma experience.
@@ -191,7 +215,7 @@ cleaner filesystem layout, and continues polishing the KDE Plasma experience.
 KPixiv keeps getting closer to becoming a proper native Pixiv wallpaper daemon
 for KDE.
 
-## [v0.1.0]
+## [v0.1.0]  – Foundation
 
 It's alive! 🎉
 

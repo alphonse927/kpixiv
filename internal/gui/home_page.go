@@ -12,6 +12,7 @@ import (
 
 	"github.com/alphonse927/kpixiv/internal/human"
 	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 func (ui *settingsUI) buildHomePage() fyne.CanvasObject {
@@ -101,12 +102,11 @@ func (ui *settingsUI) refreshMonitorStatus() {
 		ui.monitorStatus.Refresh()
 		return
 	}
-	names := make(map[string]string)
-	models := make(map[string]string)
-	if screens, screensErr := ui.ctrl.Monitors(); screensErr == nil {
-		for _, screen := range screens {
-			names[screen.ID] = screen.Name
-			models[screen.ID] = screen.Model
+
+	screens := make(map[string]wallpaper.Screen)
+	if screenList, screensErr := ui.ctrl.Monitors(); screensErr == nil {
+		for _, screen := range screenList {
+			screens[screen.ID] = screen
 		}
 	}
 
@@ -114,6 +114,7 @@ func (ui *settingsUI) refreshMonitorStatus() {
 	for id := range wallpapers {
 		ids = append(ids, id)
 	}
+
 	sort.Strings(ids)
 	for _, id := range ids {
 		meta := wallpapers[id]
@@ -123,16 +124,16 @@ func (ui *settingsUI) refreshMonitorStatus() {
 		thumbnail := canvas.NewImageFromFile(ui.ctrl.EnsureThumbnail(meta.ID))
 		thumbnail.FillMode = canvas.ImageFillContain
 		thumbnail.SetMinSize(fyne.NewSize(110, 80))
-		name := names[id]
-		if name == "" {
-			name = "Screen " + id
+		screen, ok := screens[id]
+		if !ok {
+			screen = wallpaper.Screen{ID: id}
 		}
-		if m := models[id]; m != "" {
-			name = name + " (" + m + ")"
-		}
+
+		name := screen.Label()
 		ui.monitorStatus.Add(container.NewBorder(nil, nil, thumbnail, nil,
 			widget.NewLabel(fmt.Sprintf("%s (%s)\n%s", name, id, ui.formatWallpaperInfo(meta)))))
 	}
+
 	ui.monitorStatus.Refresh()
 }
 

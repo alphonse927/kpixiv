@@ -35,6 +35,7 @@ dist/
 .env
 .env.local
 AGENTS.md
+.junie
 
 # Config (user-specific, can contain sensitive data)
 config.local.toml
