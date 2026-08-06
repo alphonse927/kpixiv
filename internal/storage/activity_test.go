@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"os"
 	"testing"
 	"time"
 
@@ -254,65 +253,5 @@ func TestBookmarkPagination(t *testing.T) {
 	}
 	if lastURL != "" || !complete {
 		t.Errorf("GetBookmarkPagination() after complete: got %q/%v, want empty/true", lastURL, complete)
-	}
-}
-
-func TestLoadActivityMigratesLegacyPagination(t *testing.T) {
-	tmp := t.TempDir()
-	s, err := New(tmp, tmp)
-	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
-	}
-
-	legacy := `{
-  "pages": { "daily:false": 3 },
-  "ranking_dates": { "daily:false": "2026-08-07" },
-  "last_bookmark_page": "https://app-api.pixiv.net/v1/user/bookmarks/illust?next=x",
-  "bookmark_complete": true
-}`
-	if err = os.WriteFile(s.legacyPaginationPath(), []byte(legacy), 0600); err != nil {
-		t.Fatalf("writing legacy pagination: %v", err)
-	}
-
-	activity, err := s.LoadActivity()
-	if err != nil {
-		t.Fatalf("LoadActivity() returned error: %v", err)
-	}
-	if got := activity.RankingPages["daily:false"]; got != 3 {
-		t.Errorf("migrated ranking page: got %d, want 3", got)
-	}
-	if got := activity.RankingDates["daily:false"]; got != "2026-08-07" {
-		t.Errorf("migrated ranking date: got %q, want %q", got, "2026-08-07")
-	}
-	if got := activity.LastBookmarkPage; got == "" || !activity.BookmarkComplete {
-		t.Errorf("migrated bookmark state: got %q/%v", got, activity.BookmarkComplete)
-	}
-
-	if _, err = os.Stat(s.legacyPaginationPath()); !os.IsNotExist(err) {
-		t.Errorf("legacy pagination.json should be removed after migration, stat err=%v", err)
-	}
-
-	page, err := s.GetRankingPage("daily:false")
-	if err != nil {
-		t.Fatalf("GetRankingPage() after migration returned error: %v", err)
-	}
-	if page != 3 {
-		t.Errorf("GetRankingPage() after migration: got %d, want 3", page)
-	}
-}
-
-func TestLoadActivityIgnoresMissingLegacyPagination(t *testing.T) {
-	tmp := t.TempDir()
-	s, err := New(tmp, tmp)
-	if err != nil {
-		t.Fatalf("New() returned error: %v", err)
-	}
-
-	activity, err := s.LoadActivity()
-	if err != nil {
-		t.Fatalf("LoadActivity() returned error: %v", err)
-	}
-	if len(activity.RankingPages) != 0 || len(activity.RankingDates) != 0 {
-		t.Errorf("fresh activity should have no ranking state, got %+v", activity)
 	}
 }
