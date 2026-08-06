@@ -3,17 +3,22 @@ package storage
 import (
 	"encoding/json"
 	"os"
+	"time"
 )
 
 type PaginationState struct {
-	Pages            map[string]int `json:"pages"`
-	LastBookmarkPage string         `json:"last_bookmark_page,omitempty"`
-	BookmarkComplete bool           `json:"bookmark_complete,omitempty"`
+	Pages            map[string]int    `json:"pages"`
+	RankingDates     map[string]string `json:"ranking_dates,omitempty"`
+	LastBookmarkPage string            `json:"last_bookmark_page,omitempty"`
+	BookmarkComplete bool              `json:"bookmark_complete,omitempty"`
 }
 
 func (p *PaginationState) Normalize() {
 	if p.Pages == nil {
 		p.Pages = map[string]int{}
+	}
+	if p.RankingDates == nil {
+		p.RankingDates = map[string]string{}
 	}
 }
 
@@ -33,7 +38,10 @@ func (s *Storage) LoadPaginationState() (*PaginationState, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &PaginationState{Pages: map[string]int{}}, nil
+			return &PaginationState{
+				Pages:        map[string]int{},
+				RankingDates: map[string]string{},
+			}, nil
 		}
 		return nil, err
 	}
@@ -80,6 +88,41 @@ func (s *Storage) SetRankingPage(key string, page int) error {
 		state.Pages[key] = page
 		return nil
 	})
+}
+
+// jstZone is the timezone used by Pixiv's daily ranking rollover.
+var jstZone = time.FixedZone("JST", 9*60*60)
+
+func rankingDate(t time.Time) string {
+	return t.In(jstZone).Format("2006-01-02")
+}
+
+// NextRankingPage returns the ranking page to fetch next for the given key.
+// When the ranking has rolled over to a new day, the page is reset to 1 so
+// the fresh ranking is crawled from the top instead of continuing from stale
+// pages of the previous day.
+func (s *Storage) NextRankingPage(key string) (int, error) {
+	state, err := s.LoadPaginationState()
+	if err != nil {
+		return 1, err
+	}
+
+	today := rankingDate(time.Now())
+	if state.RankingDates[key] != today {
+		state.RankingDates[key] = today
+		state.Pages[key] = 1
+		if err = s.SavePaginationState(state); err != nil {
+			return 1, err
+		}
+		return 1, nil
+	}
+
+	page := state.Pages[key]
+	if page < 1 {
+		return 1, nil
+	}
+
+	return page, nil
 }
 
 func (s *Storage) GetBookmarkPagination() (lastPageURL string, complete bool, err error) {

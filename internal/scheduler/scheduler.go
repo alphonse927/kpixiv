@@ -30,7 +30,6 @@ type Scheduler struct {
 	storage              *storage.Storage
 	pixiv                pixiv.ImageClient
 	setter               wallpaper.Setter
-	page                 int
 	setInterval          time.Duration
 	fetchInterval        time.Duration
 	bookmarkSyncInterval time.Duration
@@ -49,18 +48,12 @@ func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpap
 		storage:              st,
 		pixiv:                p,
 		setter:               s,
-		page:                 1,
 		setInterval:          time.Duration(cfg.Wallpaper.SetInterval) * time.Minute,
 		fetchInterval:        time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute,
 		bookmarkSyncInterval: time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute,
 		stopCh:               make(chan struct{}),
 		resetSetCh:           make(chan struct{}, 1),
 		resetFetchCh:         make(chan struct{}, 1),
-	}
-
-	pageKey := fmt.Sprintf("%s:%t", cfg.Pixiv.Ranking, cfg.Pixiv.R18)
-	if page, err := st.GetRankingPage(pageKey); err == nil && page > 1 {
-		sch.page = page
 	}
 
 	return sch
@@ -196,7 +189,10 @@ func (sch *Scheduler) fetchImages(ctx context.Context, cname string) error {
 	}
 
 	f := fetcher.NewFetcher(sch.cfg, sch.storage, sch.pixiv)
-	f.SetPage(sch.page)
+	if err := f.LoadPage(); err != nil {
+		log.Error("Failed to load ranking page", "error", err)
+		return err
+	}
 
 	result, err := f.Fetch(ctx)
 	if err != nil {
@@ -204,8 +200,7 @@ func (sch *Scheduler) fetchImages(ctx context.Context, cname string) error {
 		return err
 	}
 
-	sch.page = result.NextPage
-	log.Debug("Advanced ranking page", "nextPage", sch.page, "downloaded", result.Downloaded, "filtered", result.Filtered)
+	log.Debug("Ranking fetch complete", "downloaded", result.Downloaded, "filtered", result.Filtered, "nextPage", result.NextPage)
 	if result.Downloaded > 0 {
 		notify.SendDefault("KPixiv", fmt.Sprintf("Downloaded %d new wallpaper%s.", result.Downloaded, pluralize(result.Downloaded)))
 	} else if result.Failed > 0 {

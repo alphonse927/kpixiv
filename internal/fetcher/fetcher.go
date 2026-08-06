@@ -316,10 +316,11 @@ func (f *Fetcher) SetPage(page int) {
 	f.page = page
 }
 
-// LoadPage loads the persisted ranking page pointer from storage.
+// LoadPage loads the persisted ranking page pointer from storage, resetting
+// to page 1 when the ranking has rolled over to a new day.
 func (f *Fetcher) LoadPage() error {
 	pageKey := fmt.Sprintf("%s:%t", f.cfg.Pixiv.Ranking, f.cfg.Pixiv.R18)
-	page, err := f.storage.GetRankingPage(pageKey)
+	page, err := f.storage.NextRankingPage(pageKey)
 	if err != nil {
 		return fmt.Errorf("failed to load ranking page: %w", err)
 	}
