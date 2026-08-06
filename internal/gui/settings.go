@@ -156,6 +156,12 @@ type settingsUI struct {
 	firstRunDetail  *widget.Label
 	firstRunActions *fyne.Container
 
+	statusLastFetch        *widget.Label
+	statusNextFetch        *widget.Label
+	statusLastBookmarkSync *widget.Label
+	statusNextBookmarkSync *widget.Label
+	bookmarkSyncRows       *fyne.Container
+
 	autostartCheck     *widget.Check
 	autostartStatus    *widget.Label
 	autostartOrigState bool
@@ -201,6 +207,11 @@ func (ui *settingsUI) createDashboardStatusWidgets() {
 	ui.statusWarnings = widget.NewLabel("")
 	ui.statusWarnings.Wrapping = fyne.TextWrapWord
 	ui.statusWarnings.Hide()
+
+	ui.statusLastFetch = widget.NewLabel("")
+	ui.statusNextFetch = widget.NewLabel("")
+	ui.statusLastBookmarkSync = widget.NewLabel("")
+	ui.statusNextBookmarkSync = widget.NewLabel("")
 }
 
 func (ui *settingsUI) createWidgets() {
@@ -804,6 +815,16 @@ func (ui *settingsUI) refreshStatus() {
 	ui.statusCached.SetText(ui.formatCachedCount())
 	ui.statusLastRot.SetText(ui.formatLastRotation())
 	ui.statusNextRot.SetText(ui.formatNextRotation())
+	ui.statusLastFetch.SetText(ui.formatLastFetch())
+	ui.statusNextFetch.SetText(ui.formatNextFetch())
+	ui.statusLastBookmarkSync.SetText(ui.formatLastBookmarkSync())
+	ui.statusNextBookmarkSync.SetText(ui.formatNextBookmarkSync())
+
+	if ui.ctrl.Config().Bookmarks.Enabled {
+		ui.bookmarkSyncRows.Show()
+	} else {
+		ui.bookmarkSyncRows.Hide()
+	}
 }
 
 func (ui *settingsUI) refreshAutostartState() {
@@ -854,17 +875,66 @@ func (ui *settingsUI) formatNextRotation() string {
 	}
 	cfg := ui.ctrl.Config()
 	interval := time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
-	next := lastRot.Add(interval)
+	return ui.formatNextEvent("Next change", lastRot.Add(interval))
+}
+
+func (ui *settingsUI) formatLastFetch() string {
+	t := ui.ctrl.LastFetch()
+	if t.IsZero() {
+		return "Last fetch: Never"
+	}
+	return "Last fetch: " + t.Format("Jan 02, 15:04")
+}
+
+func (ui *settingsUI) formatNextFetch() string {
+	cfg := ui.ctrl.Config()
+	if !cfg.Wallpaper.FetchEnabled {
+		return "Next fetch: Disabled"
+	}
+	last := ui.ctrl.LastFetch()
+	if last.IsZero() {
+		return "Next fetch: in " + formatMinutes(cfg.Wallpaper.FetchInterval)
+	}
+	return ui.formatNextEvent("Next fetch", last.Add(time.Duration(cfg.Wallpaper.FetchInterval)*time.Minute))
+}
+
+func (ui *settingsUI) formatLastBookmarkSync() string {
+	t := ui.ctrl.LastBookmarkSync()
+	if t.IsZero() {
+		return "Last sync: Never"
+	}
+	return "Last sync: " + t.Format("Jan 02, 15:04")
+}
+
+func (ui *settingsUI) formatNextBookmarkSync() string {
+	cfg := ui.ctrl.Config()
+	if !cfg.Bookmarks.Enabled {
+		return "Next sync: Disabled"
+	}
+	last := ui.ctrl.LastBookmarkSync()
+	if last.IsZero() {
+		return "Next sync: in " + formatMinutes(cfg.Bookmarks.SyncInterval)
+	}
+	return ui.formatNextEvent("Next sync", last.Add(time.Duration(cfg.Bookmarks.SyncInterval)*time.Minute))
+}
+
+// formatNextEvent renders a countdown to an upcoming event, e.g. the next
+// wallpaper change or fetch.
+func (ui *settingsUI) formatNextEvent(prefix string, next time.Time) string {
 	remaining := time.Until(next)
 	if remaining <= 0 {
-		return "Next change: Any moment now"
+		return prefix + ": Any moment now"
 	}
 	mins := int(remaining.Minutes())
 	secs := int(remaining.Seconds()) % 60
 	if mins > 0 {
-		return "Next change: in " + strconv.Itoa(mins) + "m " + strconv.Itoa(secs) + "s"
+		return fmt.Sprintf("%s: in %dm %ds", prefix, mins, secs)
 	}
-	return "Next change: in " + strconv.Itoa(secs) + "s"
+	return fmt.Sprintf("%s: in %ds", prefix, secs)
+}
+
+func formatMinutes(minutes int) string {
+	return strconv.Itoa(minutes) + "m"
 }
 
 // rankingSubDisplay maps a ranking mode to its GUI select option.

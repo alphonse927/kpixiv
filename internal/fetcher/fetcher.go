@@ -98,6 +98,10 @@ func (f *Fetcher) Fetch(ctx context.Context) (*FetchResult, error) {
 		}
 	}
 
+	if err = f.storage.RecordFetch(time.Now()); err != nil {
+		log.Warn("Failed to record fetch time", "error", err)
+	}
+
 	f.page = nextPage
 	return result, nil
 }

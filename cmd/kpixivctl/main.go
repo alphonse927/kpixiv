@@ -898,6 +898,10 @@ var statusCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("could not load history:\n  %w", err)
 		}
+		activity, err := st.LoadActivity()
+		if err != nil {
+			return fmt.Errorf("could not load activity:\n  %w", err)
+		}
 		monitorHistory, monitorHistoryErr := st.LoadMonitorHistory()
 
 		stats, err := st.CacheStats()
@@ -960,6 +964,12 @@ var statusCmd = &cobra.Command{
 		fmt.Println(keyValue(width, "Next wallpaper", orNone(nextID)))
 		fmt.Println(keyValue(width, "Last change", lastChangeLabel(history.UpdatedAt)))
 		fmt.Println(keyValue(width, "Next change", nextChangeLabel(cfg, history.UpdatedAt)))
+		fmt.Println(keyValue(width, "Last fetch", lastActivityLabel(activity.LastFetchAt)))
+		fmt.Println(keyValue(width, "Next fetch", nextFetchLabel(cfg, activity.LastFetchAt)))
+		if cfg.Bookmarks.Enabled {
+			fmt.Println(keyValue(width, "Last bookmark sync", lastActivityLabel(activity.LastBookmarkSyncAt)))
+			fmt.Println(keyValue(width, "Next bookmark sync", nextBookmarkSyncLabel(cfg, activity.LastBookmarkSyncAt)))
+		}
 
 		// Cache.
 		fmt.Println()
@@ -1088,6 +1098,41 @@ func nextChangeLabel(cfg *config.Config, last time.Time) string {
 	}
 	interval := time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
 	remaining := time.Until(last.Add(interval))
+	if remaining <= 0 {
+		return "any moment now"
+	}
+	return "in " + formatDuration(remaining)
+}
+
+func lastActivityLabel(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return t.Format(time.DateTime) + " (" + formatDuration(time.Since(t)) + " ago)"
+}
+
+func nextFetchLabel(cfg *config.Config, last time.Time) string {
+	if !cfg.Wallpaper.FetchEnabled {
+		return "disabled"
+	}
+	if last.IsZero() {
+		return "in " + formatDuration(time.Duration(cfg.Wallpaper.FetchInterval)*time.Minute)
+	}
+	return nextInLabel(last.Add(time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute))
+}
+
+func nextBookmarkSyncLabel(cfg *config.Config, last time.Time) string {
+	if !cfg.Bookmarks.Enabled {
+		return "disabled"
+	}
+	if last.IsZero() {
+		return "in " + formatDuration(time.Duration(cfg.Bookmarks.SyncInterval)*time.Minute)
+	}
+	return nextInLabel(last.Add(time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute))
+}
+
+func nextInLabel(next time.Time) string {
+	remaining := time.Until(next)
 	if remaining <= 0 {
 		return "any moment now"
 	}

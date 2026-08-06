@@ -40,6 +40,8 @@ type AppController interface {
 	NextWallpaperID() string
 	WallpaperMeta(id string) (*storage.ImageMeta, error)
 	LastRotation() time.Time
+	LastFetch() time.Time
+	LastBookmarkSync() time.Time
 	ServiceEnabled() (bool, error)
 	EnableService() error
 	DisableService() error
