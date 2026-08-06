@@ -71,6 +71,10 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		}
 	}
 
+	if err := s.storage.RecordBookmarkSync(time.Now()); err != nil {
+		log.Warn("Failed to record bookmark sync time", "error", err)
+	}
+
 	log.Info("Bookmark sync complete", "total", result.Total, "downloaded", result.Downloaded, "deleted", result.Deleted, "skipped", result.Skipped, "failed", result.Failed)
 	return result, nil
 }

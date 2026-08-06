@@ -774,6 +774,24 @@ func (c *Controller) LastRotation() time.Time {
 	return history.UpdatedAt
 }
 
+// LastFetch returns the timestamp of the last ranking fetch.
+func (c *Controller) LastFetch() time.Time {
+	activity, err := c.st.LoadActivity()
+	if err != nil {
+		return time.Time{}
+	}
+	return activity.LastFetchAt
+}
+
+// LastBookmarkSync returns the timestamp of the last bookmark sync.
+func (c *Controller) LastBookmarkSync() time.Time {
+	activity, err := c.st.LoadActivity()
+	if err != nil {
+		return time.Time{}
+	}
+	return activity.LastBookmarkSyncAt
+}
+
 // ConfigPath returns the path of the active configuration file.
 func (c *Controller) ConfigPath() string {
 	return c.cfg.ConfigPath

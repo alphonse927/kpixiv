@@ -60,8 +60,17 @@ func (ui *settingsUI) buildHomePage() fyne.CanvasObject {
 		dashboardRow("History", ui.statusHistory),
 		dashboardRow("Last change", ui.statusLastRot),
 		dashboardRow("Next change", ui.statusNextRot),
-		dashboardRow("Next wallpaper", ui.statusNextWall),
+		dashboardRow("Last fetch", ui.statusLastFetch),
+		dashboardRow("Next fetch", ui.statusNextFetch),
 	)
+
+	ui.bookmarkSyncRows = container.NewVBox(
+		dashboardRow("Last sync", ui.statusLastBookmarkSync),
+		dashboardRow("Next sync", ui.statusNextBookmarkSync),
+	)
+
+	dashboard.Add(ui.bookmarkSyncRows)
+	dashboard.Add(dashboardRow("Next wallpaper", ui.statusNextWall))
 
 	content := container.NewVBox(
 		ui.firstRunBox,

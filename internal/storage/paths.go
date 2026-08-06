@@ -35,10 +35,6 @@ func (s *Storage) HistoryPath() string {
 	return filepath.Join(s.stateDir, "history.json")
 }
 
-func (s *Storage) PaginationPath() string {
-	return filepath.Join(s.stateDir, "pagination.json")
-}
-
 func (s *Storage) BlacklistPath() string {
 	return filepath.Join(s.stateDir, "blacklist.json")
 }
