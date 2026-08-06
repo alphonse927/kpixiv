@@ -2,6 +2,7 @@ package storage
 
 import (
 	"testing"
+	"time"
 
 	"github.com/alphonse927/kpixiv/internal/config"
 )
@@ -106,5 +107,92 @@ func TestSetRankingPageClamping(t *testing.T) {
 	}
 	if page != 1 {
 		t.Errorf("SetRankingPage(0) should clamp to 1: got %d", page)
+	}
+}
+
+func TestNextRankingPageFreshState(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(tmp, tmp)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	key := config.RankingDailyMode.String() + ":false"
+	page, err := s.NextRankingPage(key)
+	if err != nil {
+		t.Fatalf("NextRankingPage() returned error: %v", err)
+	}
+	if page != 1 {
+		t.Errorf("NextRankingPage() for unknown key: got %d, want 1", page)
+	}
+
+	state, err := s.LoadPaginationState()
+	if err != nil {
+		t.Fatalf("LoadPaginationState() returned error: %v", err)
+	}
+	if got := state.RankingDates[key]; got != rankingDate(time.Now()) {
+		t.Errorf("ranking date recorded: got %q, want %q", got, rankingDate(time.Now()))
+	}
+}
+
+func TestNextRankingPageSameDay(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(tmp, tmp)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	key := config.RankingDailyMode.String() + ":false"
+	today := rankingDate(time.Now())
+	original := &PaginationState{
+		Pages:        map[string]int{key: 5},
+		RankingDates: map[string]string{key: today},
+	}
+	if err = s.SavePaginationState(original); err != nil {
+		t.Fatalf("SavePaginationState() returned error: %v", err)
+	}
+
+	page, err := s.NextRankingPage(key)
+	if err != nil {
+		t.Fatalf("NextRankingPage() returned error: %v", err)
+	}
+	if page != 5 {
+		t.Errorf("NextRankingPage() same day: got %d, want 5", page)
+	}
+}
+
+func TestNextRankingPageRollsOverOnNewDay(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(tmp, tmp)
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	key := config.RankingDailyMode.String() + ":false"
+	original := &PaginationState{
+		Pages:        map[string]int{key: 9},
+		RankingDates: map[string]string{key: "2000-01-01"},
+	}
+	if err = s.SavePaginationState(original); err != nil {
+		t.Fatalf("SavePaginationState() returned error: %v", err)
+	}
+
+	page, err := s.NextRankingPage(key)
+	if err != nil {
+		t.Fatalf("NextRankingPage() returned error: %v", err)
+	}
+	if page != 1 {
+		t.Errorf("NextRankingPage() after rollover: got %d, want 1", page)
+	}
+
+	state, err := s.LoadPaginationState()
+	if err != nil {
+		t.Fatalf("LoadPaginationState() returned error: %v", err)
+	}
+	if page := state.Pages[key]; page != 1 {
+		t.Errorf("Pages[%s] after rollover: got %d, want 1", key, page)
+	}
+	if got := state.RankingDates[key]; got != rankingDate(time.Now()) {
+		t.Errorf("ranking date after rollover: got %q, want %q", got, rankingDate(time.Now()))
 	}
 }
