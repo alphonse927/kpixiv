@@ -90,10 +90,10 @@ type tintedBG struct {
 
 func (t *tintedBG) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
 	if name == theme.ColorNameBackground {
-		if variant == theme.VariantDark {
-			return color.RGBA{R: 45, G: 52, B: 68, A: 255}
+		if variant == theme.VariantLight {
+			return color.RGBA{R: 220, G: 228, B: 245, A: 255}
 		}
-		return color.RGBA{R: 220, G: 228, B: 245, A: 255}
+		return color.RGBA{R: 45, G: 52, B: 68, A: 255}
 	}
 	return t.Theme.Color(name, variant)
 }
@@ -146,7 +146,9 @@ type settingsUI struct {
 	lastWallpaperID         string
 
 	statusDaemon    *widget.Label
+	statusDaemonDot *canvas.Circle
 	statusAuth      *widget.Label
+	statusAuthDot   *canvas.Circle
 	statusCache     *widget.Label
 	statusHistory   *widget.Label
 	statusNextWall  *widget.Label
@@ -199,7 +201,9 @@ func (ui *settingsUI) build(a fyne.App) {
 
 func (ui *settingsUI) createDashboardStatusWidgets() {
 	ui.statusDaemon = widget.NewLabel("")
+	ui.statusDaemonDot = canvas.NewCircle(color.Transparent)
 	ui.statusAuth = widget.NewLabel("")
+	ui.statusAuthDot = canvas.NewCircle(color.Transparent)
 	ui.statusCache = widget.NewLabel("")
 	ui.statusHistory = widget.NewLabel("")
 	ui.statusNextWall = widget.NewLabel("")
@@ -379,13 +383,14 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 
 	navDefs := []struct {
 		label string
+		icon  fyne.Resource
 		build func() fyne.CanvasObject
 	}{
-		{"🏠 Home", ui.buildHomePage},
-		{"⚙️ Settings", ui.buildSettingsPage},
-		{"🖥 Monitors", ui.buildMonitorPage},
-		{"👤 Account", ui.buildAccountPage},
-		{"ℹ️ About", ui.buildAboutPage},
+		{"Home", theme.HomeIcon(), ui.buildHomePage},
+		{"Settings", theme.SettingsIcon(), ui.buildSettingsPage},
+		{"Monitors", theme.DesktopIcon(), ui.buildMonitorPage},
+		{"Account", theme.AccountIcon(), ui.buildAccountPage},
+		{"About", theme.InfoIcon(), ui.buildAboutPage},
 	}
 
 	ui.navButtons = make([]*widget.Button, len(navDefs))
@@ -393,21 +398,19 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 
 	for i, def := range navDefs {
 		idx := i
-
 		ui.pages[i] = def.build()
 
-		btn := widget.NewButton(def.label, func() {
+		btn := widget.NewButtonWithIcon(def.label, def.icon, func() {
 			ui.selectPage(idx)
 		})
+		btn.Alignment = widget.ButtonAlignLeading
 
 		ui.navButtons[i] = btn
 		sidebar.Add(btn)
 	}
 
 	sidebar.Add(layout.NewSpacer())
-
 	sidebarBox := container.NewPadded(sidebar)
-
 	ui.content = container.NewStack()
 
 	for _, page := range ui.pages {
@@ -426,7 +429,7 @@ func (ui *settingsUI) buildLayout() fyne.CanvasObject {
 			layout.NewSpacer(),
 			widget.NewButtonWithIcon("Cancel", theme.CancelIcon(), ui.hide),
 			widget.NewButton("Apply", ui.applySettings),
-			widget.NewButtonWithIcon("Save & Close", theme.ConfirmIcon(), func() {
+			widget.NewButtonWithIcon("OK", theme.ConfirmIcon(), func() {
 				ui.applySettings()
 				ui.log.Info("Settings saved and closed")
 				ui.hide()
@@ -457,7 +460,6 @@ func (ui *settingsUI) selectPage(idx int) {
 	ui.pages[ui.currentPage].Hide()
 	ui.pages[idx].Show()
 	ui.currentPage = idx
-
 	ui.highlightNav(idx)
 }
 
@@ -813,8 +815,8 @@ func (ui *settingsUI) refreshStatus() {
 	}
 
 	ui.statusCached.SetText(ui.formatCachedCount())
-	ui.statusLastRot.SetText(ui.formatLastRotation())
-	ui.statusNextRot.SetText(ui.formatNextRotation())
+	ui.statusLastRot.SetText(ui.formatLastChange())
+	ui.statusNextRot.SetText(ui.formatNextChange())
 	ui.statusLastFetch.SetText(ui.formatLastFetch())
 	ui.statusNextFetch.SetText(ui.formatNextFetch())
 	ui.statusLastBookmarkSync.SetText(ui.formatLastBookmarkSync())
@@ -847,6 +849,7 @@ func (ui *settingsUI) formatWallpaperInfo(meta *storage.ImageMeta) string {
 	if artist == "" {
 		artist = "Unknown artist"
 	}
+
 	res := ""
 	if meta.Width > 0 && meta.Height > 0 {
 		res = strconv.Itoa(meta.Width) + " × " + strconv.Itoa(meta.Height)
@@ -860,77 +863,88 @@ func (ui *settingsUI) formatCachedCount() string {
 	return "Cached wallpapers: " + strconv.Itoa(ui.ctrl.CachedCount())
 }
 
-func (ui *settingsUI) formatLastRotation() string {
+func (ui *settingsUI) formatLastChange() string {
 	t := ui.ctrl.LastRotation()
 	if t.IsZero() {
-		return "Last rotation: Never"
+		return "Never"
 	}
-	return "Last rotation: " + t.Format("Jan 02, 15:04")
+
+	return t.Format("Jan 02, 15:04")
 }
 
-func (ui *settingsUI) formatNextRotation() string {
+func (ui *settingsUI) formatNextChange() string {
 	lastRot := ui.ctrl.LastRotation()
 	if lastRot.IsZero() {
-		return "Next change: No rotation scheduled"
+		return "No rotation scheduled"
 	}
+
 	cfg := ui.ctrl.Config()
 	interval := time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
-	return ui.formatNextEvent("Next change", lastRot.Add(interval))
+	return ui.formatCountdown(lastRot.Add(interval))
 }
 
 func (ui *settingsUI) formatLastFetch() string {
 	t := ui.ctrl.LastFetch()
 	if t.IsZero() {
-		return "Last fetch: Never"
+		return "Never"
 	}
-	return "Last fetch: " + t.Format("Jan 02, 15:04")
+
+	return t.Format("Jan 02, 15:04")
 }
 
 func (ui *settingsUI) formatNextFetch() string {
 	cfg := ui.ctrl.Config()
 	if !cfg.Wallpaper.FetchEnabled {
-		return "Next fetch: Disabled"
+		return "Disabled"
 	}
+
 	last := ui.ctrl.LastFetch()
 	if last.IsZero() {
-		return "Next fetch: in " + formatMinutes(cfg.Wallpaper.FetchInterval)
+		return "in " + formatMinutes(cfg.Wallpaper.FetchInterval)
 	}
-	return ui.formatNextEvent("Next fetch", last.Add(time.Duration(cfg.Wallpaper.FetchInterval)*time.Minute))
+
+	return ui.formatCountdown(last.Add(time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute))
 }
 
 func (ui *settingsUI) formatLastBookmarkSync() string {
 	t := ui.ctrl.LastBookmarkSync()
 	if t.IsZero() {
-		return "Last sync: Never"
+		return "Never"
 	}
-	return "Last sync: " + t.Format("Jan 02, 15:04")
+
+	return t.Format("Jan 02, 15:04")
 }
 
 func (ui *settingsUI) formatNextBookmarkSync() string {
 	cfg := ui.ctrl.Config()
 	if !cfg.Bookmarks.Enabled {
-		return "Next sync: Disabled"
+		return "Disabled"
 	}
+
 	last := ui.ctrl.LastBookmarkSync()
 	if last.IsZero() {
-		return "Next sync: in " + formatMinutes(cfg.Bookmarks.SyncInterval)
+		return "in " + formatMinutes(cfg.Bookmarks.SyncInterval)
 	}
-	return ui.formatNextEvent("Next sync", last.Add(time.Duration(cfg.Bookmarks.SyncInterval)*time.Minute))
+
+	return ui.formatCountdown(last.Add(time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute))
 }
 
-// formatNextEvent renders a countdown to an upcoming event, e.g. the next
-// wallpaper change or fetch.
-func (ui *settingsUI) formatNextEvent(prefix string, next time.Time) string {
+// formatCountdown renders a countdown to an upcoming event, e.g., the next
+// wallpaper change or fetch. The label column of the overview supplies the
+// event name, so this only returns the pure data.
+func (ui *settingsUI) formatCountdown(next time.Time) string {
 	remaining := time.Until(next)
 	if remaining <= 0 {
-		return prefix + ": Any moment now"
+		return "Any moment now"
 	}
+
 	mins := int(remaining.Minutes())
 	secs := int(remaining.Seconds()) % 60
 	if mins > 0 {
-		return fmt.Sprintf("%s: in %dm %ds", prefix, mins, secs)
+		return fmt.Sprintf("in %dm %ds", mins, secs)
 	}
-	return fmt.Sprintf("%s: in %ds", prefix, secs)
+
+	return fmt.Sprintf("in %ds", secs)
 }
 
 func formatMinutes(minutes int) string {

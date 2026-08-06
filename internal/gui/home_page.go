@@ -2,12 +2,17 @@ package gui
 
 import (
 	"fmt"
+	"image/color"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/alphonse927/kpixiv/internal/human"
@@ -18,7 +23,9 @@ import (
 func (ui *settingsUI) buildHomePage() fyne.CanvasObject {
 	bold := fyne.TextStyle{Bold: true}
 	section := func(title string) fyne.CanvasObject {
-		return widget.NewLabelWithStyle(title, fyne.TextAlignLeading, bold)
+		l := widget.NewLabelWithStyle(title, fyne.TextAlignLeading, bold)
+		l.SizeName = theme.SizeNameSubHeadingText
+		return l
 	}
 
 	wallpaperPanel := container.NewBorder(
@@ -52,25 +59,53 @@ func (ui *settingsUI) buildHomePage() fyne.CanvasObject {
 		container.NewVBox(ui.firstRunTitle, ui.firstRunDetail, ui.firstRunActions),
 	)
 
+	statusCol := container.NewVBox(
+		subHeader("Status"),
+		container.New(
+			layout.NewFormLayout(),
+			overviewLabel("Daemon"), statusValue(ui.statusDaemonDot, ui.statusDaemon),
+			overviewLabel("Pixiv"), statusValue(ui.statusAuthDot, ui.statusAuth),
+			overviewLabel("Cached"), ui.statusCache,
+			overviewLabel("History"), ui.statusHistory,
+		),
+	)
+
+	ui.bookmarkSyncRows = container.New(
+		layout.NewFormLayout(),
+		overviewLabel("Last sync"), ui.statusLastBookmarkSync,
+		overviewLabel("Next sync"), ui.statusNextBookmarkSync,
+	)
+
+	timingMainRows := container.New(
+		layout.NewFormLayout(),
+		overviewLabel("Last change"), ui.statusLastRot,
+		overviewLabel("Next change"), ui.statusNextRot,
+		overviewLabel("Last fetch"), ui.statusLastFetch,
+		overviewLabel("Next fetch"), ui.statusNextFetch,
+	)
+
+	timingCol := container.NewVBox(
+		subHeader("Timing"),
+		timingMainRows,
+		ui.bookmarkSyncRows,
+	)
+
 	dashboard := container.NewVBox(
 		section("Overview"),
-		dashboardRow("Daemon", ui.statusDaemon),
-		dashboardRow("Pixiv", ui.statusAuth),
-		dashboardRow("Cached", ui.statusCache),
-		dashboardRow("History", ui.statusHistory),
-		dashboardRow("Last change", ui.statusLastRot),
-		dashboardRow("Next change", ui.statusNextRot),
-		dashboardRow("Last fetch", ui.statusLastFetch),
-		dashboardRow("Next fetch", ui.statusNextFetch),
+		container.NewPadded(container.NewGridWithColumns(2, statusCol, timingCol)),
 	)
 
-	ui.bookmarkSyncRows = container.NewVBox(
-		dashboardRow("Last sync", ui.statusLastBookmarkSync),
-		dashboardRow("Next sync", ui.statusNextBookmarkSync),
+	bg := canvas.NewRectangle(panelColor())
+	bg.CornerRadius = theme.Size(theme.SizeNameCardRadius)
+	nextWall := container.New(layout.NewStackLayout(),
+		bg,
+		container.NewPadded(container.NewVBox(
+			widget.NewLabelWithStyle("Next wallpaper", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			container.NewPadded(ui.statusNextWall),
+		)),
 	)
 
-	dashboard.Add(ui.bookmarkSyncRows)
-	dashboard.Add(dashboardRow("Next wallpaper", ui.statusNextWall))
+	dashboard.Add(container.NewPadded(nextWall))
 
 	content := container.NewVBox(
 		ui.firstRunBox,
@@ -91,10 +126,65 @@ func (ui *settingsUI) buildHomePage() fyne.CanvasObject {
 	return container.NewScroll(container.NewPadded(content))
 }
 
-// dashboardRow creates an aligned label pair used by the overview section.
-func dashboardRow(key string, value *widget.Label) fyne.CanvasObject {
-	label := widget.NewLabelWithStyle(key, fyne.TextAlignLeading, fyne.TextStyle{})
-	return container.NewGridWithColumns(2, label, value)
+// statusValue lays a small colored status dot out in front of a status label,
+// vertically aligned against the text.
+func statusValue(dot *canvas.Circle, label *widget.Label) fyne.CanvasObject {
+	const dotSize = float32(9)
+	boxed := container.New(
+		layout.NewGridWrapLayout(fyne.NewSize(dotSize, dotSize)),
+		dot,
+	)
+	return container.NewHBox(container.NewCenter(boxed), label)
+}
+
+// setStatus updates a status label's text along with its importance and the
+// matching indicator dot color, reusing the theme's semantic colors.
+func setStatus(label *widget.Label, dot *canvas.Circle, text string, importance widget.Importance, fill color.Color) {
+	label.SetText(text)
+	label.Importance = importance
+	label.Refresh()
+	dot.FillColor = fill
+	dot.Refresh()
+}
+
+// pluralEntry returns "entry" or "entries" depending on the count.
+func pluralEntry(n int) string {
+	if n == 1 {
+		return "entry"
+	}
+	return "entries"
+}
+
+// overviewLabel renders an overview row label. Row labels are the bottom level
+// of the screen's type hierarchy: regular weight (not bold), right-aligned so
+// each row's value column lines up.
+func overviewLabel(text string) fyne.CanvasObject {
+	return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{})
+}
+
+// subHeader renders a subsection heading (e.g. "Status", "Timing") at the
+// mid-level of the screen's type hierarchy: section headers are the largest
+// (SubHeading, bold), subsection headers are bold at the Text size, and row
+// labels are regular at the Text size.
+func subHeader(text string) fyne.CanvasObject {
+	return widget.NewLabelWithStyle(text, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+}
+
+// panelColor returns a color slightly lighter than the theme background, so a
+// contained block reads as a distinct panel in both light and dark themes.
+func panelColor() color.Color {
+	r, g, b, _ := theme.Color(theme.ColorNameBackground).RGBA()
+	toChannel := func(v uint32) float64 { return float64(v / 255) }
+	const lift = 0.10
+	lighten := func(v float64) uint8 {
+		return uint8(math.Round(v + (255-v)*lift))
+	}
+	return color.NRGBA{
+		R: lighten(toChannel(r)),
+		G: lighten(toChannel(g)),
+		B: lighten(toChannel(b)),
+		A: 255,
+	}
 }
 
 func (ui *settingsUI) refreshMonitorStatus() {
@@ -139,8 +229,40 @@ func (ui *settingsUI) refreshMonitorStatus() {
 		}
 
 		name := screen.Label()
-		ui.monitorStatus.Add(container.NewBorder(nil, nil, thumbnail, nil,
-			widget.NewLabel(fmt.Sprintf("%s (%s)\n%s", name, id, ui.formatWallpaperInfo(meta)))))
+
+		artworkTitle := meta.Title
+		if artworkTitle == "" {
+			artworkTitle = "Untitled artwork"
+		}
+
+		var secondary []string
+		if meta.Artist != "" {
+			secondary = append(secondary, meta.Artist)
+		}
+		if meta.Width > 0 && meta.Height > 0 {
+			secondary = append(secondary, strconv.Itoa(meta.Width)+" × "+strconv.Itoa(meta.Height))
+		}
+		secondary = append(secondary, formatSource(meta.Source, meta.Rank))
+
+		titleLine := widget.NewRichText(
+			&widget.TextSegment{
+				Text:  fmt.Sprintf("%s (%s)", name, id),
+				Style: widget.RichTextStyle{SizeName: theme.SizeNameText, ColorName: theme.ColorNameForeground, TextStyle: fyne.TextStyle{Bold: true}},
+			},
+			&widget.TextSegment{
+				Text:  artworkTitle,
+				Style: widget.RichTextStyle{SizeName: theme.SizeNameText, ColorName: theme.ColorNameForeground, TextStyle: fyne.TextStyle{Bold: true}},
+			},
+			&widget.TextSegment{
+				Text:  strings.Join(secondary, " · "),
+				Style: widget.RichTextStyle{SizeName: theme.SizeNameText, ColorName: theme.ColorNamePlaceHolder},
+			},
+		)
+		titleLine.Wrapping = fyne.TextWrapWord
+
+		info := container.NewVBox(titleLine)
+
+		ui.monitorStatus.Add(container.NewBorder(nil, nil, thumbnail, nil, info))
 	}
 
 	ui.monitorStatus.Refresh()
@@ -154,20 +276,20 @@ func (ui *settingsUI) refreshOverview() {
 	}
 
 	if ui.ctrl.SchedulerRunning() {
-		ui.statusDaemon.SetText("Running")
+		setStatus(ui.statusDaemon, ui.statusDaemonDot, "Running", widget.SuccessImportance, theme.Color(theme.ColorNameSuccess))
 	} else {
-		ui.statusDaemon.SetText("Stopped")
+		setStatus(ui.statusDaemon, ui.statusDaemonDot, "Stopped", widget.WarningImportance, theme.Color(theme.ColorNameWarning))
 	}
 
 	if ui.ctrl.PixivLoggedIn() {
 		user := ui.ctrl.PixivUserName()
+		text := "Connected"
 		if user != "" {
-			ui.statusAuth.SetText("Connected (" + user + ")")
-		} else {
-			ui.statusAuth.SetText("Connected")
+			text = "Connected (" + user + ")"
 		}
+		setStatus(ui.statusAuth, ui.statusAuthDot, text, widget.SuccessImportance, theme.Color(theme.ColorNameSuccess))
 	} else {
-		ui.statusAuth.SetText("Not connected")
+		setStatus(ui.statusAuth, ui.statusAuthDot, "Not connected", widget.DangerImportance, theme.Color(theme.ColorNameError))
 	}
 
 	cacheText := fmt.Sprintf("%d image%s", stats.Count, human.Plural(stats.Count))
@@ -176,7 +298,8 @@ func (ui *settingsUI) refreshOverview() {
 	}
 	ui.statusCache.SetText(cacheText)
 
-	ui.statusHistory.SetText(fmt.Sprintf("%d entr%s", ui.ctrl.HistoryCount(), human.Plural(ui.ctrl.HistoryCount())))
+	count := ui.ctrl.HistoryCount()
+	ui.statusHistory.SetText(fmt.Sprintf("%d %s", count, pluralEntry(count)))
 
 	ui.statusNextWall.SetText(ui.formatNextWallpaper())
 
@@ -188,9 +311,11 @@ func (ui *settingsUI) refreshWarnings(cached int) {
 	if cached == 0 {
 		warnings = append(warnings, "No wallpapers downloaded yet. Use \"Fetch Wallpapers\" to get started.")
 	}
+
 	if !ui.ctrl.PixivLoggedIn() {
 		warnings = append(warnings, "Not connected to Pixiv. Log in to enable bookmarks and sync.")
 	}
+
 	if ui.ctrl.SchedulerRunning() && ui.ctrl.Config().Wallpaper.RotationEnabled && cached == 0 {
 		warnings = append(warnings, "Rotation is enabled but there is nothing to rotate yet.")
 	}
@@ -201,14 +326,15 @@ func (ui *settingsUI) refreshWarnings(cached int) {
 		return
 	}
 
-	text := ""
+	var text strings.Builder
 	for i, w := range warnings {
 		if i > 0 {
-			text += "\n"
+			text.WriteString("\n")
 		}
-		text += "• " + w
+		text.WriteString("• " + w)
 	}
-	ui.statusWarnings.SetText(text)
+
+	ui.statusWarnings.SetText(text.String())
 	ui.statusWarnings.Show()
 }
 
