@@ -5,9 +5,9 @@ All notable changes to KPixiv are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - v0.9.2
+## [Unreleased] - v0.10.0
 
-Multi-monitor control from the system tray.
+Per-monitor control from the system tray, plus richer activity reporting.
 
 ### Added
 
@@ -17,6 +17,27 @@ Multi-monitor control from the system tray.
   on each screen independently. The top-level Next Wallpaper action rotates
   every monitor at once. A per-artwork bookmark lookup underpins the per-screen
   bookmark state.
+- `kpixivctl status` now reports the last and next ranking fetch, and (when
+  bookmarks are enabled) the last and next bookmark sync.
+- GUI Home page redesign: a modernized layout with live status indicators for
+  the daemon and Pixiv, cached/history counts, fetch and bookmark-sync
+  timings, and per-monitor wallpaper previews.
+
+### Changed
+
+- Persisted fetch pagination (`pagination.json`) was replaced by a unified
+  `Activity` state (`activity.json`) that also records the last ranking fetch
+  and last bookmark sync times, so status survives daemon restarts.
+- The scheduler now delegates ranking-page tracking to the fetcher instead of
+  holding it as in-memory state.
+
+### Fixed
+
+- The ranking page now resets to 1 when the daily ranking rolls over to a new
+  day (JST), so the fresh ranking is crawled from the top instead of
+  continuing from stale pages of the previous day.
+- KScreen primary-monitor detection accepts both `priority:` and
+  `priority ` output formats.
 
 ## [v0.9.1] – True Orientation
 
