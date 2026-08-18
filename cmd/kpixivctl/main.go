@@ -709,32 +709,33 @@ var autostartCmd = &cobra.Command{
 
 var autostartEnableCmd = &cobra.Command{
 	Use:   "enable",
-	Short: "Install and enable the systemd user service",
-	Long: `Installs the systemd unit file and enables the KPixiv user service.
+	Short: "Install, enable, and start the systemd user service",
+	Long: `Installs the systemd unit file, enables the KPixiv user service for
+automatic startup on login, and starts it right now.
 
-The unit file is written to ~/.config/systemd/user/kpixiv.service
-and the service is enabled for automatic startup on login.`,
+The unit file is written to ~/.config/systemd/user/kpixiv.service.
+This is the only supported way to run kPixiv persistently -- see
+` + "`kpixiv --help`" + ` for the advanced --foreground debug mode.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := platform.EnableService("kpixiv.service"); err != nil {
 			return err
 		}
-		fmt.Println("KPixiv autostart enabled.")
+		fmt.Println("KPixiv autostart enabled and started.")
 		return nil
 	},
 }
 
 var autostartDisableCmd = &cobra.Command{
 	Use:   "disable",
-	Short: "Disable automatic startup",
-	Long: `Prevents KPixiv from starting automatically when you log in.
-
-The current session is not affected. The service unit file is
-kept on disk so the service state remains queryable.`,
+	Short: "Stop kPixiv and disable automatic startup",
+	Long: `Stops kPixiv right now and prevents it from starting automatically
+when you log in. The service unit file is kept on disk so the
+service state remains queryable.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := platform.DisableService("kpixiv.service"); err != nil {
 			return err
 		}
-		fmt.Println("KPixiv autostart disabled.")
+		fmt.Println("KPixiv stopped and autostart disabled.")
 		return nil
 	},
 }

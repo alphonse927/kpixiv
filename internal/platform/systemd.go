@@ -77,13 +77,47 @@ func IsServiceActive(service string) bool {
 	return err == nil && strings.TrimSpace(string(out)) == "active"
 }
 
-func EnableService(service string) error {
+// SystemdAvailable reports whether systemctl is available on this system.
+// kPixiv only supports running as a systemd user service; when systemctl
+// isn't present (e.g. a non-systemd distro), callers should fall back to
+// running in the foreground with a clear warning rather than silently
+// pretending background supervision exists.
+func SystemdAvailable() bool {
+	_, err := exec.LookPath("systemctl")
+	return err == nil
+}
+
+// StartService ensures the unit is installed and running right now. Unlike
+// EnableService, it does not affect whether the service starts on the next
+// login -- it only makes sure it's running in the current session. This is
+// what a manual `kpixiv` launch uses to hand off to the systemd-managed
+// instance instead of becoming a second, competing process.
+func StartService(service string) error {
 	if err := InstallServiceUnit(); err != nil {
 		return err
 	}
 
 	//nolint:gosec // service name is controlled by the application, not user input
-	cmd := exec.Command("systemctl", "--user", "enable", service)
+	cmd := exec.Command("systemctl", "--user", "start", service)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("cannot start service: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	return nil
+}
+
+func EnableService(service string) error {
+	if err := InstallServiceUnit(); err != nil {
+		return err
+	}
+
+	// --now also starts the service immediately, not just on the next
+	// login. Without it, checking "start automatically" in Settings had no
+	// visible effect until the next session, so people kept launching
+	// kPixiv by hand every time -- which is exactly the parallel,
+	// unsupervised execution path this project no longer supports.
+	//nolint:gosec // service name is controlled by the application, not user input
+	cmd := exec.Command("systemctl", "--user", "enable", "--now", service)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cannot enable service: %s: %w", strings.TrimSpace(string(out)), err)
 	}
@@ -92,8 +126,14 @@ func EnableService(service string) error {
 }
 
 func DisableService(service string) error {
+	// --now also stops the service immediately. If this call is made from
+	// within the running GUI itself (i.e. this process IS the systemd
+	// service), it will receive SIGTERM and shut down gracefully right
+	// after this returns -- that's expected: turning off "run in the
+	// background" should mean kPixiv actually stops, not just "won't
+	// restart next time."
 	//nolint:gosec // service name is controlled by the application, not user input
-	cmd := exec.Command("systemctl", "--user", "disable", service)
+	cmd := exec.Command("systemctl", "--user", "disable", "--now", service)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("cannot disable service: %s: %w", strings.TrimSpace(string(out)), err)
 	}

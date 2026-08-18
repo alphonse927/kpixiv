@@ -19,20 +19,70 @@ Per-monitor control from the system tray, plus richer activity reporting.
   bookmark state.
 - `kpixivctl status` now reports the last and next ranking fetch, and (when
   bookmarks are enabled) the last and next bookmark sync.
+- `kpixiv --foreground`: an advanced/debug flag that runs the app directly in
+  the current terminal instead of handing off to the systemd user service.
+  No auto-restart, no autostart integration -- intended for local debugging
+  only.
 - GUI Home page redesign: a modernized layout with live status indicators for
   the daemon and Pixiv, cached/history counts, fetch and bookmark-sync
   timings, and per-monitor wallpaper previews.
 
 ### Changed
 
+- **kPixiv now runs exclusively as a systemd user service.** Previously,
+  running the `kpixiv` binary directly (from a terminal, a `.desktop`
+  launcher, or a portable build) was an equally valid way to run it
+  alongside the systemd autostart service, and the two could silently fight
+  over which one was actually managing wallpaper rotation, fetching, and
+  bookmark sync -- the root cause behind several of the sync/log issues
+  fixed above. A plain `kpixiv` invocation now hands off to the
+  systemd-managed instance (starting it if needed) and exits, instead of
+  becoming a second, unsupervised process. See `references/docs/decisions.md`
+  for the full rationale.
+- `kpixivctl autostart enable` now also starts kPixiv immediately, not just
+  on the next login (`systemctl --user enable --now`). Likewise, `...
+  autostart disable` now stops it immediately rather than only preventing
+  future autostart. The Settings "Run KPixiv in the background" checkbox
+  follows the same behavior, and now asks for confirmation before turning
+  it off, since doing so stops kPixiv right away.
 - Persisted fetch pagination (`pagination.json`) was replaced by a unified
   `Activity` state (`activity.json`) that also records the last ranking fetch
   and last bookmark sync times, so status survives daemon restarts.
 - The scheduler now delegates ranking-page tracking to the fetcher instead of
   holding it as in-memory state.
 
+### Removed
+
+- The tolerant "another instance is already running, just exit quietly"
+  behavior as a normal, expected code path. It's replaced by the systemd
+  hand-off described above; the single-instance lock is now a safety net for
+  the advanced `--foreground` debug flag, not something users are expected
+  to hit in normal use.
+
 ### Fixed
 
+- Bookmark sync no longer gets stuck showing "Next sync: Any moment now"
+  indefinitely. The scheduler's bookmark-sync ticker was previously only
+  created if bookmark sync was already enabled at the moment the app
+  started; enabling it later from Settings (e.g. right after logging in)
+  left the ticker permanently inert until the app was restarted. The ticker
+  is now always running, and whether a tick triggers a sync is decided from
+  the live config, matching how wallpaper rotation and ranking fetch already
+  behaved. Changing the sync interval from Settings now also takes effect
+  immediately, without a restart.
+- Logs are now centralized to `~/.local/state/kpixiv/kpixiv.log` (written by
+  both `kpixiv` and `kpixivctl`, with simple size-based rotation), and the
+  Settings "View Logs..." viewer reads from that file instead of the systemd
+  journal. Previously "View Logs" always queried `journalctl -u
+  kpixiv.service`, so it only showed anything when kPixiv was running as the
+  systemd user service; launched via `--foreground` for debugging, the
+  viewer showed an empty or stale journal instead of the actual running
+  instance's logs.
+- Launching kPixiv while another instance is already running used to exit
+  with zero feedback. It now logs a warning and shows a desktop notification
+  explaining that kPixiv is already running, instead of silently doing
+  nothing. This is now rare in practice: see "kPixiv now runs exclusively as
+  a systemd user service" below.
 - The ranking page now resets to 1 when the daily ranking rolls over to a new
   day (JST), so the fresh ranking is crawled from the top instead of
   continuing from stale pages of the previous day.

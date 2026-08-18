@@ -36,6 +36,7 @@ type Scheduler struct {
 	stopCh               chan struct{}
 	resetSetCh           chan struct{}
 	resetFetchCh         chan struct{}
+	resetBookmarkCh      chan struct{}
 	wg                   sync.WaitGroup
 	mu                   sync.Mutex
 	running              bool
@@ -54,6 +55,7 @@ func New(cfg *config.Config, st *storage.Storage, p pixiv.ImageClient, s wallpap
 		stopCh:               make(chan struct{}),
 		resetSetCh:           make(chan struct{}, 1),
 		resetFetchCh:         make(chan struct{}, 1),
+		resetBookmarkCh:      make(chan struct{}, 1),
 	}
 
 	return sch
@@ -89,8 +91,17 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 	fetchTicker := time.NewTicker(sch.fetchInterval)
 	defer fetchTicker.Stop()
 
-	bookmarkChan, cleanup := sch.newBookmarkTicker()
-	defer cleanup()
+	// bookmarkTicker is always created, mirroring setTicker/fetchTicker above.
+	// Whether a tick actually triggers a sync is decided inside the case body
+	// by reading the live cfg.Bookmarks.Enabled flag, not by whether bookmarks
+	// were enabled at the moment the scheduler started. Previously this ticker
+	// was only created when Bookmarks.Enabled was already true at startup; if
+	// the user enabled bookmark sync later via Settings, the ticker channel
+	// stayed nil forever and bookmark sync would never run again until the
+	// app was restarted (surfaced in the GUI as "Next sync: Any moment now"
+	// stuck indefinitely).
+	bookmarkTicker := time.NewTicker(sch.bookmarkSyncInterval)
+	defer bookmarkTicker.Stop()
 
 	for {
 		select {
@@ -101,6 +112,8 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 			resetTicker(setTicker, sch.setInterval)
 		case <-sch.resetFetchCh:
 			resetTicker(fetchTicker, sch.fetchInterval)
+		case <-sch.resetBookmarkCh:
+			resetTicker(bookmarkTicker, sch.bookmarkSyncInterval)
 		case <-setTicker.C:
 			if sch.cfg.Wallpaper.RotationEnabled || sch.cfg.Wallpaper.MultiMonitorEnabled {
 				log.Debug("Setting wallpaper")
@@ -114,22 +127,16 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 					log.Warn("Fetch tick failed", "error", err)
 				}
 			}
-		case <-bookmarkChan:
-			if err := sch.syncBookmarks(ctx, cname); err != nil {
-				log.Warn("Bookmark sync tick failed", "error", err)
+		case <-bookmarkTicker.C:
+			if sch.cfg.Bookmarks.Enabled {
+				if err := sch.syncBookmarks(ctx, cname); err != nil {
+					log.Warn("Bookmark sync tick failed", "error", err)
+				}
 			}
 		case <-ctx.Done():
 			return
 		}
 	}
-}
-
-func (sch *Scheduler) newBookmarkTicker() (<-chan time.Time, func()) {
-	if !sch.cfg.Bookmarks.Enabled {
-		return nil, func() {}
-	}
-	ticker := time.NewTicker(sch.bookmarkSyncInterval)
-	return ticker.C, ticker.Stop
 }
 
 func resetTicker(ticker *time.Ticker, interval time.Duration) {
@@ -403,8 +410,9 @@ func isValidWallpaperFile(entry os.DirEntry) bool {
 	return true
 }
 
-// ApplyConfig updates the scheduler's config and resets both tickers so new
-// intervals take effect without stopping the scheduler goroutine.
+// ApplyConfig updates the scheduler's config and resets the set, fetch, and
+// bookmark-sync tickers so new intervals (and newly-enabled bookmark sync)
+// take effect without stopping the scheduler goroutine.
 func (sch *Scheduler) ApplyConfig(cfg *config.Config) {
 	sch.mu.Lock()
 	sch.cfg = cfg
@@ -431,6 +439,10 @@ func (sch *Scheduler) ApplyConfig(cfg *config.Config) {
 	}
 	select {
 	case sch.resetFetchCh <- struct{}{}:
+	default:
+	}
+	select {
+	case sch.resetBookmarkCh <- struct{}{}:
 	default:
 	}
 }

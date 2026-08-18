@@ -1,5 +1,5 @@
 .PHONY: help build build-kpixiv build-kpixivctl clean \
-        install dev-install uninstall dist install-desktop register-scheme
+        install dev-install uninstall dist install-desktop install-service register-scheme
 
 Q       ?= @
 step     = $(Q)printf '==> %s\n' '$(1)'
@@ -12,6 +12,7 @@ KPIXIVCTL_BIN  = $(HOME)/.local/bin/kpixivctl
 XDG_DATA_HOME  ?= $(HOME)/.local/share
 APPLICATIONS_DIR = $(XDG_DATA_HOME)/applications
 ICONS_DIR      = $(XDG_DATA_HOME)/icons/hicolor/scalable/apps
+SYSTEMD_UNIT_DIR = $(HOME)/.config/systemd/user
 
 QT6_BIN        = /usr/lib/qt6/bin
 XDG_ENV        = PATH="$(PATH):$(QT6_BIN)"
@@ -31,9 +32,9 @@ help:
 	@echo '  dist          Create release tarball'
 	@echo ''
 	@echo 'Install:'
-	@echo '  install       Build and install to ~/.local'
-	@echo '  dev-install   Build and symlink for development'
-	@echo '  uninstall     Remove all installed files'
+	@echo '  install       Build, install to ~/.local, and start the systemd user service'
+	@echo '  dev-install   Build, symlink for development, and start the systemd user service'
+	@echo '  uninstall     Remove all installed files and stop the systemd user service'
 	@echo ''
 	@echo 'Housekeeping:'
 	@echo '  clean         Remove build and dist directories'
@@ -54,6 +55,14 @@ install-desktop:
 	$(Q)sed "s|@HOME@|$(HOME)|g" configs/kpixiv.desktop > $(APPLICATIONS_DIR)/kpixiv.desktop
 	$(Q)cp internal/tray/assets/kpixiv-symbolic.svg $(ICONS_DIR)/kpixiv.svg
 
+install-service:
+	$(call step,Installing systemd user service)
+	$(Q)mkdir -p $(SYSTEMD_UNIT_DIR)
+	$(Q)cp internal/platform/kpixiv.service $(SYSTEMD_UNIT_DIR)/kpixiv.service
+	$(Q)systemctl --user daemon-reload
+	$(Q)systemctl --user enable --now kpixiv.service
+	$(call step,kPixiv is running as a systemd user service)
+
 register-scheme: install-desktop
 	$(call step,Registering pixiv:// handler)
 	$(Q)$(XDG_ENV) xdg-mime default kpixiv.desktop x-scheme-handler/pixiv
@@ -64,12 +73,14 @@ install: build register-scheme
 	$(Q)rm -f $(KPIXIV_BIN) $(KPIXIVCTL_BIN)
 	$(Q)cp $(BIN_DIR)/kpixiv $(KPIXIV_BIN)
 	$(Q)cp $(BIN_DIR)/kpixivctl $(KPIXIVCTL_BIN)
+	$(Q)$(MAKE) install-service
 	$(call step,Installation complete)
 
 dev-install: build register-scheme
 	$(call step,Installing development symlinks)
 	$(Q)ln -sf $(BIN_DIR)/kpixiv $(KPIXIV_BIN)
 	$(Q)ln -sf $(BIN_DIR)/kpixivctl $(KPIXIVCTL_BIN)
+	$(Q)$(MAKE) install-service
 	$(call step,Installation complete)
 
 uninstall:
@@ -78,7 +89,8 @@ uninstall:
 	$(Q)rm -f $(APPLICATIONS_DIR)/kpixiv.desktop
 	$(Q)-$(XDG_ENV) xdg-mime default "" x-scheme-handler/pixiv 2>/dev/null
 	$(Q)rm -f $(ICONS_DIR)/kpixiv.svg
-	$(Q)rm -f $(HOME)/.config/systemd/user/kpixiv.service
+	$(Q)-systemctl --user disable --now kpixiv.service 2>/dev/null
+	$(Q)rm -f $(SYSTEMD_UNIT_DIR)/kpixiv.service
 	$(Q)-systemctl --user daemon-reload 2>/dev/null
 	$(call step,Uninstall complete)
 

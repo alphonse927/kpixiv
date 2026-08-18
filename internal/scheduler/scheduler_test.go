@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,8 +17,19 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// logger.Init writes to a centralized log file under $HOME/.local/state
+	// (see internal/platform.LogFilePath). Point HOME at a throwaway temp
+	// dir for the whole test binary run so tests never touch the real
+	// user's state directory.
+	tmpHome, err := os.MkdirTemp("", "kpixiv-test-home-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", tmpHome) //nolint:errcheck
 	logger.Init(false)
-	m.Run()
+	code := m.Run()
+	os.RemoveAll(tmpHome) //nolint:errcheck
+	os.Exit(code)
 }
 
 func TestMatchesOrientation(t *testing.T) {
@@ -424,5 +436,77 @@ func TestIsRunning(t *testing.T) {
 
 	if sch.IsRunning() {
 		t.Error("IsRunning() after Stop(): got true, want false")
+	}
+}
+
+// TestBookmarkSyncStartsAfterBeingEnabledPostStartup is a regression test for
+// a bug where the bookmark-sync ticker was only created if Bookmarks.Enabled
+// was already true at the moment the scheduler started. If a user enabled
+// bookmark sync later (e.g. after logging in via Settings), the running
+// scheduler's ticker channel stayed nil forever and bookmark sync never ran
+// again until the process was restarted -- surfaced in the GUI as "Next
+// sync: Any moment now" stuck indefinitely. It's fixed by always creating
+// the ticker and gating the sync on the live Enabled flag inside the tick
+// case, the same pattern already used for setTicker/fetchTicker.
+func TestBookmarkSyncStartsAfterBeingEnabledPostStartup(t *testing.T) {
+	cfg := testConfig()
+	cfg.Bookmarks.Enabled = false // disabled when the scheduler starts
+	s := testStorage(t)
+	m := &mockPixivClient{}
+	setter := &mockSetter{}
+
+	sch := New(cfg, s, m, setter)
+	sch.bookmarkSyncInterval = 20 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := sch.Run(ctx); err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+	defer sch.Stop("test")
+
+	logger.SetLevel("debug")
+	defer logger.SetLevel("info")
+
+	// Observe the debug logs emitted by syncBookmarks via the centralized
+	// log file (see internal/logger and internal/platform.LogFilePath) to
+	// confirm the tick loop actually attempts a sync once enabled. TestMain
+	// points HOME at a throwaway temp dir, so this file lives there, not in
+	// the real user's state directory.
+	logPath := logger.FilePath()
+	if logPath == "" {
+		t.Fatal("logger.FilePath() is empty; centralized log file was not initialized")
+	}
+
+	var startOffset int64
+	if info, err := os.Stat(logPath); err == nil {
+		startOffset = info.Size()
+	}
+
+	// Enable bookmark sync the way Settings would after a save: it mutates
+	// the shared config pointer that the running scheduler already holds
+	// (internal/app/app.go documents this pattern). Note this deliberately
+	// does NOT call ApplyConfig: the interval is left as the 20ms override
+	// above rather than being recomputed from cfg.Bookmarks.SyncInterval
+	// (whole minutes), which would be far too coarse for this test and,
+	// at its zero-value default, would panic on ticker.Reset(0). The point
+	// of this test is specifically that the *already-running* ticker picks
+	// up the live Enabled flag -- it was never about interval changes.
+	cfg.Bookmarks.Enabled = true
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("bookmark sync was never attempted after being enabled post-startup")
+		}
+
+		data, err := os.ReadFile(logPath)
+		if err == nil && int64(len(data)) > startOffset {
+			if strings.Contains(string(data[startOffset:]), "Skipping bookmark sync: not logged in") {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

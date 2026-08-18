@@ -37,11 +37,14 @@ This project started as a tool for my own desktop and continues to evolve based 
 ```bash
 # Install from source
 make install
-kpixivctl autostart enable     # Enable automatic startup
 
 # Or download a release
 # https://github.com/alphonse927/kpixiv/releases
 ```
+
+`make install` builds kPixiv, installs it to `~/.local`, and installs +
+starts the systemd user service — kPixiv runs exclusively as a systemd user
+service; see [Installation](#installation) for details and why.
 
 For detailed installation options, see [Installation](#installation).
 
@@ -75,10 +78,15 @@ For detailed installation options, see [Installation](#installation).
 ### Desktop Integration
 
 - KDE Plasma–focused wallpaper manager
-- Systemd user service for an autostart and supervision
+- Runs exclusively as a systemd user service — autostart on login and
+  auto-restart on crash, with no separate "run it manually" mode to keep in
+  sync (see [Installation](#installation))
 - System tray with wallpaper controls
 - GUI settings window (Home, Monitors, Settings, Account, About)
-- In-app log viewer (systemd journal)
+- In-app log viewer, reading kPixiv's own centralized log file
+  (`~/.local/state/kpixiv/kpixiv.log`) rather than the systemd journal, so it
+  works the same way whether kPixiv is running as the service or via
+  `--foreground` for debugging
 
 ## Screenshots
 
@@ -94,6 +102,26 @@ For detailed installation options, see [Installation](#installation).
 
 ## Installation
 
+kPixiv runs exclusively as a **systemd user service** (`kpixiv.service`).
+That's what gives it autostart on login and automatic restart if it ever
+crashes. Running the `kpixiv` binary directly (a terminal, an app-menu
+launcher) doesn't start a second, independent instance — it hands off to
+the systemd-managed one, starting it if it isn't already running. See
+[`references/docs/decisions.md`](references/docs/decisions.md) for the full
+rationale.
+
+### Build from source
+
+```bash
+make install
+```
+
+This builds both binaries, installs them to `~/.local/bin`, registers the
+`pixiv://` URL handler, and installs + starts the `kpixiv.service` systemd
+user unit — no separate step needed.
+
+For development, use `make dev-install` instead — it symlinks the build output so you can iterate without re-running the full install.
+
 ### Download a release
 
 Download the latest tarball from the [Releases page](https://github.com/alphonse927/kpixiv/releases) and run:
@@ -105,22 +133,36 @@ cd kpixiv-*/
 mkdir -p ~/.local/bin
 cp kpixiv kpixivctl ~/.local/bin/
 
-# Enable automatic startup (optional)
+# Install and start the systemd user service
 kpixivctl autostart enable
 ```
 
+The tarball doesn't run the Makefile's install steps, so `kpixivctl autostart enable` is what installs and starts `kpixiv.service` for this path.
+
+### Managing the service
+
 ```bash
-make install
-kpixivctl autostart enable    # Enable automatic startup (optional)
+kpixivctl autostart enable   # install, enable on login, and start now
+kpixivctl autostart disable  # stop now, and disable startup on login
+kpixivctl status             # check whether it's running
 ```
 
-For development, use `make dev-install` instead — it symlinks the build output so you can iterate without re-running the full install.
+The same toggle is available from Settings → "Run KPixiv in the background".
+
+### Debugging without systemd
+
+`kpixiv --foreground` runs the app directly in the current terminal instead
+of handing off to the systemd service. There's no auto-restart and no
+autostart integration in this mode — it's meant for local debugging, not
+day-to-day use.
 
 ### Uninstall
 
 ```bash
 make uninstall
 ```
+
+This also stops and disables `kpixiv.service`.
 
 ## Configuration
 
@@ -221,8 +263,8 @@ kpixivctl wallpaper next --monitor DP-1  # Apply on a specific monitor
 kpixivctl wallpaper next --all           # Apply on all monitors
 kpixivctl account login                  # Log in to Pixiv
 kpixivctl bookmarks sync                 # Sync bookmarked images
-kpixivctl autostart enable               # Enable automatic startup via systemd
-kpixivctl autostart disable              # Remove from automatic startup
+kpixivctl autostart enable               # Install, enable on login, and start now
+kpixivctl autostart disable              # Stop now, and disable startup on login
 kpixivctl status                         # Show full application status
 kpixivctl doctor                         # Diagnose installation problems
 kpixivctl cache stats                    # Show cache statistics
@@ -237,6 +279,7 @@ See `kpixivctl help` or the [full CLI reference](docs/cli.md) for all commands.
 | `-c, --config`  | Path to config file (default: `~/.config/kpixiv/config.yaml`) |
 | `-v, --verbose` | Enable verbose logging                                        |
 | `--dry-run`     | Show actions without downloading or applying                  |
+| `--foreground`  | `kpixiv` only, advanced: run in this terminal instead of the systemd service (debugging) |
 
 ### Settings window
 
@@ -247,9 +290,9 @@ The Settings window provides tabbed configuration:
 - **Settings** — configure intervals, feed source, dimensions, storage
 - **Account** — Pixiv login/logout
 - **About** — application info
-- **View Logs** — tail the systemd journal in-app
+- **View Logs** — tail kPixiv's own centralized log file in-app
 
-The **Autostart** toggle enables/disables the systemd user service.
+The **"Run KPixiv in the background"** toggle enables/disables — and immediately starts/stops — the systemd user service.
 
 ## Pixiv Login
 

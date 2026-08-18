@@ -12,6 +12,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
+	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/platform"
 )
 
@@ -63,7 +64,7 @@ func (ui *settingsUI) showLogViewer() {
 		firstBatch: false,
 	}
 
-	w := guiApp.NewWindow("KPixiv Logs")
+	w := guiApp.NewWindow(logViewerTitle())
 	w.Resize(fyne.NewSize(900, 600))
 	w.SetContent(content)
 
@@ -75,14 +76,30 @@ func (ui *settingsUI) showLogViewer() {
 	v.window = w
 	w.Show()
 
-	go v.readJournal(ctx)
+	go v.readLogFile(ctx)
 }
 
-func (v *journalViewer) readJournal(ctx context.Context) {
-	lines, err := platform.ReadJournal(ctx, "kpixiv.service")
+func logViewerTitle() string {
+	if path := logger.FilePath(); path != "" {
+		return fmt.Sprintf("KPixiv Logs — %s", path)
+	}
+	return "KPixiv Logs"
+}
+
+func (v *journalViewer) readLogFile(ctx context.Context) {
+	path := logger.FilePath()
+	if path == "" {
+		fyne.Do(func() {
+			v.label.SetText("The centralized log file could not be initialized for this session.\n\n" +
+				"Logs are still being printed to the terminal this instance was launched from, if any.")
+		})
+		return
+	}
+
+	lines, err := platform.TailFile(ctx, path)
 	if err != nil {
 		fyne.Do(func() {
-			v.label.SetText(fmt.Sprintf("Unable to read the systemd journal.\n\n%s", err))
+			v.label.SetText(fmt.Sprintf("Unable to read the log file at %s.\n\n%s", path, err))
 		})
 		return
 	}
