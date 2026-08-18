@@ -59,7 +59,7 @@ func TailFile(ctx context.Context, path string) (<-chan string, error) {
 
 	go func() {
 		defer close(lines)
-		defer f.Close() //nolint:errcheck,gosec // best-effort cleanup
+		defer f.Close() //nolint:errcheck // best-effort cleanup
 
 		reader := bufio.NewReader(f)
 		skipPartial := offset > 0 // first complete line after a seek may be truncated
