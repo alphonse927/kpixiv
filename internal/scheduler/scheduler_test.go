@@ -331,9 +331,24 @@ func TestFetchNowTriggersFetchWhileRunning(t *testing.T) {
 	}
 	defer sch.Stop("test")
 
+	// The scheduler now also fetches once immediately on startup (see
+	// run()). Wait for that initial call and reset the counter so this
+	// test specifically verifies FetchNow(), not just that some fetch
+	// happened since Run() was called.
+	deadline := time.After(2 * time.Second)
+	for calls.Load() == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("expected an initial fetch on startup")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	calls.Store(0)
+
 	sch.FetchNow(ctx, "test")
 
-	deadline := time.After(2 * time.Second)
+	deadline = time.After(2 * time.Second)
 	for calls.Load() == 0 {
 		select {
 		case <-deadline:
@@ -506,6 +521,165 @@ func TestBookmarkSyncStartsAfterBeingEnabledPostStartup(t *testing.T) {
 			if strings.Contains(string(data[startOffset:]), "Skipping bookmark sync: not logged in") {
 				break
 			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestFetchAttemptTrackedEvenOnFailure is a regression test for a bug where
+// "Next fetch" got stuck at "Any moment now" forever once fetches started
+// failing (expired login, network error, etc.). storage.Activity's
+// LastFetchAt only records *successful* fetches, but the GUI's countdown
+// was computed solely from it -- so a string of failures left the countdown
+// permanently based on a stale success timestamp, with no way to tell
+// whether kPixiv was still trying. LastFetchAttempt must advance on every
+// attempt, success or failure, and LastFetchError must reflect the failure.
+func TestFetchAttemptTrackedEvenOnFailure(t *testing.T) {
+	cfg := testConfig()
+	s := testStorage(t)
+	wantErr := errors.New("network unreachable")
+	m := &mockPixivClient{fetchErr: wantErr}
+	setter := &mockSetter{}
+
+	sch := New(cfg, s, m, setter)
+
+	if !sch.LastFetchAttempt().IsZero() {
+		t.Fatal("LastFetchAttempt() should be zero before any fetch has run")
+	}
+	if sch.LastFetchError() != nil {
+		t.Fatal("LastFetchError() should be nil before any fetch has run")
+	}
+
+	before := time.Now()
+	err := sch.fetchImages(context.Background(), "test")
+	if err == nil {
+		t.Fatal("expected fetchImages to return an error")
+	}
+
+	if sch.FetchInProgress() {
+		t.Error("FetchInProgress() should be false once fetchImages has returned")
+	}
+	if got := sch.LastFetchAttempt(); got.Before(before) {
+		t.Errorf("LastFetchAttempt() = %v, want a time at or after %v", got, before)
+	}
+	if got := sch.LastFetchError(); got == nil || !strings.Contains(got.Error(), "network unreachable") {
+		t.Errorf("LastFetchError() = %v, want an error containing %q", got, "network unreachable")
+	}
+}
+
+// TestFetchInProgressDuringFetch is a regression test for the GUI's
+// "Fetching..." indicator: FetchInProgress must be true while a fetch is
+// actively running, not just inferable from timestamps after the fact.
+func TestFetchInProgressDuringFetch(t *testing.T) {
+	cfg := testConfig()
+	s := testStorage(t)
+	release := make(chan struct{})
+	started := make(chan struct{}, 1)
+	m := &mockPixivClientWithHook{
+		mockPixivClient: &mockPixivClient{},
+		onFetch: func() {
+			started <- struct{}{}
+			<-release
+		},
+	}
+	setter := &mockSetter{}
+
+	sch := New(cfg, s, m, setter)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- sch.fetchImages(context.Background(), "test")
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fetch never started")
+	}
+
+	if !sch.FetchInProgress() {
+		t.Error("FetchInProgress() should be true while a fetch is running")
+	}
+
+	close(release)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fetch never finished")
+	}
+
+	if sch.FetchInProgress() {
+		t.Error("FetchInProgress() should be false once the fetch has finished")
+	}
+}
+
+// TestSchedulerRunsInitialFetchAndBookmarkSyncOnStartup verifies that both
+// fetching and bookmark sync are attempted immediately when the scheduler
+// starts, rather than only after a full fetchInterval/bookmarkSyncInterval
+// has elapsed. Without this, starting kPixiv (or logging into Pixiv) meant
+// waiting up to a full interval -- potentially hours -- before anything
+// happened.
+func TestSchedulerRunsInitialFetchAndBookmarkSyncOnStartup(t *testing.T) {
+	cfg := testConfig()
+	cfg.Bookmarks.Enabled = true
+	s := testStorage(t)
+	setter := &mockSetter{}
+
+	fetchCalled := make(chan struct{}, 1)
+	m := &mockPixivClientWithHook{
+		mockPixivClient: &mockPixivClient{},
+		onFetch: func() {
+			select {
+			case fetchCalled <- struct{}{}:
+			default:
+			}
+		},
+	}
+
+	sch := New(cfg, s, m, setter)
+	// Intervals are set far longer than the test's timeout, so any activity
+	// observed can only be attributed to the immediate startup run, not a
+	// regular tick.
+	sch.setInterval = time.Hour
+	sch.fetchInterval = time.Hour
+	sch.bookmarkSyncInterval = time.Hour
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	logger.SetLevel("debug")
+	defer logger.SetLevel("info")
+
+	logPath := logger.FilePath()
+	if logPath == "" {
+		t.Fatal("logger.FilePath() is empty; centralized log file was not initialized")
+	}
+	var startOffset int64
+	if info, err := os.Stat(logPath); err == nil {
+		startOffset = info.Size()
+	}
+
+	if err := sch.Run(ctx); err != nil {
+		t.Fatalf("Run() returned error: %v", err)
+	}
+	defer sch.Stop("test")
+
+	select {
+	case <-fetchCalled:
+	case <-time.After(2 * time.Second):
+		t.Error("expected an immediate fetch on startup, none observed")
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if time.Now().After(deadline) {
+			t.Fatal("expected an immediate bookmark sync attempt on startup, never observed in logs")
+		}
+		data, err := os.ReadFile(logPath)
+		if err == nil && int64(len(data)) > startOffset &&
+			strings.Contains(string(data[startOffset:]), "Starting bookmark sync") {
+			break
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

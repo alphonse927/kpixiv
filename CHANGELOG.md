@@ -11,6 +11,12 @@ Per-monitor control from the system tray, plus richer activity reporting.
 
 ### Added
 
+- kPixiv now runs an initial ranking fetch and bookmark sync immediately on
+  startup (and right after logging into Pixiv), instead of waiting a full
+  fetch/sync interval — which could be hours — for the first attempt.
+- Fetch and bookmark sync attempts are now logged at info level ("Starting
+  ranking fetch", "Starting bookmark sync", and their outcomes), visible in
+  `~/.local/state/kpixiv/kpixiv.log` without needing `--verbose`.
 - Multi-monitor support in the system tray: when multi-monitor rotation is
   enabled, the "current wallpaper" actions are replaced with one submenu per
   monitor, letting you rotate, copy, open, bookmark, or exclude the wallpaper
@@ -61,6 +67,18 @@ Per-monitor control from the system tray, plus richer activity reporting.
 
 ### Fixed
 
+- "Next fetch"/"Next sync" could get stuck showing "Any moment now"
+  indefinitely once fetch or bookmark sync attempts started failing (expired
+  login, network issues, etc.), even with the scheduler ticking correctly.
+  The countdown was computed only from the last *successful* run
+  (`storage.Activity`), so a string of failures froze it on a stale
+  timestamp with no visible sign anything was still happening. It's now
+  computed from the last *attempt*, success or failure, and:
+  - Shows "Fetching…" / "Syncing…" live while a fetch or bookmark sync is
+    actually running, instead of an ambiguous countdown.
+  - Appends "— last attempt failed: <reason>" to the countdown when the most
+    recent attempt errored, so the cause (e.g. an expired Pixiv session) is
+    visible directly in Settings without needing to open the log viewer.
 - Bookmark sync no longer gets stuck showing "Next sync: Any moment now"
   indefinitely. The scheduler's bookmark-sync ticker was previously only
   created if bookmark sync was already enabled at the moment the app

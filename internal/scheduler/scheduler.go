@@ -40,6 +40,21 @@ type Scheduler struct {
 	wg                   sync.WaitGroup
 	mu                   sync.Mutex
 	running              bool
+
+	// Activity tracking for the "Fetching..."/"Syncing..." GUI indicators
+	// and for computing an accurate "Next fetch"/"Next sync" countdown. The
+	// "last attempt" fields update on every tick (success or failure),
+	// unlike storage.Activity's LastFetchAt/LastBookmarkSyncAt, which only
+	// record successful runs -- using only the success timestamp to predict
+	// the next attempt meant a run of failures (auth expired, network down,
+	// etc.) made the countdown get stuck at "Any moment now" forever, with
+	// no visible indication that kPixiv was still trying every interval.
+	fetchInProgress         bool
+	lastFetchAttempt        time.Time
+	lastFetchErr            error
+	bookmarkSyncInProgress  bool
+	lastBookmarkSyncAttempt time.Time
+	lastBookmarkSyncErr     error
 }
 
 // New creates a scheduler for wallpaper rotation and periodic fetching.
@@ -102,6 +117,28 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 	// stuck indefinitely).
 	bookmarkTicker := time.NewTicker(sch.bookmarkSyncInterval)
 	defer bookmarkTicker.Stop()
+
+	// Run an initial fetch and bookmark sync right away instead of waiting
+	// a full interval for the first attempt. Previously, starting kPixiv
+	// (or logging into Pixiv) meant sitting at "Never" / a full interval's
+	// countdown until the first tick, even though the whole point of
+	// starting the app is usually to get fresh wallpapers and bookmarks
+	// without delay. Each runs in its own goroutine so a slow first attempt
+	// doesn't delay the ticker loop below from starting.
+	if sch.cfg.Wallpaper.FetchEnabled {
+		go func() {
+			if err := sch.fetchImages(ctx, cname); err != nil {
+				log.Warn("Initial fetch failed", "error", err)
+			}
+		}()
+	}
+	if sch.cfg.Bookmarks.Enabled {
+		go func() {
+			if err := sch.syncBookmarks(ctx, cname); err != nil {
+				log.Warn("Initial bookmark sync failed", "error", err)
+			}
+		}()
+	}
 
 	for {
 		select {
@@ -189,25 +226,31 @@ func (sch *Scheduler) FetchNowSync(ctx context.Context, cname string) error {
 	return sch.fetchImages(ctx, cname)
 }
 
-func (sch *Scheduler) fetchImages(ctx context.Context, cname string) error {
+func (sch *Scheduler) fetchImages(ctx context.Context, cname string) (err error) {
+	end := sch.beginFetch()
+	defer func() { end(err) }()
+
 	log := logger.WithComponent(cname)
+	log.Info("Starting ranking fetch")
 	if sch.pixiv == nil {
-		return fmt.Errorf("pixiv client is not configured")
+		err = fmt.Errorf("pixiv client is not configured")
+		return err
 	}
 
 	f := fetcher.NewFetcher(sch.cfg, sch.storage, sch.pixiv)
-	if err := f.LoadPage(); err != nil {
+	if err = f.LoadPage(); err != nil {
 		log.Error("Failed to load ranking page", "error", err)
 		return err
 	}
 
-	result, err := f.Fetch(ctx)
+	var result *fetcher.FetchResult
+	result, err = f.Fetch(ctx)
 	if err != nil {
 		log.Error("Failed to fetch", "error", err)
 		return err
 	}
 
-	log.Debug("Ranking fetch complete", "downloaded", result.Downloaded, "filtered", result.Filtered, "nextPage", result.NextPage)
+	log.Info("Ranking fetch complete", "downloaded", result.Downloaded, "filtered", result.Filtered, "nextPage", result.NextPage)
 	if result.Downloaded > 0 {
 		notify.SendDefault("KPixiv", fmt.Sprintf("Downloaded %d new wallpaper%s.", result.Downloaded, pluralize(result.Downloaded)))
 	} else if result.Failed > 0 {
@@ -230,22 +273,27 @@ func (sch *Scheduler) SyncBookmarksNowSync(ctx context.Context, cname string) er
 	return sch.syncBookmarks(ctx, cname)
 }
 
-func (sch *Scheduler) syncBookmarks(ctx context.Context, cname string) error {
+func (sch *Scheduler) syncBookmarks(ctx context.Context, cname string) (err error) {
+	end := sch.beginBookmarkSync()
+	defer func() { end(err) }()
+
 	log := logger.WithComponent(cname)
+	log.Info("Starting bookmark sync")
 
 	pixivClient, ok := sch.pixiv.(*pixiv.Client)
 	if !ok || pixivClient == nil || !pixivClient.LoggedIn() {
-		log.Debug("Skipping bookmark sync: not logged in")
+		log.Info("Skipping bookmark sync: not logged in")
 		return nil
 	}
 
 	if !sch.cfg.Bookmarks.Enabled {
-		log.Debug("Skipping bookmark sync: disabled in config")
+		log.Info("Skipping bookmark sync: disabled in config")
 		return nil
 	}
 
 	syncer := bookmarks.NewSyncer(sch.cfg, sch.storage, pixivClient)
-	result, err := syncer.Sync(ctx)
+	var result *bookmarks.SyncResult
+	result, err = syncer.Sync(ctx)
 	if err != nil {
 		log.Error("Bookmark sync failed", "error", err)
 		if errors.Is(err, pixiv.ErrAuthSessionInvalid) {
@@ -254,7 +302,7 @@ func (sch *Scheduler) syncBookmarks(ctx context.Context, cname string) error {
 		return err
 	}
 
-	log.Debug("Bookmark sync complete", "downloaded", result.Downloaded, "deleted", result.Deleted)
+	log.Info("Bookmark sync complete", "downloaded", result.Downloaded, "deleted", result.Deleted)
 	if result.Downloaded > 0 || result.Deleted > 0 {
 		notify.SendDefault("KPixiv", fmt.Sprintf("Bookmark sync: downloaded %d, removed %d.", result.Downloaded, result.Deleted))
 	}
@@ -657,6 +705,86 @@ func (sch *Scheduler) IsRunning() bool {
 	sch.mu.Lock()
 	defer sch.mu.Unlock()
 	return sch.running
+}
+
+// FetchInProgress reports whether a ranking fetch is actively running right now.
+func (sch *Scheduler) FetchInProgress() bool {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	return sch.fetchInProgress
+}
+
+// LastFetchAttempt returns when the most recent fetch attempt started,
+// regardless of whether it succeeded. Used to compute the "Next fetch"
+// countdown, since basing it on the last *successful* fetch alone would get
+// stuck once fetches start failing.
+func (sch *Scheduler) LastFetchAttempt() time.Time {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	return sch.lastFetchAttempt
+}
+
+// LastFetchError returns the error from the most recent fetch attempt, or
+// nil if it succeeded (or none has run yet).
+func (sch *Scheduler) LastFetchError() error {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	return sch.lastFetchErr
+}
+
+// BookmarkSyncInProgress reports whether a bookmark sync is actively running right now.
+func (sch *Scheduler) BookmarkSyncInProgress() bool {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	return sch.bookmarkSyncInProgress
+}
+
+// LastBookmarkSyncAttempt returns when the most recent bookmark sync attempt
+// started, regardless of whether it succeeded. See LastFetchAttempt.
+func (sch *Scheduler) LastBookmarkSyncAttempt() time.Time {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	return sch.lastBookmarkSyncAttempt
+}
+
+// LastBookmarkSyncError returns the error from the most recent bookmark sync
+// attempt, or nil if it succeeded (or none has run yet).
+func (sch *Scheduler) LastBookmarkSyncError() error {
+	sch.mu.Lock()
+	defer sch.mu.Unlock()
+	return sch.lastBookmarkSyncErr
+}
+
+// beginFetch marks a fetch attempt as started and returns a function to call
+// with its result when done.
+func (sch *Scheduler) beginFetch() func(error) {
+	sch.mu.Lock()
+	sch.fetchInProgress = true
+	sch.lastFetchAttempt = time.Now()
+	sch.mu.Unlock()
+
+	return func(err error) {
+		sch.mu.Lock()
+		sch.fetchInProgress = false
+		sch.lastFetchErr = err
+		sch.mu.Unlock()
+	}
+}
+
+// beginBookmarkSync marks a bookmark sync attempt as started and returns a
+// function to call with its result when done.
+func (sch *Scheduler) beginBookmarkSync() func(error) {
+	sch.mu.Lock()
+	sch.bookmarkSyncInProgress = true
+	sch.lastBookmarkSyncAttempt = time.Now()
+	sch.mu.Unlock()
+
+	return func(err error) {
+		sch.mu.Lock()
+		sch.bookmarkSyncInProgress = false
+		sch.lastBookmarkSyncErr = err
+		sch.mu.Unlock()
+	}
 }
 
 // ApplyCurrentOrNext applies the current wallpaper or a valid fallback.

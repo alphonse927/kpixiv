@@ -924,12 +924,29 @@ func (ui *settingsUI) formatNextFetch() string {
 		return "Disabled"
 	}
 
-	last := ui.ctrl.LastFetch()
+	if ui.ctrl.FetchInProgress() {
+		return "Fetching…"
+	}
+
+	// Use the last *attempt* (success or failure) to predict the next tick,
+	// not only the last success -- otherwise a run of failures freezes this
+	// at "Any moment now" forever even though kPixiv is still trying every
+	// interval. Fall back to the last recorded success, then to "never run
+	// yet", if no attempt has been observed in this process (e.g. right
+	// after a restart, before the first tick).
+	last := ui.ctrl.LastFetchAttempt()
+	if last.IsZero() {
+		last = ui.ctrl.LastFetch()
+	}
 	if last.IsZero() {
 		return "in " + formatMinutes(cfg.Wallpaper.FetchInterval)
 	}
 
-	return ui.formatCountdown(last.Add(time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute))
+	next := ui.formatCountdown(last.Add(time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute))
+	if err := ui.ctrl.LastFetchError(); err != nil {
+		return next + " — last attempt failed: " + truncateError(err)
+	}
+	return next
 }
 
 func (ui *settingsUI) formatLastBookmarkSync() string {
@@ -947,12 +964,23 @@ func (ui *settingsUI) formatNextBookmarkSync() string {
 		return "Disabled"
 	}
 
-	last := ui.ctrl.LastBookmarkSync()
+	if ui.ctrl.BookmarkSyncInProgress() {
+		return "Syncing…"
+	}
+
+	last := ui.ctrl.LastBookmarkSyncAttempt()
+	if last.IsZero() {
+		last = ui.ctrl.LastBookmarkSync()
+	}
 	if last.IsZero() {
 		return "in " + formatMinutes(cfg.Bookmarks.SyncInterval)
 	}
 
-	return ui.formatCountdown(last.Add(time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute))
+	next := ui.formatCountdown(last.Add(time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute))
+	if err := ui.ctrl.LastBookmarkSyncError(); err != nil {
+		return next + " — last attempt failed: " + truncateError(err)
+	}
+	return next
 }
 
 // formatCountdown renders a countdown to an upcoming event, e.g., the next
@@ -975,6 +1003,19 @@ func (ui *settingsUI) formatCountdown(next time.Time) string {
 
 func formatMinutes(minutes int) string {
 	return strconv.Itoa(minutes) + "m"
+}
+
+// truncateError renders an error for a single-line status display, keeping
+// it short enough not to blow out the layout while still being specific
+// enough to point someone at the actual cause (expired login, network
+// error, etc.) instead of a bare "failed".
+func truncateError(err error) string {
+	const maxLen = 60
+	msg := err.Error()
+	if len(msg) <= maxLen {
+		return msg
+	}
+	return msg[:maxLen-1] + "…"
 }
 
 // rankingSubDisplay maps a ranking mode to its GUI select option.
