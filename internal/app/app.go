@@ -792,6 +792,40 @@ func (c *Controller) LastBookmarkSync() time.Time {
 	return activity.LastBookmarkSyncAt
 }
 
+// FetchInProgress reports whether a ranking fetch is actively running right now.
+func (c *Controller) FetchInProgress() bool {
+	return c.sch.FetchInProgress()
+}
+
+// LastFetchAttempt returns when the most recent fetch attempt started,
+// regardless of whether it succeeded.
+func (c *Controller) LastFetchAttempt() time.Time {
+	return c.sch.LastFetchAttempt()
+}
+
+// LastFetchError returns the error from the most recent fetch attempt, or
+// nil if it succeeded (or none has run yet).
+func (c *Controller) LastFetchError() error {
+	return c.sch.LastFetchError()
+}
+
+// BookmarkSyncInProgress reports whether a bookmark sync is actively running right now.
+func (c *Controller) BookmarkSyncInProgress() bool {
+	return c.sch.BookmarkSyncInProgress()
+}
+
+// LastBookmarkSyncAttempt returns when the most recent bookmark sync attempt
+// started, regardless of whether it succeeded.
+func (c *Controller) LastBookmarkSyncAttempt() time.Time {
+	return c.sch.LastBookmarkSyncAttempt()
+}
+
+// LastBookmarkSyncError returns the error from the most recent bookmark sync
+// attempt, or nil if it succeeded (or none has run yet).
+func (c *Controller) LastBookmarkSyncError() error {
+	return c.sch.LastBookmarkSyncError()
+}
+
 // ConfigPath returns the path of the active configuration file.
 func (c *Controller) ConfigPath() string {
 	return c.cfg.ConfigPath
