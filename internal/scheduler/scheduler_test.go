@@ -25,10 +25,12 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	os.Setenv("HOME", tmpHome) //nolint:errcheck
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		panic(err)
+	}
 	logger.Init(false)
 	code := m.Run()
-	os.RemoveAll(tmpHome) //nolint:errcheck
+	_ = os.RemoveAll(tmpHome)
 	os.Exit(code)
 }
 

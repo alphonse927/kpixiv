@@ -89,8 +89,8 @@ func openLogFile() {
 		return
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
-		fmt.Fprintf(os.Stderr, "logger: cannot create log directory: %v\n", err)
+	if mkErr := os.MkdirAll(filepath.Dir(path), 0750); mkErr != nil {
+		fmt.Fprintf(os.Stderr, "logger: cannot create log directory: %v\n", mkErr)
 		return
 	}
 

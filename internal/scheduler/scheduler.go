@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -106,39 +107,46 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 	fetchTicker := time.NewTicker(sch.fetchInterval)
 	defer fetchTicker.Stop()
 
-	// bookmarkTicker is always created, mirroring setTicker/fetchTicker above.
-	// Whether a tick actually triggers a sync is decided inside the case body
-	// by reading the live cfg.Bookmarks.Enabled flag, not by whether bookmarks
-	// were enabled at the moment the scheduler started. Previously this ticker
-	// was only created when Bookmarks.Enabled was already true at startup; if
-	// the user enabled bookmark sync later via Settings, the ticker channel
-	// stayed nil forever and bookmark sync would never run again until the
-	// app was restarted (surfaced in the GUI as "Next sync: Any moment now"
-	// stuck indefinitely).
-	bookmarkTicker := time.NewTicker(sch.bookmarkSyncInterval)
-	defer bookmarkTicker.Stop()
+	// bookmarkTicker is always created when its interval is valid, mirroring
+	// setTicker/fetchTicker above. Whether a tick actually triggers a sync is
+	// decided inside the case body by reading the live cfg.Bookmarks.Enabled
+	// flag, not by whether bookmarks were enabled at the moment the scheduler
+	// started. Previously this ticker was only created when Bookmarks.Enabled
+	// was already true at startup; if the user enabled bookmark sync later via
+	// Settings, the ticker channel stayed nil forever and bookmark sync would
+	// never run again until the app was restarted (surfaced in the GUI as
+	// "Next sync: Any moment now" stuck indefinitely).
+	//
+	// A non-positive interval gets no ticker rather than panicking:
+	// time.NewTicker rejects such values, and while the config loader clamps
+	// real values to at least DefaultBookmarksSync, a raw zero-value config
+	// must not crash the scheduler goroutine.
+	var bookmarkTicker *time.Ticker
+	var bookmarkTickerC <-chan time.Time
+	if sch.bookmarkSyncInterval > 0 {
+		bookmarkTicker = time.NewTicker(sch.bookmarkSyncInterval)
+		defer bookmarkTicker.Stop()
+		bookmarkTickerC = bookmarkTicker.C
+	}
 
-	// Run an initial fetch and bookmark sync right away instead of waiting
-	// a full interval for the first attempt. Previously, starting kPixiv
-	// (or logging into Pixiv) meant sitting at "Never" / a full interval's
-	// countdown until the first tick, even though the whole point of
-	// starting the app is usually to get fresh wallpapers and bookmarks
-	// without delay. Each runs in its own goroutine so a slow first attempt
-	// doesn't delay the ticker loop below from starting.
-	if sch.cfg.Wallpaper.FetchEnabled {
-		go func() {
-			if err := sch.fetchImages(ctx, cname); err != nil {
-				log.Warn("Initial fetch failed", "error", err)
-			}
-		}()
-	}
-	if sch.cfg.Bookmarks.Enabled {
-		go func() {
-			if err := sch.syncBookmarks(ctx, cname); err != nil {
-				log.Warn("Initial bookmark sync failed", "error", err)
-			}
-		}()
-	}
+	// taskCtx is cancelled when the scheduler is told to stop (or the
+	// caller's context ends), so the startup tasks below are guaranteed to
+	// wind down before run() returns. Stop() waits on wg, so this also means
+	// the fire-and-forget startup tasks never keep writing to storage after
+	// the scheduler has stopped -- a concern in tests where the storage dir
+	// is torn down right after Stop().
+	taskCtx, cancelTask := context.WithCancel(ctx)
+	defer cancelTask()
+	go func() {
+		select {
+		case <-sch.stopCh:
+			cancelTask()
+		case <-taskCtx.Done():
+		}
+	}()
+
+	initialDone := sch.launchInitialTasks(taskCtx, cname, log)
+	defer func() { <-initialDone }()
 
 	for {
 		select {
@@ -150,29 +158,83 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 		case <-sch.resetFetchCh:
 			resetTicker(fetchTicker, sch.fetchInterval)
 		case <-sch.resetBookmarkCh:
-			resetTicker(bookmarkTicker, sch.bookmarkSyncInterval)
+			if bookmarkTicker != nil {
+				resetTicker(bookmarkTicker, sch.bookmarkSyncInterval)
+			}
 		case <-setTicker.C:
-			if sch.cfg.Wallpaper.RotationEnabled || sch.cfg.Wallpaper.MultiMonitorEnabled {
-				log.Debug("Setting wallpaper")
-				if err := sch.rotateWallpaper(cname); err != nil {
-					log.Warn("Failed to set wallpaper", "error", err)
-				}
-			}
+			sch.handleSetTick(cname, log)
 		case <-fetchTicker.C:
-			if sch.cfg.Wallpaper.FetchEnabled {
-				if err := sch.fetchImages(ctx, cname); err != nil {
-					log.Warn("Fetch tick failed", "error", err)
-				}
-			}
-		case <-bookmarkTicker.C:
-			if sch.cfg.Bookmarks.Enabled {
-				if err := sch.syncBookmarks(ctx, cname); err != nil {
-					log.Warn("Bookmark sync tick failed", "error", err)
-				}
-			}
+			sch.handleFetchTick(ctx, cname, log)
+		case <-bookmarkTickerC:
+			sch.handleBookmarkTick(ctx, cname, log)
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// launchInitialTasks runs an initial fetch and bookmark sync right away
+// instead of waiting a full interval for the first attempt. Previously,
+// starting kPixiv (or logging into Pixiv) meant sitting at "Never" / a full
+// interval's countdown until the first tick, even though the whole point of
+// starting the app is usually to get fresh wallpapers and bookmarks without
+// delay. Each runs in its own goroutine so a slow first attempt doesn't delay
+// the ticker loop below from starting. The returned channel is closed once
+// every spawned task has completed.
+func (sch *Scheduler) launchInitialTasks(ctx context.Context, cname string, log *slog.Logger) <-chan struct{} {
+	var tasks sync.WaitGroup
+	if sch.cfg.Wallpaper.FetchEnabled {
+		tasks.Add(1)
+		go func() {
+			defer tasks.Done()
+			if err := sch.fetchImages(ctx, cname); err != nil {
+				log.Warn("Initial fetch failed", "error", err)
+			}
+		}()
+	}
+	if sch.cfg.Bookmarks.Enabled {
+		tasks.Add(1)
+		go func() {
+			defer tasks.Done()
+			if err := sch.syncBookmarks(ctx, cname); err != nil {
+				log.Warn("Initial bookmark sync failed", "error", err)
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		tasks.Wait()
+		close(done)
+	}()
+	return done
+}
+
+func (sch *Scheduler) handleSetTick(cname string, log *slog.Logger) {
+	if !sch.cfg.Wallpaper.RotationEnabled && !sch.cfg.Wallpaper.MultiMonitorEnabled {
+		return
+	}
+	log.Debug("Setting wallpaper")
+	if err := sch.rotateWallpaper(cname); err != nil {
+		log.Warn("Failed to set wallpaper", "error", err)
+	}
+}
+
+func (sch *Scheduler) handleFetchTick(ctx context.Context, cname string, log *slog.Logger) {
+	if !sch.cfg.Wallpaper.FetchEnabled {
+		return
+	}
+	if err := sch.fetchImages(ctx, cname); err != nil {
+		log.Warn("Fetch tick failed", "error", err)
+	}
+}
+
+func (sch *Scheduler) handleBookmarkTick(ctx context.Context, cname string, log *slog.Logger) {
+	if !sch.cfg.Bookmarks.Enabled {
+		return
+	}
+	if err := sch.syncBookmarks(ctx, cname); err != nil {
+		log.Warn("Bookmark sync tick failed", "error", err)
 	}
 }
 

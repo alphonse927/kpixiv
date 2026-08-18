@@ -10,6 +10,29 @@ import (
 	"time"
 )
 
+func readLine(t *testing.T, lines <-chan string, label string) string {
+	t.Helper()
+	select {
+	case got := <-lines:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", label)
+		return ""
+	}
+}
+
+func expectChannelClosed(t *testing.T, lines <-chan string, label string) {
+	t.Helper()
+	select {
+	case _, ok := <-lines:
+		if ok {
+			t.Fatalf("expected channel to close %s, got a value", label)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for channel to close %s", label)
+	}
+}
+
 func TestTailFileStreamsExistingAndAppendedLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
@@ -28,13 +51,8 @@ func TestTailFileStreamsExistingAndAppendedLines(t *testing.T) {
 
 	want := []string{"line1", "line2"}
 	for _, w := range want {
-		select {
-		case got := <-lines:
-			if got != w {
-				t.Fatalf("got line %q, want %q", got, w)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatalf("timed out waiting for seeded line %q", w)
+		if got := readLine(t, lines, fmt.Sprintf("seeded line %q", w)); got != w {
+			t.Fatalf("got line %q, want %q", got, w)
 		}
 	}
 
@@ -51,25 +69,12 @@ func TestTailFileStreamsExistingAndAppendedLines(t *testing.T) {
 		t.Fatalf("Close() returned error: %v", err)
 	}
 
-	select {
-	case got := <-lines:
-		if got != "line3" {
-			t.Fatalf("got appended line %q, want %q", got, "line3")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for appended line")
+	if got := readLine(t, lines, "appended line"); got != "line3" {
+		t.Fatalf("got appended line %q, want %q", got, "line3")
 	}
 
 	cancel()
-
-	select {
-	case _, ok := <-lines:
-		if ok {
-			t.Fatal("expected channel to close after context cancellation")
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for channel to close after cancellation")
-	}
+	expectChannelClosed(t, lines, "after context cancellation")
 }
 
 func TestTailFileHandlesPartialLineAtEOF(t *testing.T) {
@@ -128,14 +133,14 @@ func TestTailFileSeedsFromTailOfLargeFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() returned error: %v", err)
 	}
-	const totalLines = 20000 // comfortably larger than defaultTailSeedBytes
-	for i := 0; i < totalLines; i++ {
-		if _, err := fmt.Fprintf(f, "line-%06d\n", i); err != nil {
-			t.Fatalf("Fprintf() returned error: %v", err)
+	const totalLines = 30000 // comfortably larger than defaultTailSeedBytes
+	for i := range totalLines {
+		if _, wErr := fmt.Fprintf(f, "line-%06d\n", i); wErr != nil {
+			t.Fatalf("Fprintf() returned error: %v", wErr)
 		}
 	}
-	if err := f.Close(); err != nil {
-		t.Fatalf("Close() returned error: %v", err)
+	if closeErr := f.Close(); closeErr != nil {
+		t.Fatalf("Close() returned error: %v", closeErr)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
