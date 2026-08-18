@@ -106,9 +106,7 @@ kPixiv runs exclusively as a **systemd user service** (`kpixiv.service`).
 That's what gives it autostart on login and automatic restart if it ever
 crashes. Running the `kpixiv` binary directly (a terminal, an app-menu
 launcher) doesn't start a second, independent instance — it hands off to
-the systemd-managed one, starting it if it isn't already running. See
-[`references/docs/decisions.md`](references/docs/decisions.md) for the full
-rationale.
+the systemd-managed one, starting it if it isn't already running.
 
 ### Build from source
 
