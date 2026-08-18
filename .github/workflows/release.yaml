@@ -24,12 +24,9 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev xorg-dev libwayland-dev libxkbcommon-dev libdbus-1-dev libxcursor-dev
       - run: make dist
       - name: Generate release title
-        id: title
         run: |
           TITLE=$(git tag -l --format='%(contents:subject)' "${{ github.ref_name }}" 2>/dev/null) || TITLE="${{ github.ref_name }}"
-          echo "title<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$TITLE" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$TITLE" > /tmp/release-title.txt
       - name: Generate release notes
         id: notes
         run: |
@@ -55,6 +52,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "${{ github.ref_name }}" \
-            --title "${{ steps.title.outputs.title }}" \
+            --title "$(cat /tmp/release-title.txt)" \
             --notes-file /tmp/release-notes.md \
             dist/kpixiv-*.tar.gz
