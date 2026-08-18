@@ -300,7 +300,7 @@ func (ui *settingsUI) createWidgets() {
 	ui.notificationsEnabled = widget.NewCheck("Show desktop notifications", nil)
 	ui.notificationsEnabled.SetChecked(cfg.Notifications.Enabled)
 
-	ui.autostartCheck = widget.NewCheck("Start KPixiv automatically when I log in", nil)
+	ui.autostartCheck = widget.NewCheck("Run KPixiv in the background (starts on login, via systemd)", nil)
 	ui.autostartCheck.Disable()
 	ui.autostartStatus = widget.NewLabel("")
 	ui.autostartStatus.Hide()
@@ -743,6 +743,32 @@ func (ui *settingsUI) applyAutostart() {
 	if ui.autostartCheck.Checked == ui.autostartOrigState {
 		return
 	}
+
+	if !ui.autostartCheck.Checked {
+		// Disabling now stops kPixiv immediately, not just future logins
+		// (see internal/platform.DisableService). If this window is itself
+		// running as the systemd-managed instance, confirming here will
+		// close it. Confirm first so this isn't a surprise.
+		dialog.ShowConfirm(
+			"Stop KPixiv?",
+			"This stops kPixiv now, not just at your next login.\n\n"+
+				"Wallpaper rotation, fetching, and bookmark sync will stop until you turn this back on.",
+			func(confirmed bool) {
+				if !confirmed {
+					ui.autostartCheck.SetChecked(ui.autostartOrigState)
+					return
+				}
+				ui.doApplyAutostart()
+			},
+			ui.w,
+		)
+		return
+	}
+
+	ui.doApplyAutostart()
+}
+
+func (ui *settingsUI) doApplyAutostart() {
 	var err error
 	if ui.autostartCheck.Checked {
 		err = ui.ctrl.EnableService()
