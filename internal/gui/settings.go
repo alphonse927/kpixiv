@@ -899,12 +899,16 @@ func (ui *settingsUI) formatLastChange() string {
 }
 
 func (ui *settingsUI) formatNextChange() string {
+	cfg := ui.ctrl.Config()
+	if !cfg.Wallpaper.RotationEnabled {
+		return "Paused"
+	}
+
 	lastRot := ui.ctrl.LastRotation()
 	if lastRot.IsZero() {
 		return "No rotation scheduled"
 	}
 
-	cfg := ui.ctrl.Config()
 	interval := time.Duration(cfg.Wallpaper.SetInterval) * time.Minute
 	return ui.formatCountdown(lastRot.Add(interval))
 }
