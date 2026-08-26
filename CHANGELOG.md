@@ -5,7 +5,47 @@ All notable changes to KPixiv are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - v0.10.0
+## [Unreleased]
+
+### Fixed
+
+- Fix the formatting of the next rotation status message when paused.
+
+## [v0.10.1] – Steady Sync
+
+Reliability fixes for fetching, syncing, and daemon management.
+
+### Changed
+
+- `kpixivctl autostart enable` now also starts kPixiv immediately, not just
+  on the next login (`systemctl --user enable --now`). Likewise, `...
+  autostart disable` now stops it immediately rather than only preventing
+  future autostart. The Settings "Run KPixiv in the background" checkbox
+  follows the same behavior, and now asks for confirmation before turning
+  it off, since doing so stops kPixiv right away.
+- kPixiv now runs exclusively as a systemd user service. Running the
+  `kpixiv` binary directly hands off to the systemd-managed instance
+  (starting it if needed) and exits. A `--foreground` debug mode is
+  available for manual execution without systemd integration.
+
+### Fixed
+
+- "Next fetch"/"Next sync" could get stuck showing "Any moment now"
+  indefinitely once fetch or bookmark sync attempts started failing. The
+  countdown is now computed from the last *attempt*, success or failure, and
+  shows "Fetching…" / "Syncing…" live while running, with error details
+  appended when the most recent attempt failed.
+- Bookmark sync no longer gets stuck showing "Next sync: Any moment now"
+  indefinitely. The scheduler's bookmark-sync ticker is now always running,
+  and whether a tick triggers a sync is decided from the live config,
+  matching how wallpaper rotation and ranking fetch already behaved.
+- Logs are now centralized to `~/.local/state/kpixiv/kpixiv.log` with
+  automatic rotation, and the Settings "View Logs..." viewer reads from that
+  file instead of the systemd journal.
+- Launching kPixiv while another instance is already running now logs a
+  warning and shows a desktop notification instead of silently exiting.
+
+## [v0.10.0] – Per-Monitor Harmony
 
 Per-monitor control from the system tray, plus richer activity reporting.
 
@@ -35,22 +75,6 @@ Per-monitor control from the system tray, plus richer activity reporting.
 
 ### Changed
 
-- **kPixiv now runs exclusively as a systemd user service.** Previously,
-  running the `kpixiv` binary directly (from a terminal, a `.desktop`
-  launcher, or a portable build) was an equally valid way to run it
-  alongside the systemd autostart service, and the two could silently fight
-  over which one was actually managing wallpaper rotation, fetching, and
-  bookmark sync -- the root cause behind several of the sync/log issues
-  fixed above. A plain `kpixiv` invocation now hands off to the
-  systemd-managed instance (starting it if needed) and exits, instead of
-  becoming a second, unsupervised process. See `references/docs/decisions.md`
-  for the full rationale.
-- `kpixivctl autostart enable` now also starts kPixiv immediately, not just
-  on the next login (`systemctl --user enable --now`). Likewise, `...
-  autostart disable` now stops it immediately rather than only preventing
-  future autostart. The Settings "Run KPixiv in the background" checkbox
-  follows the same behavior, and now asks for confirmation before turning
-  it off, since doing so stops kPixiv right away.
 - Persisted fetch pagination (`pagination.json`) was replaced by a unified
   `Activity` state (`activity.json`) that also records the last ranking fetch
   and last bookmark sync times, so status survives daemon restarts.
@@ -67,40 +91,10 @@ Per-monitor control from the system tray, plus richer activity reporting.
 
 ### Fixed
 
-- "Next fetch"/"Next sync" could get stuck showing "Any moment now"
-  indefinitely once fetch or bookmark sync attempts started failing (expired
-  login, network issues, etc.), even with the scheduler ticking correctly.
-  The countdown was computed only from the last *successful* run
-  (`storage.Activity`), so a string of failures froze it on a stale
-  timestamp with no visible sign anything was still happening. It's now
-  computed from the last *attempt*, success or failure, and:
-  - Shows "Fetching…" / "Syncing…" live while a fetch or bookmark sync is
-    actually running, instead of an ambiguous countdown.
-  - Appends "— last attempt failed: <reason>" to the countdown when the most
-    recent attempt errored, so the cause (e.g. an expired Pixiv session) is
-    visible directly in Settings without needing to open the log viewer.
-- Bookmark sync no longer gets stuck showing "Next sync: Any moment now"
-  indefinitely. The scheduler's bookmark-sync ticker was previously only
-  created if bookmark sync was already enabled at the moment the app
-  started; enabling it later from Settings (e.g. right after logging in)
-  left the ticker permanently inert until the app was restarted. The ticker
-  is now always running, and whether a tick triggers a sync is decided from
-  the live config, matching how wallpaper rotation and ranking fetch already
-  behaved. Changing the sync interval from Settings now also takes effect
-  immediately, without a restart.
-- Logs are now centralized to `~/.local/state/kpixiv/kpixiv.log` (written by
-  both `kpixiv` and `kpixivctl`, with simple size-based rotation), and the
-  Settings "View Logs..." viewer reads from that file instead of the systemd
-  journal. Previously "View Logs" always queried `journalctl -u
-  kpixiv.service`, so it only showed anything when kPixiv was running as the
-  systemd user service; launched via `--foreground` for debugging, the
-  viewer showed an empty or stale journal instead of the actual running
-  instance's logs.
-- Launching kPixiv while another instance is already running used to exit
-  with zero feedback. It now logs a warning and shows a desktop notification
-  explaining that kPixiv is already running, instead of silently doing
-  nothing. This is now rare in practice: see "kPixiv now runs exclusively as
-  a systemd user service" below.
+- "Next change" showed the misleading "Any moment now" when wallpaper
+  rotation was paused and the previous countdown target had already elapsed.
+  It now shows "Paused" whenever rotation is disabled, regardless of how
+  much time has passed since the last rotation.
 - The ranking page now resets to 1 when the daily ranking rolls over to a new
   day (JST), so the fresh ranking is crawled from the top instead of
   continuing from stale pages of the previous day.
