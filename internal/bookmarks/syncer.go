@@ -17,6 +17,7 @@ const pageDelay = 2 * time.Second
 
 type SyncResult struct {
 	Total      int
+	Filtered   int
 	Downloaded int
 	Deleted    int
 	Skipped    int
@@ -75,8 +76,41 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		log.Warn("Failed to record bookmark sync time", "error", err)
 	}
 
-	log.Info("Bookmark sync complete", "total", result.Total, "downloaded", result.Downloaded, "deleted", result.Deleted, "skipped", result.Skipped, "failed", result.Failed)
+	log.Info("Bookmark sync complete", "total", result.Total, "filtered", result.Filtered, "downloaded", result.Downloaded, "deleted", result.Deleted, "skipped", result.Skipped, "failed", result.Failed)
 	return result, nil
+}
+
+// syncOrientation returns the orientation used to filter synced bookmarks.
+// Mirrors the fetcher's logic: single-monitor mode uses the global wallpaper
+// orientation; multi-monitor mode only restricts to landscape when every
+// configured monitor requires landscape, otherwise anything is accepted.
+func (s *Syncer) syncOrientation() config.WallpaperOrientation {
+	if !s.cfg.Wallpaper.MultiMonitorEnabled {
+		return s.cfg.Wallpaper.Orientation
+	}
+
+	for _, monitor := range s.cfg.Wallpaper.Monitors {
+		if monitor.Orientation != config.WallpaperLandscapeOrientation {
+			return config.WallpaperAnyOrientation
+		}
+	}
+
+	return config.WallpaperLandscapeOrientation
+}
+
+// filterByOrientation returns only the images that match the given
+// orientation filter. Bookmarks are still recorded as bookmarked
+// (see remoteIDs handling in syncIncremental/syncFull) even when filtered
+// out here; only download eligibility is restricted.
+func filterByOrientation(images []pixiv.Image, orientation config.WallpaperOrientation) []pixiv.Image {
+	var filtered []pixiv.Image
+	for _, img := range images {
+		if orientation.Matches(img.Width, img.Height) {
+			filtered = append(filtered, img)
+		}
+	}
+
+	return filtered
 }
 
 func (s *Syncer) syncIncremental(ctx context.Context, remoteIDs map[string]struct{}) (*SyncResult, error) {
@@ -92,12 +126,14 @@ func (s *Syncer) syncIncremental(ctx context.Context, remoteIDs map[string]struc
 		remoteIDs[img.ID] = struct{}{}
 	}
 
+	filteredImages := filterByOrientation(images, s.syncOrientation())
 	bookmarksDir := s.storage.BookmarksDir()
-	pending, known, prevMeta := s.prepareDownloads(images)
+	pending, known, prevMeta := s.prepareDownloads(filteredImages)
 	downloaded := s.downloadAndSave(ctx, pending, bookmarksDir, prevMeta)
 
 	return &SyncResult{
 		Total:      len(images),
+		Filtered:   len(filteredImages),
 		Skipped:    known,
 		Downloaded: downloaded,
 		Failed:     len(pending) - downloaded,
@@ -111,6 +147,7 @@ func (s *Syncer) syncFull(ctx context.Context, remoteIDs map[string]struct{}, la
 	bookmarksDir := s.storage.BookmarksDir()
 	result := &SyncResult{}
 	currentURL := lastPageURL
+	orientation := s.syncOrientation()
 
 	for {
 		images, next, err := s.client.FetchBookmarks(ctx, s.client.AuthUserID(), currentURL)
@@ -122,8 +159,10 @@ func (s *Syncer) syncFull(ctx context.Context, remoteIDs map[string]struct{}, la
 			remoteIDs[img.ID] = struct{}{}
 		}
 
-		pending, known, prevMeta := s.prepareDownloads(images)
+		filteredImages := filterByOrientation(images, orientation)
+		pending, known, prevMeta := s.prepareDownloads(filteredImages)
 		result.Total += len(images)
+		result.Filtered += len(filteredImages)
 		result.Skipped += known
 
 		downloaded := s.downloadAndSave(ctx, pending, bookmarksDir, prevMeta)
@@ -132,16 +171,18 @@ func (s *Syncer) syncFull(ctx context.Context, remoteIDs map[string]struct{}, la
 
 		if next == "" {
 			log.Debug("Bookmark full sync complete, marking pagination done")
-			if err := s.storage.SetBookmarkPagination("", true); err != nil {
+			if err = s.storage.SetBookmarkPagination("", true); err != nil {
 				log.Warn("Failed to save pagination state", "error", err)
 			}
+
 			break
 		}
 
 		log.Debug("Saving bookmark pagination cursor", "nextURL", next)
-		if err := s.storage.SetBookmarkPagination(next, false); err != nil {
+		if err = s.storage.SetBookmarkPagination(next, false); err != nil {
 			log.Warn("Failed to save pagination state", "error", err)
 		}
+
 		currentURL = next
 
 		select {
@@ -156,6 +197,7 @@ func (s *Syncer) syncFull(ctx context.Context, remoteIDs map[string]struct{}, la
 		if err != nil {
 			log.Warn("Failed to cleanup removed bookmarks", "error", err)
 		}
+
 		result.Deleted = deleted
 	}
 
@@ -177,13 +219,13 @@ func (s *Syncer) prepareDownloads(images []pixiv.Image) (pending []pixiv.Image, 
 		altPath := filepath.Join(bookmarksDir, img.ID+".png")
 
 		if meta, ok := metadata[img.ID]; ok && meta.Source == "bookmarks" {
-			if _, err := os.Stat(meta.Path); err == nil {
+			if _, err = os.Stat(meta.Path); err == nil {
 				knownCount++
 				continue
 			}
 		}
 
-		if _, err := os.Stat(destPath); err == nil {
+		if _, err = os.Stat(destPath); err == nil {
 			metadata[img.ID] = &storage.ImageMeta{
 				ID:           img.ID,
 				Path:         destPath,
@@ -199,7 +241,7 @@ func (s *Syncer) prepareDownloads(images []pixiv.Image) (pending []pixiv.Image, 
 			continue
 		}
 
-		if _, err := os.Stat(altPath); err == nil {
+		if _, err = os.Stat(altPath); err == nil {
 			metadata[img.ID] = &storage.ImageMeta{
 				ID:           img.ID,
 				Path:         altPath,
@@ -311,8 +353,8 @@ func (s *Syncer) cleanupRemoved(ctx context.Context, remoteIDs map[string]struct
 	if err != nil {
 		log.Warn("Failed to cleanup orphan files", "error", err)
 	}
-	deleted += orphans
 
+	deleted += orphans
 	return deleted, nil
 }
 
@@ -335,14 +377,16 @@ func (s *Syncer) cleanupOrphanFiles(remoteIDs map[string]struct{}, bookmarksDir 
 		if _, inMeta := metadata[id]; inMeta {
 			continue
 		}
+
 		if _, inRemote := remoteIDs[id]; inRemote {
 			continue
 		}
 
 		path := filepath.Join(bookmarksDir, name)
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err = os.Remove(path); err != nil && !os.IsNotExist(err) {
 			continue
 		}
+
 		deleted++
 	}
 

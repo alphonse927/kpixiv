@@ -355,8 +355,8 @@ var bookmarksSyncCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Bookmark sync complete!\n")
-		fmt.Printf("Total: %d, Downloaded: %d, Deleted: %d, Skipped: %d, Failed: %d\n",
-			result.Total, result.Downloaded, result.Deleted, result.Skipped, result.Failed)
+		fmt.Printf("Total: %d, Filtered: %d, Downloaded: %d, Deleted: %d, Skipped: %d, Failed: %d\n",
+			result.Total, result.Filtered, result.Downloaded, result.Deleted, result.Skipped, result.Failed)
 		return nil
 	},
 }

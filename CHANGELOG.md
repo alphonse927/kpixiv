@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bookmark sync now respects the configured wallpaper orientation filter
+  (the same rule used for ranking fetches), so bookmarked images that don't
+  match the orientation setting are no longer downloaded. Images that don't
+  match are still recorded as bookmarked (for status checks) but are
+  skipped for a download.
 - Fix the formatting of the next rotation status message when paused.
 
 ## [v0.10.1] – Steady Sync
