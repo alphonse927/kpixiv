@@ -67,12 +67,13 @@ func (s *Syncer) Sync(ctx context.Context) (*SyncResult, error) {
 		for id := range remoteIDs {
 			ids = append(ids, id)
 		}
-		if err := s.storage.AddBookmarks(ids); err != nil {
+
+		if err = s.storage.AddBookmarks(ids); err != nil {
 			log.Warn("Failed to persist synced bookmarks", "error", err)
 		}
 	}
 
-	if err := s.storage.RecordBookmarkSync(time.Now()); err != nil {
+	if err = s.storage.RecordBookmarkSync(time.Now()); err != nil {
 		log.Warn("Failed to record bookmark sync time", "error", err)
 	}
 
