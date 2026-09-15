@@ -859,6 +859,14 @@ func (c *Controller) SyncBookmarks() error {
 	return c.sch.SyncBookmarksNowSync(c.ctx, componentName)
 }
 
+// ClearSyncedBookmarks permanently deletes every bookmark image already
+// synced to disk (files, metadata, thumbnails, history, and queue entries),
+// and resets the bookmark sync cursor so a future sync starts fresh. It does
+// not touch which artworks are flagged as bookmarked in the UI.
+func (c *Controller) ClearSyncedBookmarks() (storage.CleanupResult, error) {
+	return c.st.ClearBookmarks()
+}
+
 // ShowSettingsWindow opens the settings window without blocking the tray.
 func (c *Controller) ShowSettingsWindow() error {
 	logger.WithComponent(componentName).Debug("Opening settings window")

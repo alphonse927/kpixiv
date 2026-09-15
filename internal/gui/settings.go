@@ -131,9 +131,10 @@ type settingsUI struct {
 
 	notificationsEnabled *widget.Check
 
-	bookmarksEnabled      *widget.Check
-	bookmarksSyncInterval *numericalEntry
-	bookmarksAutoCleanup  *widget.Check
+	bookmarksEnabled          *widget.Check
+	bookmarksEnabledOrigState bool
+	bookmarksSyncInterval     *numericalEntry
+	bookmarksAutoCleanup      *widget.Check
 
 	statusWallpaper         *widget.Label
 	statusCached            *widget.Label
@@ -276,6 +277,7 @@ func (ui *settingsUI) createWidgets() {
 		}
 	})
 	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
+	ui.bookmarksEnabledOrigState = cfg.Bookmarks.Enabled
 
 	if !cfg.Bookmarks.Enabled {
 		ui.bookmarksSyncInterval.Disable()
@@ -521,6 +523,7 @@ func (ui *settingsUI) update() {
 	ui.refreshMonitorSettings()
 
 	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
+	ui.bookmarksEnabledOrigState = cfg.Bookmarks.Enabled
 	ui.bookmarksSyncInterval.SetText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
 	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
 
@@ -537,6 +540,27 @@ func (ui *settingsUI) update() {
 }
 
 func (ui *settingsUI) applySettings() {
+	if ui.bookmarksEnabledOrigState && !ui.bookmarksEnabled.Checked {
+		dialog.ShowConfirm(
+			"Disable Bookmark Sync?",
+			"Turning off bookmark sync will permanently delete every bookmark image already synced to this device.\n\n"+
+				"Your bookmarks on Pixiv are not affected — only the local copies stored here.",
+			func(confirmed bool) {
+				if !confirmed {
+					ui.bookmarksEnabled.SetChecked(true)
+					return
+				}
+				ui.doApplySettings()
+			},
+			ui.w,
+		)
+		return
+	}
+
+	ui.doApplySettings()
+}
+
+func (ui *settingsUI) doApplySettings() {
 	cfg := ui.ctrl.Config()
 	cfg.DownloadPath = ui.downloadPath.Text
 
@@ -612,9 +636,17 @@ func (ui *settingsUI) applySettings() {
 	}
 
 	ui.ctrl.ApplyConfig(cfg)
-
 	ui.applyAutostart()
 
+	if ui.bookmarksEnabledOrigState && !cfg.Bookmarks.Enabled {
+		if result, err := ui.ctrl.ClearSyncedBookmarks(); err != nil {
+			dialog.ShowError(fmt.Errorf("failed to remove synced bookmark images: %w", err), ui.w)
+		} else {
+			ui.log.Info("Cleared synced bookmark images", "removed", result.Removed, "freedBytes", result.FreedBytes)
+		}
+	}
+
+	ui.bookmarksEnabledOrigState = cfg.Bookmarks.Enabled
 	ui.log.Info("Settings applied")
 }
 

@@ -60,6 +60,7 @@ type AppController interface {
 	DataDir() string
 	StateDir() string
 	DownloadDir() string
+	ClearSyncedBookmarks() (storage.CleanupResult, error)
 }
 
 var (

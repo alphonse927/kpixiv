@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Turning off "Enable Bookmark Sync" in Settings now asks for confirmation,
+  then permanently deletes every bookmark image already synced to disk
+  (files, metadata, thumbnails, history, and queue entries) and resets the
+  sync cursor so a future re-enable starts a fresh full sync. Your Pixiv
+  bookmarks themselves aren't affected, only the local copies.
+
 ### Fixed
 
 - Bookmark sync now respects the configured wallpaper orientation filter

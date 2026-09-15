@@ -229,6 +229,121 @@ func (s *Storage) cleanupQueue(removedIDs sets.Set[string]) error {
 	return nil
 }
 
+// ClearBookmarks permanently removes every locally synced bookmark image:
+// its file, metadata entry, thumbnail, history entry, and queue entry. It
+// also resets the bookmark sync pagination cursor so a future sync starts
+// fresh instead of resuming mid-page. The Pixiv bookmark flags recorded in
+// bookmarks.json (used to show which artworks are bookmarked in the UI) are
+// left untouched — this only clears the local copies downloaded by sync.
+func (s *Storage) ClearBookmarks() (CleanupResult, error) {
+	images, err := s.LoadMetadata()
+	if err != nil {
+		return CleanupResult{}, err
+	}
+
+	removedIDs := sets.New[string]()
+	var removedCount int
+	var freedBytes int64
+
+	for id, meta := range images {
+		if meta.Source != "bookmarks" {
+			continue
+		}
+
+		if meta.Path != "" {
+			if info, statErr := os.Stat(meta.Path); statErr == nil {
+				freedBytes += info.Size()
+			}
+			if rmErr := os.Remove(meta.Path); rmErr != nil && !os.IsNotExist(rmErr) {
+				return CleanupResult{}, fmt.Errorf("failed to remove bookmark image %s: %w", meta.Path, rmErr)
+			}
+		}
+
+		delete(images, id)
+		removedIDs.Add(id)
+		removedCount++
+	}
+
+	if err = s.SaveMetadata(images); err != nil {
+		return CleanupResult{}, err
+	}
+
+	orphanRemoved, orphanFreed, err := s.clearBookmarksDirOrphans(removedIDs)
+	if err != nil {
+		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
+	}
+	removedCount += orphanRemoved
+	freedBytes += orphanFreed
+
+	if err = s.cleanupHistory(removedIDs); err != nil {
+		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
+	}
+
+	if err = s.cleanupQueue(removedIDs); err != nil {
+		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
+	}
+
+	thumbRemoved, thumbFreed, err := s.cleanupThumbnails(removedIDs, false)
+	if err != nil {
+		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
+	}
+	removedCount += thumbRemoved
+	freedBytes += thumbFreed
+
+	if err = s.SetBookmarkPagination("", false); err != nil {
+		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
+	}
+
+	return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, nil
+}
+
+// clearBookmarksDirOrphans removes any file left in BookmarksDir that had no
+// corresponding metadata entry (e.g. downloaded but never recorded), adding
+// its ID to alreadyRemoved so thumbnail cleanup catches it too.
+func (s *Storage) clearBookmarksDirOrphans(alreadyRemoved sets.Set[string]) (int, int64, error) {
+	entries, err := os.ReadDir(s.BookmarksDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+
+		return 0, 0, fmt.Errorf("failed to read bookmarks directory: %w", err)
+	}
+
+	var removed int
+	var freed int64
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+		ext := filepath.Ext(name)
+		id := name[:len(name)-len(ext)]
+		if alreadyRemoved.Contains(id) {
+			continue
+		}
+
+		info, infoErr := entry.Info()
+		path := filepath.Join(s.BookmarksDir(), name)
+		if rmErr := os.Remove(path); rmErr != nil {
+			if os.IsNotExist(rmErr) {
+				continue
+			}
+
+			return removed, freed, fmt.Errorf("failed to remove bookmark file %s: %w", path, rmErr)
+		}
+
+		if infoErr == nil {
+			freed += info.Size()
+		}
+		removed++
+		alreadyRemoved.Add(id)
+	}
+
+	return removed, freed, nil
+}
+
 func cleanupCutoff(days int) (time.Time, bool) {
 	removeAll := days <= 0
 	if removeAll {
