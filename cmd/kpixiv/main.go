@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/alphonse927/kpixiv/internal/app"
@@ -85,14 +86,31 @@ func runDesktop(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
+	// shutdown tears the app down exactly once, however, it's triggered
+	// (SIGTERM, or the user quitting from the tray). Previously, on
+	// SIGTERM, cancel() -- which is what wakes up gui.Run() and the tray's
+	// event loop -- was only called *after* controller.Shutdown() had
+	// fully returned, and Shutdown() blocks until the scheduler's
+	// goroutine winds down (including any fetch/bookmark sync already in
+	// flight). That meant the GUI and tray sat frozen for the whole
+	// scheduler teardown before they even started quitting, on top of
+	// their own teardown time. Calling cancel() first lets the GUI and
+	// tray start quitting immediately, in parallel with the scheduler
+	// stopping, instead of strictly after it.
+	var shutdownOnce sync.Once
+	shutdownDone := make(chan struct{})
+	shutdown := func() {
+		shutdownOnce.Do(func() {
+			cancel()
+			controller.Shutdown()
+			close(shutdownDone)
+		})
+	}
+
 	go func() {
 		<-sigCh
 		log.Info("Received shutdown signal")
-		controller.Shutdown()
-		if closeErr := listener.Close(); closeErr != nil {
-			log.Error("Failed to close instance listener", "error", closeErr)
-		}
-		cancel()
+		shutdown()
 	}()
 
 	quitCh := make(chan struct{})
@@ -103,6 +121,15 @@ func runDesktop(cmd *cobra.Command, args []string) error {
 
 	log.Info("Starting kPixiv")
 	gui.Run(controller, ctx, quitCh)
+
+	// gui.Run() can return as soon as cancel() fires, which may be before
+	// controller.Shutdown() (started above on SIGTERM, or not started at
+	// all if the user quit from the tray instead) has actually finished.
+	// Trigger it here too -- a no-op if the signal handler already did --
+	// and wait for it, so the process doesn't exit while that teardown is
+	// still writing files or mid-request.
+	shutdown()
+	<-shutdownDone
 
 	log.Info("kPixiv stopped")
 	return nil
