@@ -177,7 +177,7 @@ pixiv:
 
 wallpaper:
   mode: "fill"
-  orientation: "any"
+  orientation: "landscape"
   history_limit: 10
   set_interval: 5
   fetch_interval: 30
@@ -207,7 +207,7 @@ kde:
 | `pixiv.r18`                                  | `false`             | Include R-18 content                                      |
 | `pixiv.min_width` / `min_height`             | `1280` / `720`      | Minimum image dimensions                                  |
 | `wallpaper.mode`                             | `fill`              | Scaling mode (`fill`/`cover`/`fit`)                       |
-| `wallpaper.orientation`                      | `any`               | Single-monitor orientation (`any`/`landscape`/`portrait`) |
+| `wallpaper.orientation`                      | `landscape`         | Single-monitor orientation (`any`/`landscape`/`portrait`) |
 | `wallpaper.multi_monitor_enabled`            | `false`             | Enable per-monitor wallpaper assignment                   |
 | `wallpaper.monitors.<conn>.rotation_enabled` | `true`              | Enable rotation for this monitor                          |
 | `wallpaper.monitors.<conn>.orientation`      | `any`               | Orientation filter (`any`/`landscape`/`portrait`)         |

@@ -36,7 +36,7 @@ func Default() *Config {
 		Wallpaper: WallpaperConfig{
 			Mode:                WallpaperFillMode,
 			QueueSource:         QueueSourceAll,
-			Orientation:         WallpaperAnyOrientation,
+			Orientation:         WallpaperLandscapeOrientation,
 			RotationEnabled:     true,
 			FetchEnabled:        true,
 			HistoryLimit:        DefaultHistoryLimit,
