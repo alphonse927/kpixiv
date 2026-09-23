@@ -137,10 +137,14 @@ func onReady(appCtx context.Context, controller Controller) {
 		systray.SetIcon(icon)
 	}
 
-	if err := controller.Start(); err != nil {
-		tm.log.Error("Failed to start application controller", "error", err)
-	}
-
+	// Build the menu and start the event loop before Start(). On first run
+	// (no cached images yet) Start() blocks on a synchronous initial fetch,
+	// which can take a while; createItemsOnce() is only reached from
+	// buildMenu(), so calling Start() first meant the tray had no menu
+	// items at all -- and therefore did not respond to right-click -- until
+	// that first fetch finished. Building the menu up front keeps it
+	// responsive (Rotate/Login/Settings/Quit all work) while Start() runs
+	// in the background.
 	tm.buildMenu()
 
 	// Register as rebuild target (socket-ready foundation).
@@ -149,6 +153,16 @@ func onReady(appCtx context.Context, controller Controller) {
 	}
 
 	go tm.eventLoop(appCtx)
+
+	go func() {
+		if err := controller.Start(); err != nil {
+			tm.log.Error("Failed to start application controller", "error", err)
+		}
+		// Auth/monitor state (and, in multi-monitor mode, the per-monitor
+		// submenus) may depend on data Start() just produced -- e.g. images
+		// from the first-run fetch -- so refresh the menu once it's done.
+		tm.RebuildMenu()
+	}()
 }
 
 // buildMenu constructs the tray menu (once) and repopulates the per-monitor
