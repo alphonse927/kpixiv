@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.11.0] – Fresh Landscape
+
+Landscape wallpapers by default, a tray that responds from the first run,
+and a faster, cleaner shutdown.
+
 ### Changed
 
+- The default wallpaper orientation for new installs is now "Landscape"
+  instead of "Any". Existing configs are untouched; change it back in
+  Settings if you prefer the old behavior.
 - Turning off "Enable Bookmark Sync" in Settings now asks for confirmation,
   then permanently deletes every bookmark image already synced to disk
   (files, metadata, thumbnails, history, and queue entries) and resets the
@@ -17,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The tray's right-click menu no longer sits empty and unresponsive during
+  the first run's initial fetch. The menu is now built (and the Rotate,
+  Login, Settings, and Quit items are usable) before that fetch starts,
+  instead of only after it finishes.
+- kPixiv now shuts down faster. Previously, on SIGTERM (including the one
+  systemd sends when the session/PC is shutting down), the GUI and tray
+  didn't even start quitting until the scheduler had fully stopped; the two
+  now tear down in parallel instead of one after the other.
 - Bookmark sync now respects the configured wallpaper orientation filter
   (the same rule used for ranking fetches), so bookmarked images that don't
   match the orientation setting are no longer downloaded. Images that don't
