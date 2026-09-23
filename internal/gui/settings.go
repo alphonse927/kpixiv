@@ -262,27 +262,7 @@ func (ui *settingsUI) createWidgets() {
 	ui.lockScreen.SetChecked(cfg.KDE.SetLockScreen)
 	ui.createMonitorWidgets()
 
-	ui.bookmarksSyncInterval = newNumericalWithText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
-
-	ui.bookmarksAutoCleanup = widget.NewCheck("Remove unbookmarked images", nil)
-	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
-
-	ui.bookmarksEnabled = widget.NewCheck("Enable Bookmark Sync", func(enabled bool) {
-		if enabled {
-			ui.bookmarksSyncInterval.Enable()
-			ui.bookmarksAutoCleanup.Enable()
-		} else {
-			ui.bookmarksSyncInterval.Disable()
-			ui.bookmarksAutoCleanup.Disable()
-		}
-	})
-	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
-	ui.bookmarksEnabledOrigState = cfg.Bookmarks.Enabled
-
-	if !cfg.Bookmarks.Enabled {
-		ui.bookmarksSyncInterval.Disable()
-		ui.bookmarksAutoCleanup.Disable()
-	}
+	ui.createBookmarkWidgets(cfg)
 
 	ui.statusWallpaper = widget.NewLabel("")
 	ui.statusWallpaper.Wrapping = fyne.TextWrapWord
@@ -366,6 +346,32 @@ func (ui *settingsUI) newLogoutButton() *widget.Button {
 func (ui *settingsUI) createWallpaperOrientationWidget(cfg *config.Config) {
 	ui.wallpaperOrientation = widget.NewSelect(orientationLabels, nil)
 	ui.wallpaperOrientation.SetSelected(orientationDisplay(cfg.Wallpaper.Orientation))
+}
+
+// createBookmarkWidgets builds the bookmark-sync controls and applies the
+// enabled/disabled state of the dependent options.
+func (ui *settingsUI) createBookmarkWidgets(cfg *config.Config) {
+	ui.bookmarksSyncInterval = newNumericalWithText(strconv.Itoa(cfg.Bookmarks.SyncInterval))
+
+	ui.bookmarksAutoCleanup = widget.NewCheck("Remove unbookmarked images", nil)
+	ui.bookmarksAutoCleanup.SetChecked(cfg.Bookmarks.AutoCleanup)
+
+	ui.bookmarksEnabled = widget.NewCheck("Enable Bookmark Sync", func(enabled bool) {
+		if enabled {
+			ui.bookmarksSyncInterval.Enable()
+			ui.bookmarksAutoCleanup.Enable()
+		} else {
+			ui.bookmarksSyncInterval.Disable()
+			ui.bookmarksAutoCleanup.Disable()
+		}
+	})
+	ui.bookmarksEnabled.SetChecked(cfg.Bookmarks.Enabled)
+	ui.bookmarksEnabledOrigState = cfg.Bookmarks.Enabled
+
+	if !cfg.Bookmarks.Enabled {
+		ui.bookmarksSyncInterval.Disable()
+		ui.bookmarksAutoCleanup.Disable()
+	}
 }
 
 func (ui *settingsUI) createMonitorWidgets() {
@@ -560,37 +566,30 @@ func (ui *settingsUI) applySettings() {
 	ui.doApplySettings()
 }
 
+// applyIntField parses text and stores it in dst, leaving dst at its
+// current value when text is not a valid integer. It centralizes the
+// ignore-invalid-input pattern used across the settings form.
+func applyIntField(text string, dst *int) {
+	if v, err := strconv.Atoi(text); err == nil {
+		*dst = v
+	}
+}
+
 func (ui *settingsUI) doApplySettings() {
 	cfg := ui.ctrl.Config()
 	cfg.DownloadPath = ui.downloadPath.Text
 
-	if v, err := strconv.Atoi(ui.setInterval.Text); err == nil {
-		cfg.Wallpaper.SetInterval = v
-	}
-
-	if v, err := strconv.Atoi(ui.fetchInterval.Text); err == nil {
-		cfg.Wallpaper.FetchInterval = v
-	}
-
-	if v, err := strconv.Atoi(ui.historyLimit.Text); err == nil {
-		cfg.Wallpaper.HistoryLimit = v
-	}
-
-	if v, err := strconv.Atoi(ui.cleanupDays.Text); err == nil {
-		cfg.Wallpaper.CleanupDays = v
-	}
+	applyIntField(ui.setInterval.Text, &cfg.Wallpaper.SetInterval)
+	applyIntField(ui.fetchInterval.Text, &cfg.Wallpaper.FetchInterval)
+	applyIntField(ui.historyLimit.Text, &cfg.Wallpaper.HistoryLimit)
+	applyIntField(ui.cleanupDays.Text, &cfg.Wallpaper.CleanupDays)
 
 	cfg.Wallpaper.RotationEnabled = ui.rotationEnabled.Checked
 	cfg.Wallpaper.FetchEnabled = ui.fetchEnabled.Checked
 	cfg.Wallpaper.Orientation = orientationValue(ui.wallpaperOrientation.Selected)
 
-	if v, err := strconv.Atoi(ui.minWidth.Text); err == nil {
-		cfg.Pixiv.MinWidth = v
-	}
-
-	if v, err := strconv.Atoi(ui.minHeight.Text); err == nil {
-		cfg.Pixiv.MinHeight = v
-	}
+	applyIntField(ui.minWidth.Text, &cfg.Pixiv.MinWidth)
+	applyIntField(ui.minHeight.Text, &cfg.Pixiv.MinHeight)
 
 	ui.applyFeedSource(cfg)
 
@@ -616,9 +615,7 @@ func (ui *settingsUI) doApplySettings() {
 
 	cfg.Bookmarks.Enabled = ui.bookmarksEnabled.Checked
 	cfg.Bookmarks.AutoCleanup = ui.bookmarksAutoCleanup.Checked
-	if v, err := strconv.Atoi(ui.bookmarksSyncInterval.Text); err == nil {
-		cfg.Bookmarks.SyncInterval = v
-	}
+	applyIntField(ui.bookmarksSyncInterval.Text, &cfg.Bookmarks.SyncInterval)
 
 	cfg.LogLevel = ui.logLevel.Selected
 	cfg.Notifications.Enabled = ui.notificationsEnabled.Checked
