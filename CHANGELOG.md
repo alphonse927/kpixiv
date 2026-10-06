@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cache cleanup (including `kpixiv --reset`) no longer deletes the wallpaper
+  currently in use, or the one on each screen in multi-monitor mode. Previously
+  the file could be removed and KDE would fall back to its default wallpaper.
+
 ## [v0.11.0] – Fresh Landscape
 
 Landscape wallpapers by default, a tray that responds from the first run,

@@ -17,7 +17,7 @@ type CleanupResult struct {
 
 // CleanupImagesOlderThanDays removes cached wallpapers older than the given
 // number of days. A non-positive value removes everything. Bookmarked images
-// are never removed. The returned result reports how many files were deleted
+// and wallpapers currently in use (global or per monitor) are never removed. The returned result reports how many files were deleted
 // and how much disk space was freed.
 func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 	images, err := s.LoadMetadata()
@@ -25,8 +25,14 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 		return CleanupResult{}, err
 	}
 
+	protectedIDs, err := s.inUseImageIDs()
+	if err != nil {
+		return CleanupResult{}, err
+	}
+
 	cutoff, removeAll := cleanupCutoff(days)
-	removedIDs, removedFiles, metaRemoved, metaFreed, mrErr := s.cleanupMetadata(images, cutoff, removeAll)
+	protectedPaths := s.protectedImagePaths(images, protectedIDs)
+	removedIDs, removedFiles, metaRemoved, metaFreed, mrErr := s.cleanupMetadata(images, cutoff, removeAll, protectedIDs)
 	if mrErr != nil {
 		return CleanupResult{}, mrErr
 	}
@@ -35,7 +41,7 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 		return CleanupResult{}, err
 	}
 
-	fileRemoved, fileFreed, crErr := s.cleanupRankingFiles(cutoff, removeAll, removedFiles)
+	fileRemoved, fileFreed, crErr := s.cleanupRankingFiles(cutoff, removeAll, removedFiles, protectedPaths)
 	if crErr != nil {
 		return CleanupResult{}, crErr
 	}
@@ -48,7 +54,7 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 		return CleanupResult{Removed: metaRemoved + fileRemoved, FreedBytes: metaFreed + fileFreed}, err
 	}
 
-	thumbRemoved, thumbFreed, thErr := s.cleanupThumbnails(removedIDs, removeAll)
+	thumbRemoved, thumbFreed, thErr := s.cleanupThumbnails(removedIDs, removeAll, protectedIDs)
 	if thErr != nil {
 		return CleanupResult{Removed: metaRemoved + fileRemoved, FreedBytes: metaFreed + fileFreed}, thErr
 	}
@@ -56,22 +62,63 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 	return CleanupResult{Removed: metaRemoved + fileRemoved + thumbRemoved, FreedBytes: metaFreed + fileFreed + thumbFreed}, nil
 }
 
+// inUseImageIDs returns the IDs of the wallpapers currently applied: the
+// global current wallpaper plus one per monitor in multi-monitor mode. These
+// must survive every cleanup pass (including a full reset) because deleting
+// the file makes Plasma fall back to its default wallpaper.
+func (s *Storage) inUseImageIDs() (sets.Set[string], error) {
+	history, err := s.LoadHistory()
+	if err != nil {
+		return nil, err
+	}
+
+	ids := sets.New[string]()
+	if history.Current != "" {
+		ids.Add(history.Current)
+	}
+
+	for _, id := range history.Monitors {
+		if id != "" {
+			ids.Add(id)
+		}
+	}
+
+	return ids, nil
+}
+
+// protectedImagePaths resolves the on-disk paths of the protected IDs, using
+// the metadata path when available and falling back to a directory lookup.
+func (s *Storage) protectedImagePaths(images map[string]*ImageMeta, ids sets.Set[string]) sets.Set[string] {
+	paths := sets.New[string]()
+	for id := range ids {
+		if meta, ok := images[id]; ok && meta.Path != "" {
+			paths.Add(meta.Path)
+		}
+		if p, ok := s.findImageInRankingDir(id); ok {
+			paths.Add(p)
+		}
+	}
+
+	return paths
+}
+
 // cleanupThumbnails removes cached thumbnails. When removeAll is true, the
 // entire thumbnail directory is cleared; otherwise, only thumbnails whose
 // artwork was removed are deleted.
-func (s *Storage) cleanupThumbnails(removedIDs sets.Set[string], removeAll bool) (int, int64, error) {
-	targets, err := s.cleanupThumbnailTargets(removedIDs, removeAll)
-	if err != nil {
-		return 0, 0, err
+func (s *Storage) cleanupThumbnails(removedIDs sets.Set[string], removeAll bool, protectedIDs sets.Set[string]) (int, int64, error) {
+	targets, tErr := s.cleanupThumbnailTargets(removedIDs, removeAll, protectedIDs)
+	if tErr != nil {
+		return 0, 0, tErr
 	}
 
 	var removedCount int
 	var freedBytes int64
 	for _, path := range targets {
-		size, removed, err := removeThumbnail(path)
-		if err != nil {
-			return removedCount, freedBytes, err
+		size, removed, rtErr := removeThumbnail(path)
+		if rtErr != nil {
+			return removedCount, freedBytes, rtErr
 		}
+
 		if removed {
 			freedBytes += size
 			removedCount++
@@ -83,7 +130,7 @@ func (s *Storage) cleanupThumbnails(removedIDs sets.Set[string], removeAll bool)
 
 // cleanupThumbnailTargets resolves the list of thumbnail paths to remove,
 // either the full thumbnail directory or the thumbnails for removed IDs.
-func (s *Storage) cleanupThumbnailTargets(removedIDs sets.Set[string], removeAll bool) ([]string, error) {
+func (s *Storage) cleanupThumbnailTargets(removedIDs sets.Set[string], removeAll bool, protectedIDs sets.Set[string]) ([]string, error) {
 	if !removeAll {
 		targets := make([]string, 0, len(removedIDs))
 		for id := range removedIDs {
@@ -102,13 +149,23 @@ func (s *Storage) cleanupThumbnailTargets(removedIDs sets.Set[string], removeAll
 		return nil, fmt.Errorf("failed to read thumbnail directory: %w", err)
 	}
 
+	protectedThumbs := sets.New[string]()
+	for id := range protectedIDs {
+		protectedThumbs.Add(s.ThumbnailPath(id))
+	}
+
 	targets := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 
-		targets = append(targets, filepath.Join(s.ThumbnailDir(), entry.Name()))
+		path := filepath.Join(s.ThumbnailDir(), entry.Name())
+		if protectedThumbs.Contains(path) {
+			continue
+		}
+
+		targets = append(targets, path)
 	}
 
 	return targets, nil
@@ -132,14 +189,14 @@ func removeThumbnail(path string) (int64, bool, error) {
 	return info.Size(), true, nil
 }
 
-func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time, removeAll bool) (sets.Set[string], sets.Set[string], int, int64, error) {
+func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time, removeAll bool, protectedIDs sets.Set[string]) (sets.Set[string], sets.Set[string], int, int64, error) {
 	removedIDs := sets.New[string]()
 	removedFiles := sets.New[string]()
 	removedCount := 0
 	var freedBytes int64
 
 	for id, meta := range images {
-		if meta.Source == "bookmarks" {
+		if meta.Source == "bookmarks" || protectedIDs.Contains(id) {
 			continue
 		}
 
@@ -151,9 +208,11 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 			if info, rmErr := os.Stat(meta.Path); rmErr == nil {
 				freedBytes += info.Size()
 			}
+
 			if rmErr := os.Remove(meta.Path); rmErr != nil && !os.IsNotExist(rmErr) {
 				return nil, nil, removedCount, freedBytes, fmt.Errorf("failed to remove image file %s: %w", meta.Path, rmErr)
 			}
+
 			removedFiles.Add(meta.Path)
 		}
 
@@ -165,7 +224,7 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 	return removedIDs, removedFiles, removedCount, freedBytes, nil
 }
 
-func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles sets.Set[string]) (int, int64, error) {
+func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles, protectedPaths sets.Set[string]) (int, int64, error) {
 	rankingEntries, readErr := os.ReadDir(s.RankingDir())
 	if readErr != nil {
 		return 0, 0, fmt.Errorf("failed to read ranking directory: %w", readErr)
@@ -179,7 +238,7 @@ func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedF
 		}
 
 		path := filepath.Join(s.RankingDir(), entry.Name())
-		if removedFiles.Contains(path) {
+		if removedFiles.Contains(path) || protectedPaths.Contains(path) {
 			continue
 		}
 
@@ -283,13 +342,13 @@ func (s *Storage) ClearBookmarks() (CleanupResult, error) {
 		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
 	}
 
-	thumbRemoved, thumbFreed, err := s.cleanupThumbnails(removedIDs, false)
+	thumbRemoved, thumbFreed, err := s.cleanupThumbnails(removedIDs, false, nil)
 	if err != nil {
 		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
 	}
+
 	removedCount += thumbRemoved
 	freedBytes += thumbFreed
-
 	if err = s.SetBookmarkPagination("", false); err != nil {
 		return CleanupResult{Removed: removedCount, FreedBytes: freedBytes}, err
 	}

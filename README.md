@@ -4,10 +4,10 @@
   <em>KDE Plasma–focused wallpaper manager for Pixiv.</em>
   <br>
 
-  <a href="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml"><img src="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/alphonse927/kpixiv/releases"><img src="https://img.shields.io/github/v/release/alphonse927/kpixiv?label=release" alt="Release"></a>
-  <br><br>
-  <img src="docs/screenshots/settings_windows.png" width="600" alt="Configuration tabs">
+<a href="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml"><img src="https://github.com/alphonse927/kpixiv/actions/workflows/ci.yaml/badge.svg" alt="CI"></a>
+<a href="https://github.com/alphonse927/kpixiv/releases"><img src="https://img.shields.io/github/v/release/alphonse927/kpixiv?label=release" alt="Release"></a>
+<br><br>
+<img src="docs/screenshots/settings_windows.png" width="600" alt="Configuration tabs">
 </div>
 
 ## About
@@ -29,7 +29,7 @@ Users are responsible for complying with Pixiv's Terms of Service.
 
 ### Why kPixiv?
 
-I created kPixiv because I switched to Arch Linux (KDE Plasma) and couldn't find a wallpaper rotator that fit the way I wanted to. 
+I created kPixiv because I switched to Arch Linux (KDE Plasma) and couldn't find a wallpaper rotator that fit the way I wanted to.
 This project started as a tool for my own desktop and continues to evolve based on my personal workflow. If it happens to be useful to others, even better.
 
 ## Quick Start
@@ -63,7 +63,7 @@ For detailed installation options, see [Installation](#installation).
 ### Wallpaper Management
 
 - Automatic rotation on a configurable interval
-- Download cache with the deduplication and age-based cleanup
+- Download cache with deduplication and age-based cleanup (wallpapers currently in use are never removed)
 - Favorites directory for keeping wallpapers you like
 - Queue rebuilding from ranking images and/or bookmarks
 - Dry-run mode for testing
@@ -214,7 +214,7 @@ kde:
 | `wallpaper.history_limit`                    | `10`                | Max wallpapers in rotation history                        |
 | `wallpaper.set_interval`                     | `5`                 | Minutes between wallpaper changes                         |
 | `wallpaper.fetch_interval`                   | `30`                | Minutes between Pixiv fetch cycles                        |
-| `wallpaper.cleanup_days`                     | `7`                 | Remove cached wallpapers older than N days                |
+| `wallpaper.cleanup_days`                     | `7`                 | Remove cached wallpapers older than N days (except in use)|
 | `bookmarks.enabled`                          | `false`             | Enable periodic bookmark sync                             |
 | `bookmarks.sync_interval`                    | `60`                | Minutes between bookmark sync cycles                      |
 | `bookmarks.auto_cleanup`                     | `true`              | Remove unbookmarked images from favorites                 |
@@ -228,7 +228,7 @@ Use `kpixivctl config set <key> <value>` to change settings from the command lin
 
 ```bash
 kpixiv
-kpixiv --reset    # Clear all cached images before starting
+kpixiv --reset    # Clear all cached images before starting (except wallpapers in use)
 ```
 
 The system tray provides:
@@ -307,8 +307,13 @@ From the desktop, use the tray menu or the Account tab in Settings.
 
 ## Favorites
 
-The **Copy to Favorites** tray action saves the current wallpaper to `$HOME/Pictures/KPixiv/` or the configured download path. 
+The **Copy to Favorites** tray action saves the current wallpaper to `$HOME/Pictures/KPixiv/` or the configured download path.
 Favorites are excluded from automatic cleanup.
+
+## Cache Cleanup
+
+KPixiv removes cached wallpapers when it starts: by default, those older than `wallpaper.cleanup_days`, or all of them when started with `--reset`. The wallpaper currently applied (and, with multi-monitor enabled, the one on each screen) is always kept, even if it is older than the cleanup age or `--reset` is used. 
+This prevents KDE from falling back to its default wallpaper because the file in use was deleted. Once a wallpaper is replaced by the next rotation, it becomes eligible for cleanup like any other.
 
 ## Bookmark Sync
 
