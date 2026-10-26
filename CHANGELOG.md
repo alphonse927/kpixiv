@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- With the "Ranking + Bookmarks" source, each queue refill now includes at most
+  10 randomly chosen bookmarks, plus every ranking image. Previously all
+  bookmarks were shuffled together with the ranking, so a library of a few
+  hundred bookmarks almost completely crowded out the ranking. When there
+  is no ranking to show (nothing downloaded yet, or none that matches the
+  screen's orientation), every bookmark is queued instead, so nothing repeats
+  until the whole library has been shown. The "Bookmarks" source is unaffected
+  and still queues every bookmark.
+
 ### Fixed
 
 - Cache cleanup (including `kpixiv --reset`) no longer deletes the wallpaper

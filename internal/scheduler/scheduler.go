@@ -17,11 +17,21 @@ import (
 	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
+	"github.com/alphonse927/kpixiv/internal/sets"
+	"github.com/alphonse927/kpixiv/internal/slices"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 const componentName = "scheduler"
+
+// maxBookmarksPerAllRefill caps how many bookmark images join the queue on
+// each refill when the queue source is All (ranking + bookmarks) and there is
+// ranking to show. Without a cap, a large bookmark library (hundreds of
+// images) drowns out the ranking. The cap does not apply when no ranking
+// image is available: then every bookmark is queued, shuffled once, so none
+// repeats before the whole library has been shown.
+const maxBookmarksPerAllRefill = 10
 
 // ErrImageNotFound indicates that a queued wallpaper ID does not exist in metadata.
 var ErrImageNotFound = fmt.Errorf("image not found")
@@ -381,34 +391,21 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 		return fmt.Errorf("failed to load blacklist: %w", err)
 	}
 
-	valid := make([]string, 0)
-	seen := make(map[string]bool)
-
-	switch queueSource {
-	case config.QueueSourceBookmarks:
-		err = sch.collectImagesFromDir(sch.storage.BookmarksDir(), blacklist, seen, &valid)
-		if err != nil {
-			return fmt.Errorf("failed to read favorites directory: %w", err)
-		}
-	case config.QueueSourceRanking:
-		err = sch.collectImagesFromDir(sch.storage.RankingDir(), blacklist, seen, &valid)
-		if err != nil {
-			return fmt.Errorf("failed to read ranking directory: %w", err)
-		}
-	default:
-		err = sch.collectImagesFromDir(sch.storage.RankingDir(), blacklist, seen, &valid)
-		if err != nil {
-			return fmt.Errorf("failed to read ranking directory: %w", err)
-		}
-		err = sch.collectImagesFromDir(sch.storage.BookmarksDir(), blacklist, seen, &valid)
-		if err != nil {
-			return fmt.Errorf("failed to read favorites directory: %w", err)
-		}
+	valid, bookmarkIDs, err := sch.collectQueueCandidates(queueSource, blacklist)
+	if err != nil {
+		return err
 	}
 
 	valid, err = sch.filterQueueByOrientation(q, valid, blacklist)
 	if err != nil {
 		return err
+	}
+
+	// Cap after the orientation filter so every sampled bookmark is usable
+	// by this queue (and so ranking that the filter removed doesn't count).
+	// bookmarkIDs is only set for the mixed (All) source.
+	if bookmarkIDs != nil {
+		valid = limitBookmarks(valid, bookmarkIDs, maxBookmarksPerAllRefill)
 	}
 
 	if len(valid) == 0 {
@@ -421,6 +418,53 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 
 	log.Debug("Loaded images into queue", "count", len(valid))
 	return nil
+}
+
+// collectQueueCandidates lists the image IDs eligible for the queue under the
+// given source. For the mixed source (ranking + bookmarks) it also returns the
+// set of IDs that came from bookmarks; for every other source that set is nil.
+func (sch *Scheduler) collectQueueCandidates(source config.QueueSource, blacklist map[string]struct{}) ([]string, sets.Set[string], error) {
+	valid := make([]string, 0)
+	seen := make(map[string]bool)
+
+	switch source {
+	case config.QueueSourceBookmarks:
+		if err := sch.collectImagesFromDir(sch.storage.BookmarksDir(), blacklist, seen, &valid); err != nil {
+			return nil, nil, fmt.Errorf("failed to read favorites directory: %w", err)
+		}
+
+		return valid, nil, nil
+	case config.QueueSourceRanking:
+		if err := sch.collectImagesFromDir(sch.storage.RankingDir(), blacklist, seen, &valid); err != nil {
+			return nil, nil, fmt.Errorf("failed to read ranking directory: %w", err)
+		}
+
+		return valid, nil, nil
+	default:
+		if err := sch.collectImagesFromDir(sch.storage.RankingDir(), blacklist, seen, &valid); err != nil {
+			return nil, nil, fmt.Errorf("failed to read ranking directory: %w", err)
+		}
+
+		rankingCount := len(valid)
+		if err := sch.collectImagesFromDir(sch.storage.BookmarksDir(), blacklist, seen, &valid); err != nil {
+			return nil, nil, fmt.Errorf("failed to read favorites directory: %w", err)
+		}
+
+		return valid, sets.NewFrom(valid[rankingCount:]), nil
+	}
+}
+
+// limitBookmarks keeps every ID that is not a bookmark plus at most limit
+// randomly chosen bookmark IDs. When there is nothing but bookmarks, ids are
+// returned untouched, so the whole library is queued.
+func limitBookmarks(ids []string, bookmarkIDs sets.Set[string], limit int) []string {
+	others := slices.Filter(ids, func(id string) bool { return !bookmarkIDs.Contains(id) })
+	if len(others) == 0 {
+		return ids
+	}
+
+	bf := slices.Filter(ids, bookmarkIDs.Contains)
+	return append(others, slices.Sample(bf, limit)...)
 }
 
 func (sch *Scheduler) filterQueueByOrientation(q *storage.Queue, valid []string, blacklist map[string]struct{}) ([]string, error) {

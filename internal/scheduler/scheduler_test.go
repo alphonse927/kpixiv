@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -684,5 +685,191 @@ func TestSchedulerRunsInitialFetchAndBookmarkSyncOnStartup(t *testing.T) {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func writeTestImages(t *testing.T, dir, prefix string, count int) []string {
+	t.Helper()
+
+	ids := make([]string, 0, count)
+	for i := range count {
+		id := fmt.Sprintf("%s%d", prefix, i)
+		if err := os.WriteFile(filepath.Join(dir, id+".jpg"), []byte("img"), 0600); err != nil {
+			t.Fatalf("WriteFile(%s) returned error: %v", id, err)
+		}
+		ids = append(ids, id)
+	}
+
+	return ids
+}
+
+func countIn(items []string, ids []string) int {
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+
+	n := 0
+	for _, item := range items {
+		if set[item] {
+			n++
+		}
+	}
+
+	return n
+}
+
+func TestRefillQueueAllLimitsBookmarksAndKeepsEveryRankingImage(t *testing.T) {
+	cfg := testConfig()
+	cfg.Wallpaper.QueueSource = config.QueueSourceAll
+	s := testStorage(t)
+	ranking := writeTestImages(t, s.RankingDir(), "rk-", 30)
+	bookmarks := writeTestImages(t, s.BookmarksDir(), "bm-", 200)
+
+	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	q := storage.NewQueue(s.StateDir())
+	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
+		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
+	}
+
+	items := q.GetAll()
+	if got := countIn(items, ranking); got != len(ranking) {
+		t.Errorf("ranking images in queue: got %d, want %d", got, len(ranking))
+	}
+	if got := countIn(items, bookmarks); got != maxBookmarksPerAllRefill {
+		t.Errorf("bookmark images in queue: got %d, want %d", got, maxBookmarksPerAllRefill)
+	}
+	if want := len(ranking) + maxBookmarksPerAllRefill; len(items) != want {
+		t.Errorf("queue length: got %d, want %d", len(items), want)
+	}
+}
+
+func TestRefillQueueAllWithoutRankingQueuesEveryBookmark(t *testing.T) {
+	cfg := testConfig()
+	cfg.Wallpaper.QueueSource = config.QueueSourceAll
+	s := testStorage(t)
+	bookmarks := writeTestImages(t, s.BookmarksDir(), "bm-", 200)
+
+	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	q := storage.NewQueue(s.StateDir())
+	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
+		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
+	}
+
+	items := q.GetAll()
+	if len(items) != len(bookmarks) {
+		t.Fatalf("queue length: got %d, want %d", len(items), len(bookmarks))
+	}
+	if got := countIn(items, bookmarks); got != len(bookmarks) {
+		t.Errorf("distinct bookmarks in queue: got %d, want %d", got, len(bookmarks))
+	}
+}
+
+func TestRefillQueueAllQueuesEveryBookmarkWhenOrientationLeavesNoRanking(t *testing.T) {
+	cfg := testConfig()
+	cfg.Wallpaper.QueueSource = config.QueueSourceAll
+	s := testStorage(t)
+	ranking := writeTestImages(t, s.RankingDir(), "rk-", 3)
+	bookmarks := writeTestImages(t, s.BookmarksDir(), "bm-", 25)
+
+	meta := make(map[string]*storage.ImageMeta)
+	for _, id := range ranking {
+		meta[id] = &storage.ImageMeta{ID: id, Width: 1600, Height: 1000}
+	}
+	for _, id := range bookmarks {
+		meta[id] = &storage.ImageMeta{ID: id, Width: 1000, Height: 1600}
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+
+	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	mq := storage.NewMonitorQueue(s.StateDir(), "DP-1")
+	if err := mq.SetOrientation(config.WallpaperPortraitOrientation.String()); err != nil {
+		t.Fatalf("SetOrientation() returned error: %v", err)
+	}
+	if err := sch.refillQueueFromStorage(mq, "test"); err != nil {
+		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
+	}
+
+	// The portrait monitor can't use any ranking image, so it behaves as
+	// "no ranking" and gets the whole bookmark library.
+	if got := mq.Len(); got != len(bookmarks) {
+		t.Errorf("queue length: got %d, want %d", got, len(bookmarks))
+	}
+}
+
+func TestRefillQueueAllWithFewBookmarksQueuesAllOfThem(t *testing.T) {
+	cfg := testConfig()
+	cfg.Wallpaper.QueueSource = config.QueueSourceAll
+	s := testStorage(t)
+	ranking := writeTestImages(t, s.RankingDir(), "rk-", 5)
+	writeTestImages(t, s.BookmarksDir(), "bm-", 4)
+
+	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	q := storage.NewQueue(s.StateDir())
+	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
+		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
+	}
+
+	items := q.GetAll()
+	if len(items) != len(ranking)+4 {
+		t.Errorf("queue length: got %d, want %d", len(items), len(ranking)+4)
+	}
+}
+
+func TestRefillQueueBookmarksSourceIsNotLimited(t *testing.T) {
+	cfg := testConfig()
+	cfg.Wallpaper.QueueSource = config.QueueSourceBookmarks
+	s := testStorage(t)
+	writeTestImages(t, s.RankingDir(), "rk-", 5)
+	writeTestImages(t, s.BookmarksDir(), "bm-", 200)
+
+	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	q := storage.NewQueue(s.StateDir())
+	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
+		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
+	}
+
+	if got := q.Len(); got != 200 {
+		t.Errorf("queue length: got %d, want 200", got)
+	}
+}
+
+func TestRefillQueueAllSamplesBookmarksAfterOrientationFilter(t *testing.T) {
+	cfg := testConfig()
+	cfg.Wallpaper.QueueSource = config.QueueSourceAll
+	s := testStorage(t)
+	portrait := writeTestImages(t, s.BookmarksDir(), "bm-p", 20)
+	landscape := writeTestImages(t, s.BookmarksDir(), "bm-l", 10)
+
+	meta := make(map[string]*storage.ImageMeta)
+	for _, id := range portrait {
+		meta[id] = &storage.ImageMeta{ID: id, Width: 1000, Height: 1600}
+	}
+	for _, id := range landscape {
+		meta[id] = &storage.ImageMeta{ID: id, Width: 1600, Height: 1000}
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+
+	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	mq := storage.NewMonitorQueue(s.StateDir(), "DP-1")
+	if err := mq.SetOrientation(config.WallpaperPortraitOrientation.String()); err != nil {
+		t.Fatalf("SetOrientation() returned error: %v", err)
+	}
+	if err := sch.refillQueueFromStorage(mq, "test"); err != nil {
+		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
+	}
+
+	// Sampling before filtering would leave about 6 or 7 portrait images
+	// here; sampling after filtering fills all 10 slots with usable ones.
+	items := mq.GetAll()
+	if len(items) != maxBookmarksPerAllRefill {
+		t.Fatalf("queue length: got %d, want %d", len(items), maxBookmarksPerAllRefill)
+	}
+	if got := countIn(items, portrait); got != len(items) {
+		t.Errorf("portrait bookmarks in queue: got %d, want %d", got, len(items))
 	}
 }
