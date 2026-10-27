@@ -26,11 +26,9 @@ import (
 const componentName = "scheduler"
 
 // maxBookmarksPerAllRefill caps how many bookmark images join the queue on
-// each refill when the queue source is All (ranking + bookmarks) and there is
-// ranking to show. Without a cap, a large bookmark library (hundreds of
-// images) drowns out the ranking. The cap does not apply when no ranking
-// image is available: then every bookmark is queued, shuffled once, so none
-// repeats before the whole library has been shown.
+// each refill when the queue source is All (ranking + bookmarks). Without a
+// cap, a large bookmark library (hundreds of images) drowns out the ranking,
+// including when nothing has been downloaded yet.
 const maxBookmarksPerAllRefill = 10
 
 // ErrImageNotFound indicates that a queued wallpaper ID does not exist in metadata.
@@ -403,7 +401,8 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 
 	// Cap after the orientation filter so every sampled bookmark is usable
 	// by this queue (and so ranking that the filter removed doesn't count).
-	// bookmarkIDs is only set for the mixed (All) source.
+	// bookmarkIDs is only set for the mixed (All) source, which is the only
+	// source the cap applies to.
 	if bookmarkIDs != nil {
 		valid = limitBookmarks(valid, bookmarkIDs, maxBookmarksPerAllRefill)
 	}
@@ -455,14 +454,9 @@ func (sch *Scheduler) collectQueueCandidates(source config.QueueSource, blacklis
 }
 
 // limitBookmarks keeps every ID that is not a bookmark plus at most limit
-// randomly chosen bookmark IDs. When there is nothing but bookmarks, ids are
-// returned untouched, so the whole library is queued.
+// randomly chosen bookmark IDs.
 func limitBookmarks(ids []string, bookmarkIDs sets.Set[string], limit int) []string {
 	others := slices.Filter(ids, func(id string) bool { return !bookmarkIDs.Contains(id) })
-	if len(others) == 0 {
-		return ids
-	}
-
 	bf := slices.Filter(ids, bookmarkIDs.Contains)
 	return append(others, slices.Sample(bf, limit)...)
 }

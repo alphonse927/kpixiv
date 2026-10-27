@@ -65,7 +65,7 @@ For detailed installation options, see [Installation](#installation).
 - Automatic rotation on a configurable interval
 - Download cache with deduplication and age-based cleanup (wallpapers currently in use are never removed)
 - Favorites directory for keeping wallpapers you like
-- Queue rebuilding from ranking images and/or bookmarks (when mixing both, each refill adds every ranking image plus 10 random bookmarks, so a large bookmark library never crowds out the ranking; with no ranking available, all bookmarks are queued)
+- Queue rebuilding from ranking images and/or bookmarks (when mixing both, each refill adds every ranking image plus 10 random bookmarks, so a large bookmark library never crowds out the ranking)
 - Dry-run mode for testing
 
 ### Multi-Monitor

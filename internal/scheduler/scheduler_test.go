@@ -744,7 +744,7 @@ func TestRefillQueueAllLimitsBookmarksAndKeepsEveryRankingImage(t *testing.T) {
 	}
 }
 
-func TestRefillQueueAllWithoutRankingQueuesEveryBookmark(t *testing.T) {
+func TestRefillQueueAllWithoutRankingStillCapsBookmarks(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceAll
 	s := testStorage(t)
@@ -756,16 +756,18 @@ func TestRefillQueueAllWithoutRankingQueuesEveryBookmark(t *testing.T) {
 		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
 	}
 
+	// Nothing has been downloaded yet, but the cap still applies so a large
+	// bookmark library cannot fill the whole queue.
 	items := q.GetAll()
-	if len(items) != len(bookmarks) {
-		t.Fatalf("queue length: got %d, want %d", len(items), len(bookmarks))
+	if len(items) != maxBookmarksPerAllRefill {
+		t.Fatalf("queue length: got %d, want %d", len(items), maxBookmarksPerAllRefill)
 	}
-	if got := countIn(items, bookmarks); got != len(bookmarks) {
-		t.Errorf("distinct bookmarks in queue: got %d, want %d", got, len(bookmarks))
+	if got := countIn(items, bookmarks); got != len(items) {
+		t.Errorf("distinct bookmarks in queue: got %d, want %d", got, len(items))
 	}
 }
 
-func TestRefillQueueAllQueuesEveryBookmarkWhenOrientationLeavesNoRanking(t *testing.T) {
+func TestRefillQueueAllWhenOrientationLeavesNoRankingStillCapsBookmarks(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceAll
 	s := testStorage(t)
@@ -792,10 +794,14 @@ func TestRefillQueueAllQueuesEveryBookmarkWhenOrientationLeavesNoRanking(t *test
 		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
 	}
 
-	// The portrait monitor can't use any ranking image, so it behaves as
-	// "no ranking" and gets the whole bookmark library.
-	if got := mq.Len(); got != len(bookmarks) {
-		t.Errorf("queue length: got %d, want %d", got, len(bookmarks))
+	// The portrait monitor can't use any ranking image, but the cap still
+	// applies; every sampled bookmark must be usable by this queue.
+	if got := mq.Len(); got != maxBookmarksPerAllRefill {
+		t.Fatalf("queue length: got %d, want %d", got, maxBookmarksPerAllRefill)
+	}
+	items := mq.GetAll()
+	if got := countIn(items, bookmarks); got != len(items) {
+		t.Errorf("bookmarks in queue: got %d, want %d", got, len(items))
 	}
 }
 
