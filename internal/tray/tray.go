@@ -35,7 +35,6 @@ type Controller interface {
 	ResumeRotation()
 	PixivLoggedIn() bool
 	PixivUserName() string
-	LogoutFromPixiv() error
 	CopyCurrentArtwork() error
 	BookmarkCurrentArtwork() error
 	IsWallpaperBookmarked(artworkID string) bool
@@ -94,7 +93,6 @@ type trayMenu struct {
 	rotate          *systray.MenuItem
 	login           *systray.MenuItem
 	bookmarkCurrent *systray.MenuItem
-	logout          *systray.MenuItem
 	favoriteCurrent *systray.MenuItem
 	openCurrent     *systray.MenuItem
 	openPixiv       *systray.MenuItem
@@ -202,7 +200,6 @@ func (tm *trayMenu) createItemsOnce() {
 
 	tm.login = systray.AddMenuItem("Login to Pixiv", "Connect your Pixiv account")
 	tm.bookmarkCurrent = systray.AddMenuItem("Bookmark Current Artwork", "Bookmark the current artwork in Pixiv")
-	tm.logout = systray.AddMenuItem("Logout from Pixiv", "Forget the saved Pixiv session")
 
 	systray.AddSeparator()
 
@@ -407,12 +404,6 @@ func (tm *trayMenu) eventLoop(appCtx context.Context) {
 				tm.log.Warn("Failed to open account settings", "error", err)
 			}
 
-		case <-tm.logout.ClickedCh:
-			if err := tm.ctrl.LogoutFromPixiv(); err != nil {
-				tm.log.Warn("Failed to log out from Pixiv", "error", err)
-			}
-			tm.updateAuthItems()
-
 		case <-tm.favoriteCurrent.ClickedCh:
 			if err := tm.ctrl.CopyCurrentArtwork(); err != nil {
 				tm.log.Warn("Failed to copy current artwork", "error", err)
@@ -569,25 +560,24 @@ func (tm *trayMenu) updateAuthItems() {
 		} else {
 			tm.login.SetTitle("Pixiv Connected")
 		}
+
 		tm.login.Disable()
-		tm.logout.Show()
-		tm.logout.Enable()
 		if !tm.multiMonitorActive() {
 			tm.bookmarkCurrent.Enable()
 			tm.updateBookmarkItem()
 		}
+
 		tm.updateMonitorSlots()
 		return
 	}
 
 	tm.login.SetTitle("Login to Pixiv")
 	tm.login.Enable()
-	tm.logout.Hide()
-	tm.logout.Disable()
 	if !tm.multiMonitorActive() {
 		tm.bookmarkCurrent.Disable()
 		tm.bookmarkCurrent.SetTitle("Bookmark Current Artwork")
 	}
+
 	tm.updateMonitorSlots()
 }
 

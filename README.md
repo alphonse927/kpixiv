@@ -239,7 +239,6 @@ Rotate Wallpaper            Toggle automatic rotation
 ---
 Login to Pixiv / <user>    Authenticate or show connected user
 Bookmark Current Artwork    Bookmark the current wallpaper on Pixiv
-Logout from Pixiv           Clear session
 ---
 Copy to Favorites           Save wallpaper to favorites directory
 Open Current Artwork        Open the image file

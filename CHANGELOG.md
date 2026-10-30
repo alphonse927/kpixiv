@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- The tray's "Logout from Pixiv" menu item. Logging out (or switching
+  accounts) is still available from the GUI's Account page and from
+  `kpixivctl account logout`.
+
 ### Changed
 
 - With the "Ranking + Bookmarks" source, each queue refill now includes at most
