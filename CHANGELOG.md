@@ -26,6 +26,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cache cleanup (including `kpixiv --reset`) no longer deletes the wallpaper
   currently in use, or the one on each screen in multi-monitor mode. Previously
   the file could be removed and KDE would fall back to its default wallpaper.
+- With multi-monitor enabled, the queues are now built for the setting from the
+  moment kPixiv starts. Previously only the single-monitor queue was filled at
+  startup, and the per-screen queues appeared after the first wallpaper change.
+  Newly downloaded images also go to the per-screen queues (filtered by each
+  screen's orientation) instead of the single-monitor queue.
+- In multi-monitor mode, excluding a wallpaper from one screen's tray menu no
+  longer changes the wallpaper on every screen. Only the screens that were
+  showing the excluded image get a new one, and the excluded image is removed
+  from every queue and from the history (it no longer reappears there).
+- The cleanup that runs at startup now also removes deleted images from the
+  per-screen queues, deletes files without a metadata entry from the history
+  and queues, and removes thumbnails that no longer belong to any image,
+  including those of excluded wallpapers. The blacklist is never touched, so
+  excluded artworks are not downloaded again.
 
 ## [v0.11.0] – Fresh Landscape
 

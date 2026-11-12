@@ -46,21 +46,27 @@ func (h *History) SetMonitor(screenID, imageID string) {
 	h.Monitors[screenID] = imageID
 }
 
+// Remove forgets an image everywhere in the history: the list, the global
+// current wallpaper and every per-monitor entry. Clearing the monitor entries
+// matters: SetMonitor pushes the previous wallpaper of a screen back into
+// Images when it is replaced, which would otherwise resurrect the removed ID.
 func (h *History) Remove(imageID string) {
-	h.Images = slices.Filter(h.Images, func(id string) bool {
-		return id != imageID
-	})
-	if h.Current == imageID {
-		h.Current = ""
-	}
+	h.RemoveSet(sets.NewFrom([]string{imageID}))
 }
 
+// RemoveSet forgets several images everywhere in the history. See Remove.
 func (h *History) RemoveSet(ids sets.Set[string]) {
 	h.Images = slices.Filter(h.Images, func(id string) bool {
 		return !ids.Contains(id)
 	})
 	if ids.Contains(h.Current) {
 		h.Current = ""
+	}
+
+	for screenID, id := range h.Monitors {
+		if ids.Contains(id) {
+			delete(h.Monitors, screenID)
+		}
 	}
 }
 

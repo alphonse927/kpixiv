@@ -29,6 +29,10 @@ type Fetcher struct {
 	client  pixiv.ImageClient
 	page    int
 	mode    string
+
+	// enqueue receives the IDs that Fetch makes available. When nil they are
+	// appended to the global queue.
+	enqueue func(ids []string) error
 }
 
 // NewFetcher creates a fetcher bound to config, storage, and pixiv client.
@@ -87,13 +91,8 @@ func (f *Fetcher) Fetch(ctx context.Context) (*FetchResult, error) {
 
 	log.Info("Fetch summary", "downloaded", result.Downloaded, "skipped", result.Skipped, "failed", result.Failed)
 
-	q := storage.NewQueue(f.storage.StateDir())
-	if err = q.Load(); err != nil {
-		log.Warn("Failed to load queue", "error", err)
-	}
-
 	if len(availableIDs) > 0 {
-		if err = q.AppendRandom(availableIDs); err != nil {
+		if err = f.enqueueIDs(availableIDs); err != nil {
 			log.Warn("Failed to append to queue", "error", err)
 		}
 	}
@@ -308,6 +307,26 @@ func (f *Fetcher) collectAvailableIDs(filteredImages []pixiv.Image, downloadedID
 	}
 
 	return ids
+}
+
+// SetEnqueue replaces how fetched IDs reach the queue. The scheduler uses it
+// to feed the queues that match the multi-monitor setting; without it the IDs
+// go to the global queue.
+func (f *Fetcher) SetEnqueue(fn func(ids []string) error) {
+	f.enqueue = fn
+}
+
+func (f *Fetcher) enqueueIDs(ids []string) error {
+	if f.enqueue != nil {
+		return f.enqueue(ids)
+	}
+
+	q := storage.NewQueue(f.storage.StateDir())
+	if err := q.Load(); err != nil {
+		logger.WithComponent("fetcher").Warn("Failed to load queue", "error", err)
+	}
+
+	return q.AppendRandom(ids)
 }
 
 // GetPage returns the current ranking page pointer used by the fetcher.

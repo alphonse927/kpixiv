@@ -314,6 +314,8 @@ Favorites are excluded from automatic cleanup.
 KPixiv removes cached wallpapers when it starts: by default, those older than `wallpaper.cleanup_days`, or all of them when started with `--reset`. The wallpaper currently applied (and, with multi-monitor enabled, the one on each screen) is always kept, even if it is older than the cleanup age or `--reset` is used. 
 This prevents KDE from falling back to its default wallpaper because the file in use was deleted. Once a wallpaper is replaced by the next rotation, it becomes eligible for cleanup like any other.
 
+Removed images are also dropped from the history, the queues (including each screen's queue in multi-monitor mode) and the thumbnail cache. The blacklist is kept, so excluded artworks are never downloaded again.
+
 ## Bookmark Sync
 
 When `bookmarks.enabled` is `true`, KPixiv periodically syncs your Pixiv bookmarks into the Favorites directory. Synced images are tagged as `bookmarks` in metadata and excluded from cleanup. When `auto_cleanup` is enabled, images that are no longer bookmarked are removed.

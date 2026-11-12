@@ -31,8 +31,12 @@ const componentName = "scheduler"
 // including when nothing has been downloaded yet.
 const maxBookmarksPerAllRefill = 10
 
-// ErrImageNotFound indicates that a queued wallpaper ID does not exist in metadata.
-var ErrImageNotFound = fmt.Errorf("image not found")
+var (
+	// ErrImageNotFound indicates that a queued wallpaper ID does not exist in metadata.
+	ErrImageNotFound = errors.New("image not found")
+	// errNoWallpapers means there is nothing on disk to build a queue from yet.
+	errNoWallpapers = errors.New("no wallpapers found in storage")
+)
 
 type Scheduler struct {
 	cfg                  *config.Config
@@ -308,6 +312,7 @@ func (sch *Scheduler) fetchImages(ctx context.Context, cname string) (err error)
 	}
 
 	f := fetcher.NewFetcher(sch.cfg, sch.storage, sch.pixiv)
+	f.SetEnqueue(sch.enqueueNewImages)
 	if err = f.LoadPage(); err != nil {
 		log.Error("Failed to load ranking page", "error", err)
 		return err
@@ -408,7 +413,7 @@ func (sch *Scheduler) refillQueueFromStorage(q *storage.Queue, cname string) err
 	}
 
 	if len(valid) == 0 {
-		return fmt.Errorf("no wallpapers found in storage")
+		return errNoWallpapers
 	}
 
 	if err = q.AppendRandom(valid); err != nil {
@@ -612,25 +617,158 @@ func (sch *Scheduler) Stop(cname string) {
 	sch.wg.Wait()
 }
 
-// RebuildQueue clears the queue and refills it from available images.
+// RebuildQueue empties the queues that the current settings use and refills
+// them from the images on disk: one queue per screen in multi-monitor mode and
+// the global queue otherwise. The global queue is also used when the screens
+// cannot be listed, which is exactly when rotation falls back to it.
 func (sch *Scheduler) RebuildQueue() error {
 	log := logger.WithComponent(componentName)
 
-	q := storage.NewQueue(sch.storage.StateDir())
+	screens, err := sch.multiMonitorScreens()
+	if err != nil {
+		log.Warn("Could not list screens; rebuilding the global queue", "error", err)
+	}
+
+	if len(screens) > 0 {
+		return sch.rebuildMonitorQueues(screens)
+	}
+
+	return sch.rebuildGlobalQueue()
+}
+
+// rebuildQueue is the one routine that (re)builds any queue, global or
+// per-monitor: it loads the queue, applies the orientation it must be filtered
+// by (ignored for the global queue), empties it and refills it from the images
+// on disk. An empty image store leaves the queue empty and is not an error.
+func (sch *Scheduler) rebuildQueue(q *storage.Queue, orientation string) error {
 	if err := q.Load(); err != nil {
 		return fmt.Errorf("failed to load queue: %w", err)
+	}
+
+	if err := q.SetOrientation(orientation); err != nil {
+		return fmt.Errorf("failed to set queue orientation: %w", err)
 	}
 
 	if err := q.Clear(); err != nil {
 		return fmt.Errorf("failed to clear queue: %w", err)
 	}
 
+	log := logger.WithComponent(componentName)
 	if err := sch.refillQueueFromStorage(q, componentName); err != nil {
-		log.Debug("Queue rebuild: no images available", "error", err)
+		if errors.Is(err, errNoWallpapers) {
+			log.Debug("Queue rebuild: no images available")
+			return nil
+		}
+
+		return err
 	}
 
 	log.Debug("Queue rebuilt", "count", q.Len())
 	return nil
+}
+
+// rebuildGlobalQueue rebuilds the queue shared by single-monitor mode.
+func (sch *Scheduler) rebuildGlobalQueue() error {
+	return sch.rebuildQueue(storage.NewQueue(sch.storage.StateDir()), "")
+}
+
+// rebuildMonitorQueue rebuilds the queue of one screen, filtered by that
+// screen's own orientation setting.
+func (sch *Scheduler) rebuildMonitorQueue(screenID string) error {
+	q := storage.NewMonitorQueue(sch.storage.StateDir(), screenID)
+	return sch.rebuildQueue(q, sch.monitorOrientation(screenID).String())
+}
+
+// rebuildMonitorQueues rebuilds the queue of every given screen. A failure on
+// one screen does not stop the others; all failures are returned together.
+func (sch *Scheduler) rebuildMonitorQueues(screens []wallpaper.Screen) error {
+	errs := make([]error, 0, len(screens))
+	for _, screen := range screens {
+		if err := sch.rebuildMonitorQueue(screen.ID); err != nil {
+			errs = append(errs, fmt.Errorf("screen %s: %w", screen.ID, err))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// multiMonitorScreens lists the screens when multi-monitor mode is on and the
+// wallpaper setter can address them one by one. It returns no screens in any
+// other case, which callers treat as "use the global queue".
+func (sch *Scheduler) multiMonitorScreens() ([]wallpaper.Screen, error) {
+	if !sch.cfg.Wallpaper.MultiMonitorEnabled {
+		return nil, nil
+	}
+
+	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
+	if !ok {
+		return nil, nil
+	}
+
+	return monitorSetter.Screens()
+}
+
+// enqueueNewImages adds freshly fetched IDs to the queues the current settings
+// use: each screen's own queue (filtered by that screen's orientation) in
+// multi-monitor mode, the global queue otherwise.
+func (sch *Scheduler) enqueueNewImages(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	screens, err := sch.multiMonitorScreens()
+	if err != nil {
+		logger.WithComponent(componentName).Warn("Could not list screens; queueing in the global queue", "error", err)
+	}
+
+	if len(screens) == 0 {
+		return sch.appendToQueue(storage.NewQueue(sch.storage.StateDir()), "", ids)
+	}
+
+	errs := make([]error, 0, len(screens))
+	for _, screen := range screens {
+		q := storage.NewMonitorQueue(sch.storage.StateDir(), screen.ID)
+		if appendErr := sch.appendToQueue(q, sch.monitorOrientation(screen.ID).String(), ids); appendErr != nil {
+			errs = append(errs, fmt.Errorf("screen %s: %w", screen.ID, appendErr))
+		}
+	}
+
+	return errors.Join(errs...)
+}
+
+// appendToQueue merges IDs into one queue, keeping only the ones that match
+// the orientation the queue is built for.
+func (sch *Scheduler) appendToQueue(q *storage.Queue, orientation string, ids []string) error {
+	if err := q.Load(); err != nil {
+		return fmt.Errorf("failed to load queue: %w", err)
+	}
+
+	if err := q.SetOrientation(orientation); err != nil {
+		return fmt.Errorf("failed to set queue orientation: %w", err)
+	}
+
+	matching, err := sch.idsMatchingOrientation(ids, orientation)
+	if err != nil {
+		return err
+	}
+
+	return q.AppendRandom(matching)
+}
+
+// idsMatchingOrientation filters IDs down to the images that fit orientation.
+func (sch *Scheduler) idsMatchingOrientation(ids []string, orientation string) ([]string, error) {
+	if orientation == "" || orientation == config.WallpaperAnyOrientation.String() {
+		return ids, nil
+	}
+
+	images, err := sch.storage.LoadMetadata()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	return slices.Filter(ids, func(id string) bool {
+		return matchesOrientation(images[id], config.WallpaperOrientation(orientation))
+	}), nil
 }
 
 // SetNextWallpaper applies the next wallpaper from the queue and updates history.
@@ -656,6 +794,39 @@ func (sch *Scheduler) SetNextWallpaperForScreen(_ *storage.Queue, screenID, scre
 // SetNextWallpapers advances the rotation on every active screen.
 func (sch *Scheduler) SetNextWallpapers(cname string) error {
 	return sch.rotateWallpaper(cname)
+}
+
+// SetNextWallpaperForScreens advances the rotation only on the given screens
+// (connector names), leaving every other screen untouched. Unlike a regular
+// rotation it does not skip screens whose rotation is disabled: the caller
+// uses it to replace a wallpaper that is no longer usable. When the screens
+// cannot be addressed individually it falls back to the global queue, the same
+// way a regular rotation does.
+func (sch *Scheduler) SetNextWallpaperForScreens(screenIDs []string, cname string) error {
+	screens, err := sch.multiMonitorScreens()
+	if err != nil || len(screens) == 0 {
+		q := storage.NewQueue(sch.storage.StateDir())
+		if loadErr := q.Load(); loadErr != nil {
+			return fmt.Errorf("failed to load queue: %w", loadErr)
+		}
+
+		return sch.SetNextWallpaper(q, cname)
+	}
+
+	wanted := sets.NewFrom(screenIDs)
+	var errs []error
+	for _, screen := range screens {
+		if !wanted.Contains(screen.ID) {
+			continue
+		}
+
+		setErr := sch.SetNextWallpaperForScreen(nil, screen.ID, screen.Index, cname)
+		if setErr != nil && !errors.Is(setErr, ErrImageNotFound) {
+			errs = append(errs, fmt.Errorf("screen %s: %w", screen.ID, setErr))
+		}
+	}
+
+	return errors.Join(errs...)
 }
 
 // ResolveScreenIndex returns the Plasma screen index for a given connector name.
@@ -1097,58 +1268,14 @@ func (sch *Scheduler) monitorOrientation(screenID string) config.WallpaperOrient
 	return config.WallpaperAnyOrientation
 }
 
-// RebuildMonitorQueues recreates all monitor queues from the main queue.
-// This is called when monitor config or rotation settings change, ensuring
-// every monitor starts with a fresh queue.
+// RebuildMonitorQueues empties and refills the queue of every screen so each
+// one matches the current settings. It is called when monitor config or
+// rotation settings change, and does nothing outside multi-monitor mode.
 func (sch *Scheduler) RebuildMonitorQueues() error {
-	if !sch.cfg.Wallpaper.MultiMonitorEnabled {
-		return nil
-	}
-
-	monitorSetter, ok := sch.setter.(wallpaper.MonitorSetter)
-	if !ok {
-		return nil
-	}
-
-	screens, err := monitorSetter.Screens()
+	screens, err := sch.multiMonitorScreens()
 	if err != nil {
 		return err
 	}
 
-	// Build a set of current screen IDs to detect stale entries.
-	currentIDs := make(map[string]struct{}, len(screens))
-	for _, s := range screens {
-		currentIDs[s.ID] = struct{}{}
-	}
-
-	// Load the main queue to check for stale monitor entries.
-	mq := storage.NewQueue(sch.storage.StateDir())
-	if err = mq.Load(); err != nil {
-		return err
-	}
-
-	// Recreate each monitor queue: clear and refill from the main queue.
-	for _, screen := range screens {
-		q := storage.NewMonitorQueue(sch.storage.StateDir(), screen.ID)
-		if err = q.Load(); err != nil {
-			return err
-		}
-
-		if err = q.SetOrientation(sch.monitorOrientation(screen.ID).String()); err != nil {
-			return err
-		}
-
-		// Always clear and refill to match current settings.
-		if !q.IsEmpty() {
-			if clearErr := q.Clear(); clearErr != nil {
-				return fmt.Errorf("failed to clear monitor queue for screen %s: %w", screen.ID, clearErr)
-			}
-		}
-
-		if err = sch.refillQueueFromStorage(q, "scheduler"); err != nil {
-			return fmt.Errorf("screen %s: %w", screen.ID, err)
-		}
-	}
-
-	return nil
+	return sch.rebuildMonitorQueues(screens)
 }

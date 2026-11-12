@@ -3,7 +3,11 @@ package storage
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
+
+	"github.com/alphonse927/kpixiv/internal/sets"
 )
 
 func TestNewQueueCreatesEmptyQueue(t *testing.T) {
@@ -482,5 +486,84 @@ func TestQueueLoadExistingData(t *testing.T) {
 
 	if q.Len() != 3 {
 		t.Errorf("Load() existing data: got %d, want 3", q.Len())
+	}
+}
+
+func TestRemoveFromQueuesCleansGlobalAndMonitorQueues(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(tmp, filepath.Join(tmp, "downloads"))
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	global := NewQueue(s.StateDir())
+	if err = global.AppendRandom([]string{"gone", "keep-g"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+	for _, monitorID := range []string{"DP-1", "HDMI-1"} {
+		mq := NewMonitorQueue(s.StateDir(), monitorID)
+		if err = mq.SetOrientation("landscape"); err != nil {
+			t.Fatalf("SetOrientation() returned error: %v", err)
+		}
+		if err = mq.AppendRandom([]string{"gone", "keep-" + monitorID}); err != nil {
+			t.Fatalf("AppendRandom() returned error: %v", err)
+		}
+	}
+
+	if err = s.RemoveFromQueues(sets.NewFrom([]string{"gone"})); err != nil {
+		t.Fatalf("RemoveFromQueues() returned error: %v", err)
+	}
+
+	check := func(q *Queue, want string) {
+		t.Helper()
+		if err = q.Load(); err != nil {
+			t.Fatalf("Load() returned error: %v", err)
+		}
+		if got := q.GetAll(); !slices.Equal(got, []string{want}) {
+			t.Errorf("queue items: got %v, want [%s]", got, want)
+		}
+	}
+	check(NewQueue(s.StateDir()), "keep-g")
+	check(NewMonitorQueue(s.StateDir(), "DP-1"), "keep-DP-1")
+	check(NewMonitorQueue(s.StateDir(), "HDMI-1"), "keep-HDMI-1")
+
+	// The orientation recorded for a monitor queue must survive the purge.
+	mq := NewMonitorQueue(s.StateDir(), "DP-1")
+	if err = mq.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if mq.Orientation() != "landscape" {
+		t.Errorf("orientation: got %q, want landscape", mq.Orientation())
+	}
+}
+
+func TestRemoveFromQueuesWithoutQueueFileIsNoop(t *testing.T) {
+	tmp := t.TempDir()
+	s, err := New(tmp, filepath.Join(tmp, "downloads"))
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	if err = s.RemoveFromQueues(sets.NewFrom([]string{"x"})); err != nil {
+		t.Fatalf("RemoveFromQueues() returned error: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(s.StateDir(), queueFileName)); !os.IsNotExist(statErr) {
+		t.Fatalf("queue file should not be created, stat error: %v", statErr)
+	}
+}
+
+func TestMonitorQueueFirstSaveWritesEmptyGlobalItems(t *testing.T) {
+	tmp := t.TempDir()
+	mq := NewMonitorQueue(tmp, "DP-1")
+	if err := mq.AppendRandom([]string{"a"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(tmp, queueFileName))
+	if err != nil {
+		t.Fatalf("ReadFile() returned error: %v", err)
+	}
+	if !strings.Contains(string(data), `"items": []`) || !strings.Contains(string(data), `"DP-1"`) {
+		t.Fatalf("queue.json should have an empty global list and the monitor queue, got:\n%s", data)
 	}
 }

@@ -238,3 +238,35 @@ func TestAddToHistoryWithLimit(t *testing.T) {
 		t.Fatalf("current should be latest id11, got %s", history.Current)
 	}
 }
+
+func TestHistoryRemoveClearsMonitorEntries(t *testing.T) {
+	h := NewHistory()
+	h.SetCurrent("gone")
+	h.SetMonitor("DP-1", "gone")
+	h.SetMonitor("HDMI-1", "keep")
+	h.Images = []string{"gone", "old"}
+
+	h.Remove("gone")
+
+	if h.Current != "" {
+		t.Errorf("Current: got %q, want empty", h.Current)
+	}
+	if _, ok := h.Monitors["DP-1"]; ok {
+		t.Errorf("monitor entry for the removed image should be dropped: %#v", h.Monitors)
+	}
+	if h.Monitors["HDMI-1"] != "keep" {
+		t.Errorf("unrelated monitor entry changed: %#v", h.Monitors)
+	}
+	if len(h.Images) != 1 || h.Images[0] != "old" {
+		t.Errorf("Images: got %v, want [old]", h.Images)
+	}
+
+	// Replacing the screen's wallpaper afterwards must not push the removed
+	// image back into the history list.
+	h.SetMonitor("DP-1", "next")
+	for _, id := range h.Images {
+		if id == "gone" {
+			t.Fatalf("removed image resurrected in history: %v", h.Images)
+		}
+	}
+}

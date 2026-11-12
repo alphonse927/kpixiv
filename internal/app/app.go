@@ -16,6 +16,7 @@ import (
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/platform"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
+	"github.com/alphonse927/kpixiv/internal/sets"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
@@ -317,12 +318,22 @@ func (c *Controller) OpenCurrentArtworkInPixiv() error {
 	return c.OpenWallpaperInPixiv(currentID)
 }
 
-// ExcludeWallpaper blacklists an artwork, deletes its file, and switches to the next one.
+// ExcludeWallpaper blacklists an artwork, deletes its file and thumbnail, and
+// drops it from the history and from every queue. The wallpaper is only
+// replaced where the artwork was on display: in multi-monitor mode that is the
+// screens showing it (the others keep their wallpaper); otherwise the single
+// global wallpaper.
 func (c *Controller) ExcludeWallpaper(artworkID string) error {
 	log := logger.WithComponent("app")
 
 	if artworkID == "" {
 		return fmt.Errorf("no artwork ID provided")
+	}
+
+	// The history forgets the artwork below, so note which screens show it first.
+	affectedScreens, err := c.screensShowing(artworkID)
+	if err != nil {
+		return err
 	}
 
 	metadata, err := c.st.LoadMetadata()
@@ -342,31 +353,57 @@ func (c *Controller) ExcludeWallpaper(artworkID string) error {
 		}
 	}
 
+	// Without its metadata entry the thumbnail would never be cleaned up again.
+	if tErr := c.st.RemoveThumbnail(artworkID); tErr != nil {
+		log.Warn("Failed to delete excluded wallpaper thumbnail", "id", artworkID, "error", tErr)
+	}
+
 	if err = c.st.ExcludeWallpaper(artworkID); err != nil {
 		return fmt.Errorf("failed to exclude artwork: %w", err)
 	}
 
-	q := storage.NewQueue(c.st.StateDir())
-	if err = q.Load(); err != nil {
-		return fmt.Errorf("excluded artwork, but failed to load queue: %w", err)
-	}
-	if err = q.Remove(artworkID); err != nil {
-		return fmt.Errorf("excluded artwork, but failed to update queue: %w", err)
+	if err = c.st.RemoveFromQueues(sets.NewFrom([]string{artworkID})); err != nil {
+		return fmt.Errorf("excluded artwork, but failed to update queues: %w", err)
 	}
 
-	if c.cfg.Wallpaper.MultiMonitorEnabled {
-		if err = c.sch.SetNextWallpapers(trayComponentName); err != nil {
-			return err
-		}
-	} else {
-		if err = c.sch.SetNextWallpaper(q, trayComponentName); err != nil {
-			return err
-		}
+	if err = c.setNextAfterExclusion(affectedScreens); err != nil {
+		return err
 	}
 
 	c.sch.ResetRotationTimer()
 	notify.SendDefault("KPixiv", fmt.Sprintf("The image %s has been excluded from the normal rotation.", c.artworkTitle(artworkID)))
 	return nil
+}
+
+// screensShowing returns the screens whose remembered wallpaper is artworkID.
+func (c *Controller) screensShowing(artworkID string) ([]string, error) {
+	monitors, err := c.st.LoadMonitorHistory()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load monitor history: %w", err)
+	}
+
+	screens := make([]string, 0, len(monitors))
+	for screenID, id := range monitors {
+		if id == artworkID {
+			screens = append(screens, screenID)
+		}
+	}
+
+	return screens, nil
+}
+
+// setNextAfterExclusion replaces the excluded wallpaper only where it was shown.
+func (c *Controller) setNextAfterExclusion(affectedScreens []string) error {
+	if c.cfg.Wallpaper.MultiMonitorEnabled {
+		return c.sch.SetNextWallpaperForScreens(affectedScreens, trayComponentName)
+	}
+
+	q := storage.NewQueue(c.st.StateDir())
+	if err := q.Load(); err != nil {
+		return fmt.Errorf("excluded artwork, but failed to load queue: %w", err)
+	}
+
+	return c.sch.SetNextWallpaper(q, trayComponentName)
 }
 
 // ExcludeCurrentWallpaper blacklists the current wallpaper, deletes the file, and switches to another one.

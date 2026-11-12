@@ -3,6 +3,7 @@ package storage
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
@@ -157,5 +158,202 @@ func TestCleanupKeepsWallpapersInUse(t *testing.T) {
 	}
 	if _, statErr := os.Stat(other); !os.IsNotExist(statErr) {
 		t.Fatalf("unused wallpaper should be removed, stat error: %v", statErr)
+	}
+}
+
+// cleanupFixture holds a storage with one image old enough to be cleaned up
+// ("old"), one recent image that is kept ("new"), and the matching thumbnails.
+type cleanupFixture struct {
+	s       *Storage
+	oldPath string
+	oldTime time.Time
+}
+
+func newCleanupFixture(t *testing.T) *cleanupFixture {
+	t.Helper()
+
+	tmp := t.TempDir()
+	s, err := New(tmp, filepath.Join(tmp, "downloads"))
+	if err != nil {
+		t.Fatalf("New() returned error: %v", err)
+	}
+
+	f := &cleanupFixture{s: s, oldTime: time.Now().Add(-10 * 24 * time.Hour)}
+	f.oldPath = f.writeRanking(t, "old", f.oldTime)
+	newPath := f.writeRanking(t, "new", time.Now())
+
+	meta := map[string]*ImageMeta{
+		"old": {ID: "old", Path: f.oldPath, DownloadedAt: f.oldTime},
+		"new": {ID: "new", Path: newPath, DownloadedAt: time.Now()},
+	}
+	if err = s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+	if err = s.AddToHistoryWithLimit("new", 10); err != nil {
+		t.Fatalf("AddToHistoryWithLimit() returned error: %v", err)
+	}
+
+	return f
+}
+
+func (f *cleanupFixture) writeRanking(t *testing.T, id string, modTime time.Time) string {
+	t.Helper()
+
+	path := filepath.Join(f.s.RankingDir(), id+".jpg")
+	if err := os.WriteFile(path, []byte(id), 0600); err != nil {
+		t.Fatalf("failed writing image %s: %v", id, err)
+	}
+	if err := os.Chtimes(path, modTime, modTime); err != nil {
+		t.Fatalf("failed setting times for %s: %v", id, err)
+	}
+
+	return path
+}
+
+func (f *cleanupFixture) writeThumbnail(t *testing.T, id string) string {
+	t.Helper()
+
+	path := f.s.ThumbnailPath(id)
+	if err := os.WriteFile(path, []byte("thumb"), 0600); err != nil {
+		t.Fatalf("failed writing thumbnail %s: %v", id, err)
+	}
+
+	return path
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+
+	return err == nil
+}
+
+func TestCleanupRemovesImagesFromGlobalAndMonitorQueues(t *testing.T) {
+	f := newCleanupFixture(t)
+	s := f.s
+
+	if err := NewQueue(s.StateDir()).AppendRandom([]string{"old", "new"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+	for _, screen := range []string{"DP-1", "HDMI-1"} {
+		if err := NewMonitorQueue(s.StateDir(), screen).AppendRandom([]string{"old", "new"}); err != nil {
+			t.Fatalf("AppendRandom() returned error: %v", err)
+		}
+	}
+
+	if _, err := s.CleanupImagesOlderThanDays(7); err != nil {
+		t.Fatalf("CleanupImagesOlderThanDays() returned error: %v", err)
+	}
+
+	queues := map[string]*Queue{
+		"global": NewQueue(s.StateDir()),
+		"DP-1":   NewMonitorQueue(s.StateDir(), "DP-1"),
+		"HDMI-1": NewMonitorQueue(s.StateDir(), "HDMI-1"),
+	}
+	for name, q := range queues {
+		if err := q.Load(); err != nil {
+			t.Fatalf("Load(%s) returned error: %v", name, err)
+		}
+		if got := q.GetAll(); !slices.Equal(got, []string{"new"}) {
+			t.Errorf("%s queue after cleanup: got %v, want [new]", name, got)
+		}
+	}
+}
+
+func TestCleanupRemovesThumbnailsThatNoLongerHaveAnImage(t *testing.T) {
+	f := newCleanupFixture(t)
+	s := f.s
+
+	oldThumb := f.writeThumbnail(t, "old")         // image removed by this cleanup
+	newThumb := f.writeThumbnail(t, "new")         // image still known
+	excludedThumb := f.writeThumbnail(t, "banned") // image excluded earlier: no metadata entry
+	ghostThumb := f.writeThumbnail(t, "ghost")     // file without metadata, removed by cleanup
+	f.writeRanking(t, "ghost", f.oldTime)
+	otherFile := filepath.Join(s.ThumbnailDir(), "notes.txt")
+	if err := os.WriteFile(otherFile, []byte("x"), 0600); err != nil {
+		t.Fatalf("WriteFile() returned error: %v", err)
+	}
+
+	if _, err := s.CleanupImagesOlderThanDays(7); err != nil {
+		t.Fatalf("CleanupImagesOlderThanDays() returned error: %v", err)
+	}
+
+	for name, path := range map[string]string{"old": oldThumb, "banned": excludedThumb, "ghost": ghostThumb} {
+		if exists(path) {
+			t.Errorf("thumbnail of %q should have been removed", name)
+		}
+	}
+	if !exists(newThumb) {
+		t.Error("thumbnail of a known image must be kept")
+	}
+	if !exists(otherFile) {
+		t.Error("files that are not thumbnails must be left alone")
+	}
+}
+
+func TestCleanupDropsUntrackedFilesFromHistoryAndQueues(t *testing.T) {
+	f := newCleanupFixture(t)
+	s := f.s
+
+	// "ghost" has a file but no metadata entry; cleanup deletes the file, so
+	// its ID must leave the history and every queue as well.
+	f.writeRanking(t, "ghost", f.oldTime)
+	if err := s.updateHistory(func(h *History) error {
+		h.Images = append(h.Images, "ghost")
+		return nil
+	}); err != nil {
+		t.Fatalf("updateHistory() returned error: %v", err)
+	}
+	if err := NewQueue(s.StateDir()).AppendRandom([]string{"ghost", "new"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+	if err := NewMonitorQueue(s.StateDir(), "DP-1").AppendRandom([]string{"ghost", "new"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	if _, err := s.CleanupImagesOlderThanDays(7); err != nil {
+		t.Fatalf("CleanupImagesOlderThanDays() returned error: %v", err)
+	}
+
+	history, err := s.LoadHistory()
+	if err != nil {
+		t.Fatalf("LoadHistory() returned error: %v", err)
+	}
+	if slices.Contains(history.Images, "ghost") {
+		t.Errorf("history still lists the removed file: %v", history.Images)
+	}
+
+	for name, q := range map[string]*Queue{
+		"global": NewQueue(s.StateDir()),
+		"DP-1":   NewMonitorQueue(s.StateDir(), "DP-1"),
+	} {
+		if err = q.Load(); err != nil {
+			t.Fatalf("Load(%s) returned error: %v", name, err)
+		}
+		if slices.Contains(q.GetAll(), "ghost") {
+			t.Errorf("%s queue still lists the removed file: %v", name, q.GetAll())
+		}
+	}
+}
+
+func TestCleanupLeavesBlacklistUntouched(t *testing.T) {
+	f := newCleanupFixture(t)
+	s := f.s
+
+	// "old" is blacklisted and also gets cleaned up; "banned" has no image at
+	// all. Both must stay blacklisted so the fetcher never downloads them again.
+	if err := s.SaveBlacklist(&Blacklist{IDs: []string{"old", "banned"}}); err != nil {
+		t.Fatalf("SaveBlacklist() returned error: %v", err)
+	}
+
+	if _, err := s.CleanupImagesOlderThanDays(7); err != nil {
+		t.Fatalf("CleanupImagesOlderThanDays() returned error: %v", err)
+	}
+
+	blacklist, err := s.LoadBlacklist()
+	if err != nil {
+		t.Fatalf("LoadBlacklist() returned error: %v", err)
+	}
+	if !blacklist.Contains("old") || !blacklist.Contains("banned") || len(blacklist.IDs) != 2 {
+		t.Fatalf("blacklist changed by cleanup: %v", blacklist.IDs)
 	}
 }

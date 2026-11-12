@@ -6,15 +6,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 func TestMain(m *testing.M) {
@@ -73,6 +78,22 @@ type mockPixivClient struct {
 	nextPage    int
 	fetchErr    error
 	downloadErr error
+}
+
+// screenApply records one SetForScreen call.
+type screenApply struct {
+	index string
+	path  string
+}
+
+// mockMonitorSetter is a wallpaper.MonitorSetter with fixed screens.
+type mockMonitorSetter struct {
+	mockSetter
+	screens    []wallpaper.Screen
+	screensErr error
+
+	mu      sync.Mutex
+	applied []screenApply
 }
 
 func (m *mockPixivClient) FetchRanking(context.Context, string, int, bool) ([]pixiv.Image, int, error) {
@@ -877,5 +898,352 @@ func TestRefillQueueAllSamplesBookmarksAfterOrientationFilter(t *testing.T) {
 	}
 	if got := countIn(items, portrait); got != len(items) {
 		t.Errorf("portrait bookmarks in queue: got %d, want %d", got, len(items))
+	}
+}
+
+func (m *mockMonitorSetter) Screens() ([]wallpaper.Screen, error) {
+	return m.screens, m.screensErr
+}
+
+func (m *mockMonitorSetter) SetForScreen(index, path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.applied = append(m.applied, screenApply{index: index, path: path})
+
+	return nil
+}
+
+func (m *mockMonitorSetter) appliedIndexes() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	indexes := make([]string, 0, len(m.applied))
+	for _, a := range m.applied {
+		indexes = append(indexes, a.index)
+	}
+	sort.Strings(indexes)
+
+	return indexes
+}
+
+func twoScreens() []wallpaper.Screen {
+	return []wallpaper.Screen{
+		{ID: "DP-1", Index: "0"},
+		{ID: "HDMI-1", Index: "1"},
+	}
+}
+
+func multiMonitorConfig() *config.Config {
+	cfg := testConfig()
+	cfg.Wallpaper.MultiMonitorEnabled = true
+
+	return cfg
+}
+
+// queueItems loads one queue from disk; an empty monitorID means the global queue.
+func queueItems(t *testing.T, s *storage.Storage, monitorID string) []string {
+	t.Helper()
+
+	q := storage.NewQueue(s.StateDir())
+	if monitorID != "" {
+		q = storage.NewMonitorQueue(s.StateDir(), monitorID)
+	}
+	if err := q.Load(); err != nil {
+		t.Fatalf("Load(%q) returned error: %v", monitorID, err)
+	}
+
+	return q.GetAll()
+}
+
+func sorted(items []string) []string {
+	out := slices.Clone(items)
+	sort.Strings(out)
+
+	return out
+}
+
+func TestRebuildQueueMultiMonitorFillsMonitorQueuesOnly(t *testing.T) {
+	s := testStorage(t)
+	ids := writeTestImages(t, s.RankingDir(), "img-", 5)
+	setter := &mockMonitorSetter{screens: twoScreens()}
+	sch := New(multiMonitorConfig(), s, &mockPixivClient{}, setter)
+
+	// A fresh install has no queue file yet.
+	if _, err := os.Stat(filepath.Join(s.StateDir(), "queue.json")); !os.IsNotExist(err) {
+		t.Fatalf("queue.json should not exist before the rebuild, stat error: %v", err)
+	}
+
+	if err := sch.RebuildQueue(); err != nil {
+		t.Fatalf("RebuildQueue() returned error: %v", err)
+	}
+
+	for _, screen := range twoScreens() {
+		if got := sorted(queueItems(t, s, screen.ID)); !slices.Equal(got, sorted(ids)) {
+			t.Errorf("queue of %s: got %v, want %v", screen.ID, got, sorted(ids))
+		}
+	}
+	if got := queueItems(t, s, ""); len(got) != 0 {
+		t.Errorf("global queue should stay empty in multi-monitor mode, got %v", got)
+	}
+}
+
+func TestRebuildQueueSingleMonitorFillsOnlyGlobalQueue(t *testing.T) {
+	s := testStorage(t)
+	ids := writeTestImages(t, s.RankingDir(), "img-", 5)
+	// The setter can address screens, but the setting is off.
+	setter := &mockMonitorSetter{screens: twoScreens()}
+	sch := New(testConfig(), s, &mockPixivClient{}, setter)
+
+	if err := sch.RebuildQueue(); err != nil {
+		t.Fatalf("RebuildQueue() returned error: %v", err)
+	}
+
+	if got := sorted(queueItems(t, s, "")); !slices.Equal(got, sorted(ids)) {
+		t.Errorf("global queue: got %v, want %v", got, sorted(ids))
+	}
+	for _, screen := range twoScreens() {
+		if got := queueItems(t, s, screen.ID); len(got) != 0 {
+			t.Errorf("queue of %s should stay empty in single-monitor mode, got %v", screen.ID, got)
+		}
+	}
+}
+
+func TestRebuildQueueMultiMonitorFallsBackToGlobalQueue(t *testing.T) {
+	cases := map[string]wallpaper.Setter{
+		"setter cannot address screens": &mockSetter{},
+		"no screens reported":           &mockMonitorSetter{},
+		"screens cannot be listed":      &mockMonitorSetter{screensErr: errors.New("dbus unavailable")},
+	}
+
+	for name, setter := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := testStorage(t)
+			ids := writeTestImages(t, s.RankingDir(), "img-", 3)
+			sch := New(multiMonitorConfig(), s, &mockPixivClient{}, setter)
+
+			if err := sch.RebuildQueue(); err != nil {
+				t.Fatalf("RebuildQueue() returned error: %v", err)
+			}
+
+			if got := sorted(queueItems(t, s, "")); !slices.Equal(got, sorted(ids)) {
+				t.Errorf("global queue: got %v, want %v", got, sorted(ids))
+			}
+		})
+	}
+}
+
+func TestRebuildQueueWithoutImagesIsNotAnError(t *testing.T) {
+	for name, cfg := range map[string]*config.Config{"single": testConfig(), "multi": multiMonitorConfig()} {
+		t.Run(name, func(t *testing.T) {
+			s := testStorage(t)
+			sch := New(cfg, s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+
+			if err := sch.RebuildQueue(); err != nil {
+				t.Fatalf("RebuildQueue() returned error: %v", err)
+			}
+		})
+	}
+}
+
+func TestRebuildQueueReplacesStaleItems(t *testing.T) {
+	s := testStorage(t)
+	ids := writeTestImages(t, s.RankingDir(), "img-", 2)
+	stale := storage.NewMonitorQueue(s.StateDir(), "DP-1")
+	if err := stale.AppendRandom([]string{"stale"}); err != nil {
+		t.Fatalf("AppendRandom() returned error: %v", err)
+	}
+
+	sch := New(multiMonitorConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+	if err := sch.RebuildQueue(); err != nil {
+		t.Fatalf("RebuildQueue() returned error: %v", err)
+	}
+
+	if got := sorted(queueItems(t, s, "DP-1")); !slices.Equal(got, sorted(ids)) {
+		t.Errorf("queue of DP-1: got %v, want %v", got, sorted(ids))
+	}
+}
+
+// saveOrientedImages writes one landscape and one portrait image and their metadata.
+func saveOrientedImages(t *testing.T, s *storage.Storage) (landscape, portrait string) {
+	t.Helper()
+
+	writeTestImages(t, s.RankingDir(), "land-", 1)
+	writeTestImages(t, s.RankingDir(), "port-", 1)
+	meta := map[string]*storage.ImageMeta{
+		"land-0": {ID: "land-0", Path: filepath.Join(s.RankingDir(), "land-0.jpg"), Width: 1920, Height: 1080},
+		"port-0": {ID: "port-0", Path: filepath.Join(s.RankingDir(), "port-0.jpg"), Width: 1080, Height: 1920},
+	}
+	if err := s.SaveMetadata(meta); err != nil {
+		t.Fatalf("SaveMetadata() returned error: %v", err)
+	}
+
+	return "land-0", "port-0"
+}
+
+func orientedMonitorConfig() *config.Config {
+	cfg := multiMonitorConfig()
+	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{
+		"DP-1":   {RotationEnabled: true, Orientation: config.WallpaperLandscapeOrientation},
+		"HDMI-1": {RotationEnabled: true, Orientation: config.WallpaperPortraitOrientation},
+	}
+
+	return cfg
+}
+
+func TestRebuildQueueFiltersEachMonitorByItsOrientation(t *testing.T) {
+	s := testStorage(t)
+	landscape, portrait := saveOrientedImages(t, s)
+	sch := New(orientedMonitorConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+
+	if err := sch.RebuildQueue(); err != nil {
+		t.Fatalf("RebuildQueue() returned error: %v", err)
+	}
+
+	if got := queueItems(t, s, "DP-1"); !slices.Equal(got, []string{landscape}) {
+		t.Errorf("landscape monitor queue: got %v, want [%s]", got, landscape)
+	}
+	if got := queueItems(t, s, "HDMI-1"); !slices.Equal(got, []string{portrait}) {
+		t.Errorf("portrait monitor queue: got %v, want [%s]", got, portrait)
+	}
+}
+
+func TestEnqueueNewImagesFollowsMultiMonitorSetting(t *testing.T) {
+	t.Run("multi-monitor feeds each screen by orientation", func(t *testing.T) {
+		s := testStorage(t)
+		landscape, portrait := saveOrientedImages(t, s)
+		sch := New(orientedMonitorConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+
+		if err := sch.enqueueNewImages([]string{landscape, portrait}); err != nil {
+			t.Fatalf("enqueueNewImages() returned error: %v", err)
+		}
+
+		if got := queueItems(t, s, "DP-1"); !slices.Equal(got, []string{landscape}) {
+			t.Errorf("landscape monitor queue: got %v, want [%s]", got, landscape)
+		}
+		if got := queueItems(t, s, "HDMI-1"); !slices.Equal(got, []string{portrait}) {
+			t.Errorf("portrait monitor queue: got %v, want [%s]", got, portrait)
+		}
+		if got := queueItems(t, s, ""); len(got) != 0 {
+			t.Errorf("global queue should stay empty, got %v", got)
+		}
+	})
+
+	t.Run("single-monitor feeds the global queue", func(t *testing.T) {
+		s := testStorage(t)
+		sch := New(testConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+
+		if err := sch.enqueueNewImages([]string{"a", "b"}); err != nil {
+			t.Fatalf("enqueueNewImages() returned error: %v", err)
+		}
+
+		if got := sorted(queueItems(t, s, "")); !slices.Equal(got, []string{"a", "b"}) {
+			t.Errorf("global queue: got %v, want [a b]", got)
+		}
+		if got := queueItems(t, s, "DP-1"); len(got) != 0 {
+			t.Errorf("monitor queue should stay empty, got %v", got)
+		}
+	})
+}
+
+// writingPixivClient serves a fixed ranking and writes a file on download.
+type writingPixivClient struct {
+	images []pixiv.Image
+}
+
+func (c *writingPixivClient) FetchRanking(context.Context, string, int, bool) ([]pixiv.Image, int, error) {
+	return c.images, 2, nil
+}
+
+func (c *writingPixivClient) DownloadImage(_ context.Context, _ *pixiv.Image, destPath string) error {
+	return os.WriteFile(destPath, []byte("img"), 0600)
+}
+
+func TestFetchInMultiMonitorModeFeedsMonitorQueues(t *testing.T) {
+	notify.SetEnabled(false)
+	t.Cleanup(func() { notify.SetEnabled(true) })
+
+	s := testStorage(t)
+	client := &writingPixivClient{images: []pixiv.Image{
+		{ID: "fresh-1", Width: 1920, Height: 1080},
+		{ID: "fresh-2", Width: 2560, Height: 1440},
+	}}
+	sch := New(multiMonitorConfig(), s, client, &mockMonitorSetter{screens: twoScreens()})
+
+	if err := sch.fetchImages(context.Background(), "test"); err != nil {
+		t.Fatalf("fetchImages() returned error: %v", err)
+	}
+
+	for _, screen := range twoScreens() {
+		if got := sorted(queueItems(t, s, screen.ID)); !slices.Equal(got, []string{"fresh-1", "fresh-2"}) {
+			t.Errorf("queue of %s: got %v, want both fetched images", screen.ID, got)
+		}
+	}
+	if got := queueItems(t, s, ""); len(got) != 0 {
+		t.Errorf("global queue should stay empty in multi-monitor mode, got %v", got)
+	}
+}
+
+func TestSetNextWallpaperForScreensOnlyAdvancesTheGivenScreens(t *testing.T) {
+	s := testStorage(t)
+	writeTestImages(t, s.RankingDir(), "img-", 6)
+	setter := &mockMonitorSetter{screens: twoScreens()}
+	cfg := multiMonitorConfig()
+	cfg.Wallpaper.HistoryLimit = 10
+	sch := New(cfg, s, &mockPixivClient{}, setter)
+
+	if err := sch.SetNextWallpaperForScreens([]string{"HDMI-1"}, "test"); err != nil {
+		t.Fatalf("SetNextWallpaperForScreens() returned error: %v", err)
+	}
+
+	if got := setter.appliedIndexes(); !slices.Equal(got, []string{"1"}) {
+		t.Errorf("screens that received a wallpaper: got %v, want only [1] (HDMI-1)", got)
+	}
+
+	monitors, err := s.LoadMonitorHistory()
+	if err != nil {
+		t.Fatalf("LoadMonitorHistory() returned error: %v", err)
+	}
+	if monitors["HDMI-1"] == "" {
+		t.Error("HDMI-1 should have a wallpaper recorded")
+	}
+	if _, touched := monitors["DP-1"]; touched {
+		t.Errorf("DP-1 must not be touched, history: %v", monitors)
+	}
+}
+
+func TestSetNextWallpaperForScreensIgnoresDisabledRotation(t *testing.T) {
+	s := testStorage(t)
+	writeTestImages(t, s.RankingDir(), "img-", 3)
+	setter := &mockMonitorSetter{screens: twoScreens()}
+	cfg := multiMonitorConfig()
+	cfg.Wallpaper.HistoryLimit = 10
+	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{"DP-1": {RotationEnabled: false}}
+	sch := New(cfg, s, &mockPixivClient{}, setter)
+
+	if err := sch.SetNextWallpaperForScreens([]string{"DP-1"}, "test"); err != nil {
+		t.Fatalf("SetNextWallpaperForScreens() returned error: %v", err)
+	}
+
+	// The caller is replacing a wallpaper that is no longer usable, so the
+	// screen's "rotation off" setting must not leave it on the old one.
+	if got := setter.appliedIndexes(); !slices.Equal(got, []string{"0"}) {
+		t.Errorf("screens that received a wallpaper: got %v, want [0]", got)
+	}
+}
+
+func TestSetNextWallpaperForScreensFallsBackToGlobalWallpaper(t *testing.T) {
+	s := testStorage(t)
+	writeTestImages(t, s.RankingDir(), "img-", 3)
+	setter := &mockSetter{}
+	cfg := multiMonitorConfig()
+	cfg.Wallpaper.HistoryLimit = 10
+	sch := New(cfg, s, &mockPixivClient{}, setter)
+
+	if err := sch.SetNextWallpaperForScreens([]string{"DP-1"}, "test"); err != nil {
+		t.Fatalf("SetNextWallpaperForScreens() returned error: %v", err)
+	}
+
+	if !setter.setCalled {
+		t.Error("without per-screen support the global wallpaper should be replaced")
 	}
 }

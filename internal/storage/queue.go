@@ -9,8 +9,13 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/alphonse927/kpixiv/internal/sets"
 	"github.com/alphonse927/kpixiv/internal/slices"
 )
+
+// queueFileName is the single file that holds the global queue and every
+// monitor queue.
+const queueFileName = "queue.json"
 
 type Queue struct {
 	mu          sync.RWMutex
@@ -32,7 +37,7 @@ type MonitorQueueData struct {
 
 // NewQueue creates a queue persisted in queue.json.
 func NewQueue(stateDir string) *Queue {
-	path := filepath.Join(stateDir, "queue.json")
+	path := filepath.Join(stateDir, queueFileName)
 	return &Queue{
 		items: []string{},
 		path:  path,
@@ -121,6 +126,7 @@ func (q *Queue) freshQueueData() QueueData {
 	}
 
 	return QueueData{
+		Items: []string{},
 		Monitors: map[string]MonitorQueueData{
 			q.monitorID: {Items: q.items, Orientation: q.orientation},
 		},
@@ -265,4 +271,63 @@ func (q *Queue) shuffleCopy(items []string) []string {
 	}
 
 	return result
+}
+
+// RemoveFromQueues deletes the given IDs from every queue persisted in
+// queue.json: the global queue and each monitor queue. A missing queue file is
+// not an error, and the file is only rewritten when something was removed.
+func (s *Storage) RemoveFromQueues(ids sets.Set[string]) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	path := filepath.Join(s.stateDir, queueFileName)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+
+		return err
+	}
+
+	var qd QueueData
+	if err = json.Unmarshal(data, &qd); err != nil {
+		return err
+	}
+
+	changed := false
+	if items, removed := dropIDs(qd.Items, ids); removed {
+		qd.Items = items
+		changed = true
+	}
+
+	for monitorID, mq := range qd.Monitors {
+		items, removed := dropIDs(mq.Items, ids)
+		if !removed {
+			continue
+		}
+
+		mq.Items = items
+		qd.Monitors[monitorID] = mq
+		changed = true
+	}
+
+	if !changed {
+		return nil
+	}
+
+	out, err := json.MarshalIndent(qd, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, out, 0600)
+}
+
+// dropIDs returns items without the given IDs and whether any were removed.
+func dropIDs(items []string, ids sets.Set[string]) ([]string, bool) {
+	kept := slices.Filter(items, func(id string) bool { return !ids.Contains(id) })
+
+	return kept, len(kept) != len(items)
 }

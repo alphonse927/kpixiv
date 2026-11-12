@@ -2,7 +2,9 @@ package fetcher
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/alphonse927/kpixiv/internal/config"
@@ -132,5 +134,63 @@ func TestFilterImagesSingleMonitorUsesWallpaperOrientation(t *testing.T) {
 	}
 	if images[0].ID != "portrait" {
 		t.Fatalf("filterImages() returned %q, want portrait", images[0].ID)
+	}
+}
+
+func writingImageClient(images []pixiv.Image) *mockImageClient {
+	return &mockImageClient{
+		fetchImages: images,
+		nextPage:    2,
+		downloadFunc: func(_ context.Context, _ *pixiv.Image, destPath string) error {
+			return os.WriteFile(destPath, []byte("img"), 0600)
+		},
+	}
+}
+
+func TestFetchQueuesIntoGlobalQueueByDefault(t *testing.T) {
+	st := testFetcherStorage(t)
+	images := []pixiv.Image{{ID: "a", Width: 1920, Height: 1080}}
+	f := NewFetcher(testFetcherConfig(), st, writingImageClient(images))
+
+	if _, err := f.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch() returned error: %v", err)
+	}
+
+	q := storage.NewQueue(st.StateDir())
+	if err := q.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if got := q.GetAll(); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("global queue: got %v, want [a]", got)
+	}
+}
+
+func TestFetchUsesCustomEnqueue(t *testing.T) {
+	st := testFetcherStorage(t)
+	images := []pixiv.Image{{ID: "a", Width: 1920, Height: 1080}}
+	f := NewFetcher(testFetcherConfig(), st, writingImageClient(images))
+
+	var received []string
+	f.SetEnqueue(func(ids []string) error {
+		received = append(received, ids...)
+
+		return nil
+	})
+
+	if _, err := f.Fetch(context.Background()); err != nil {
+		t.Fatalf("Fetch() returned error: %v", err)
+	}
+
+	if !slices.Equal(received, []string{"a"}) {
+		t.Fatalf("custom enqueue received %v, want [a]", received)
+	}
+
+	// The global queue must stay untouched when a custom destination is set.
+	q := storage.NewQueue(st.StateDir())
+	if err := q.Load(); err != nil {
+		t.Fatalf("Load() returned error: %v", err)
+	}
+	if !q.IsEmpty() {
+		t.Fatalf("global queue should be empty, got %v", q.GetAll())
 	}
 }

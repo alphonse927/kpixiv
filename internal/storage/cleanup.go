@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/alphonse927/kpixiv/internal/sets"
@@ -19,6 +20,11 @@ type CleanupResult struct {
 // number of days. A non-positive value removes everything. Bookmarked images
 // and wallpapers currently in use (global or per monitor) are never removed. The returned result reports how many files were deleted
 // and how much disk space was freed.
+//
+// Every removed image is also dropped from the history, from the global queue
+// and from every monitor queue, and thumbnails that no longer belong to any
+// known image are deleted. The blacklist is deliberately left alone: it is what
+// keeps excluded artworks from being downloaded again.
 func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 	images, err := s.LoadMetadata()
 	if err != nil {
@@ -41,9 +47,15 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 		return CleanupResult{}, err
 	}
 
-	fileRemoved, fileFreed, crErr := s.cleanupRankingFiles(cutoff, removeAll, removedFiles, protectedPaths)
+	fileRemoved, fileFreed, fileIDs, crErr := s.cleanupRankingFiles(cutoff, removeAll, removedFiles, protectedPaths)
 	if crErr != nil {
 		return CleanupResult{}, crErr
+	}
+
+	// Files that had no metadata entry are gone too, so their IDs must leave
+	// the history, the queues and the thumbnail cache like any other.
+	for id := range fileIDs {
+		removedIDs.Add(id)
 	}
 
 	if err = s.cleanupHistory(removedIDs); err != nil {
@@ -59,7 +71,15 @@ func (s *Storage) CleanupImagesOlderThanDays(days int) (CleanupResult, error) {
 		return CleanupResult{Removed: metaRemoved + fileRemoved, FreedBytes: metaFreed + fileFreed}, thErr
 	}
 
-	return CleanupResult{Removed: metaRemoved + fileRemoved + thumbRemoved, FreedBytes: metaFreed + fileFreed + thumbFreed}, nil
+	orphanRemoved, orphanFreed, orErr := s.cleanupOrphanThumbnails(images, protectedIDs)
+	if orErr != nil {
+		return CleanupResult{Removed: metaRemoved + fileRemoved + thumbRemoved, FreedBytes: metaFreed + fileFreed + thumbFreed}, orErr
+	}
+
+	return CleanupResult{
+		Removed:    metaRemoved + fileRemoved + thumbRemoved + orphanRemoved,
+		FreedBytes: metaFreed + fileFreed + thumbFreed + orphanFreed,
+	}, nil
 }
 
 // inUseImageIDs returns the IDs of the wallpapers currently applied: the
@@ -171,6 +191,56 @@ func (s *Storage) cleanupThumbnailTargets(removedIDs sets.Set[string], removeAll
 	return targets, nil
 }
 
+// cleanupOrphanThumbnails removes every cached thumbnail whose artwork is not
+// in the metadata store (and is not in use). This catches thumbnails that the
+// ID-based cleanup can never see: excluded wallpapers (their metadata entry is
+// dropped on exclusion), files deleted by hand, and files removed without a
+// metadata entry.
+func (s *Storage) cleanupOrphanThumbnails(images map[string]*ImageMeta, protectedIDs sets.Set[string]) (int, int64, error) {
+	entries, err := os.ReadDir(s.ThumbnailDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, 0, nil
+		}
+
+		return 0, 0, fmt.Errorf("failed to read thumbnail directory: %w", err)
+	}
+
+	var removedCount int
+	var freedBytes int64
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || filepath.Ext(name) != ".jpg" {
+			continue
+		}
+
+		id := strings.TrimSuffix(name, ".jpg")
+		if _, known := images[id]; known || protectedIDs.Contains(id) {
+			continue
+		}
+
+		size, removed, rtErr := removeThumbnail(filepath.Join(s.ThumbnailDir(), name))
+		if rtErr != nil {
+			return removedCount, freedBytes, rtErr
+		}
+
+		if removed {
+			freedBytes += size
+			removedCount++
+		}
+	}
+
+	return removedCount, freedBytes, nil
+}
+
+// RemoveThumbnail deletes the cached thumbnail of one artwork. A missing
+// thumbnail is not an error.
+func (s *Storage) RemoveThumbnail(id string) error {
+	_, _, err := removeThumbnail(s.ThumbnailPath(id))
+
+	return err
+}
+
 // removeThumbnail deletes a single thumbnail file, reporting its size.
 func removeThumbnail(path string) (int64, bool, error) {
 	info, err := os.Stat(path)
@@ -224,14 +294,17 @@ func (s *Storage) cleanupMetadata(images map[string]*ImageMeta, cutoff time.Time
 	return removedIDs, removedFiles, removedCount, freedBytes, nil
 }
 
-func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles, protectedPaths sets.Set[string]) (int, int64, error) {
+// cleanupRankingFiles deletes ranking files that metadata does not track (and
+// are old enough). It also returns the artwork IDs of the files it deleted.
+func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedFiles, protectedPaths sets.Set[string]) (int, int64, sets.Set[string], error) {
 	rankingEntries, readErr := os.ReadDir(s.RankingDir())
 	if readErr != nil {
-		return 0, 0, fmt.Errorf("failed to read ranking directory: %w", readErr)
+		return 0, 0, nil, fmt.Errorf("failed to read ranking directory: %w", readErr)
 	}
 
 	removedCount := 0
 	var freedBytes int64
+	removedIDs := sets.New[string]()
 	for _, entry := range rankingEntries {
 		if entry.IsDir() {
 			continue
@@ -252,14 +325,15 @@ func (s *Storage) cleanupRankingFiles(cutoff time.Time, removeAll bool, removedF
 		}
 
 		if rmErr := os.Remove(path); rmErr != nil && !os.IsNotExist(rmErr) {
-			return removedCount, freedBytes, fmt.Errorf("failed to remove ranking image %s: %w", path, rmErr)
+			return removedCount, freedBytes, removedIDs, fmt.Errorf("failed to remove ranking image %s: %w", path, rmErr)
 		}
 
 		freedBytes += info.Size()
 		removedCount++
+		removedIDs.Add(strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name())))
 	}
 
-	return removedCount, freedBytes, nil
+	return removedCount, freedBytes, removedIDs, nil
 }
 
 func (s *Storage) cleanupHistory(removedIDs sets.Set[string]) error {
@@ -269,23 +343,10 @@ func (s *Storage) cleanupHistory(removedIDs sets.Set[string]) error {
 	})
 }
 
+// cleanupQueue drops the removed IDs from the global queue and from every
+// monitor queue.
 func (s *Storage) cleanupQueue(removedIDs sets.Set[string]) error {
-	q := NewQueue(s.stateDir)
-	if err := q.Load(); err != nil {
-		return err
-	}
-
-	if q.IsEmpty() {
-		return nil
-	}
-
-	for id := range removedIDs {
-		if err := q.Remove(id); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return s.RemoveFromQueues(removedIDs)
 }
 
 // ClearBookmarks permanently removes every locally synced bookmark image:
