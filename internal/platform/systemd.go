@@ -33,12 +33,33 @@ func InstallServiceUnit() error {
 		return fmt.Errorf("cannot create systemd user directory: %w", err)
 	}
 
+	// Remember whether autostart was enabled so it can be restored after the
+	// unit is replaced. If the state cannot be determined, assume it was not
+	// enabled and leave autostart to the caller.
+	wasEnabled, err := IsServiceEnabled(serviceName)
+	if err != nil {
+		wasEnabled = false
+	}
+
+	// Remove enablement symlinks from any previous [Install] target before
+	// writing the new unit. If WantedBy=... changes between releases, leaving
+	// the old symlink behind creates an ordering cycle with
+	// graphical-session.target and can break the entire login.
+	//nolint:errcheck // best-effort: disabling a unit that was never enabled fails
+	_ = exec.Command("systemctl", "--user", "disable", serviceName).Run()
+
 	if err = os.WriteFile(path, []byte(serviceUnit), 0600); err != nil {
 		return fmt.Errorf("cannot write service unit: %w", err)
 	}
 
 	if out, err := exec.Command("systemctl", "--user", "daemon-reload").CombinedOutput(); err != nil {
 		return fmt.Errorf("cannot reload systemd: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+
+	if wasEnabled {
+		if out, err := exec.Command("systemctl", "--user", "enable", serviceName).CombinedOutput(); err != nil {
+			return fmt.Errorf("cannot re-enable service: %s: %w", strings.TrimSpace(string(out)), err)
+		}
 	}
 
 	return nil

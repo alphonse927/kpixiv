@@ -58,6 +58,10 @@ install-desktop:
 install-service:
 	$(call step,Installing systemd user service)
 	$(Q)mkdir -p $(SYSTEMD_UNIT_DIR)
+	# Drop enablement symlinks from any previous [Install] target. Otherwise a
+	# changed WantedBy=... leaves a stale symlink behind and can create
+	# ordering cycles (e.g. with graphical-session.target).
+	$(Q)systemctl --user disable kpixiv.service >/dev/null 2>&1 || true
 	$(Q)cp internal/platform/kpixiv.service $(SYSTEMD_UNIT_DIR)/kpixiv.service
 	$(Q)systemctl --user daemon-reload
 	$(Q)systemctl --user enable --now kpixiv.service
