@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.12.1] – Session Guard
+
+A systemd install fix that keeps the login session safe when the service
+unit's startup target changes.
+
+### Changed
+
+- `kpixiv.service` now belongs to the graphical session: it uses
+  `PartOf=graphical-session.target`, starts after `plasma-workspace.target`,
+  and is enabled through `graphical-session.target` instead of
+  `default.target`. It thus starts with Plasma and stops with the session.
+
+### Fixed
+
+- Reinstalling or updating kPixiv no longer leaves a stale systemd enablement
+  symlink behind. `kpixivctl autostart enable`, `make install`, and
+  `make dev-install` now disable the old unit before replacing it, then
+  re-enable it only if it had been enabled. Previously, when `WantedBy=`
+  changed between releases, the old `default.target.wants/kpixiv.service`
+  symlink combined with the new one and could create a startup ordering cycle
+  with `graphical-session.target`, potentially breaking the login session.
+
+### Upgrade note
+
+- The unit file is embedded in the binary and only rewritten when installed.
+  After replacing the binaries, run `kpixivctl autostart enable` once (or
+  `make install`) so the corrected unit is written.
+
+## [v0.12.0] – Held Ground
+
+Multi-monitor queue fixes, safer cache cleanup, and a leaner tray menu.
+
 ### Removed
 
 - The tray's "Logout from Pixiv" menu item. Logging out (or switching
