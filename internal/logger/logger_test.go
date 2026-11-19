@@ -12,7 +12,7 @@ import (
 // must refuse to create or open any log file.
 func TestInitDoesNotWriteOutsideTempDirInTests(t *testing.T) {
 	fakeHome := filepath.Join(string(filepath.Separator), "kpixiv-test-nonexistent-home")
-	t.Cleanup(func() { _ = os.RemoveAll(fakeHome) }) //nolint:errcheck // best-effort cleanup if the guard ever fails
+	t.Cleanup(func() { _ = os.RemoveAll(fakeHome) }) // best-effort cleanup if the guard ever fails
 	t.Setenv("HOME", fakeHome)
 
 	Init(false)
