@@ -975,11 +975,9 @@ func (ui *settingsUI) formatNextFetch() string {
 		return "in " + formatMinutes(cfg.Wallpaper.FetchInterval)
 	}
 
-	next := ui.formatCountdown(last.Add(time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute))
-	if err := ui.ctrl.LastFetchError(); err != nil {
-		return next + " — last attempt failed: " + truncateError(err)
-	}
-	return next
+	// Failures are deliberately not shown here: error text can be arbitrarily
+	// long and stretched the window. Details live in the log viewer.
+	return ui.formatCountdown(last.Add(time.Duration(cfg.Wallpaper.FetchInterval) * time.Minute))
 }
 
 func (ui *settingsUI) formatLastBookmarkSync() string {
@@ -1009,11 +1007,8 @@ func (ui *settingsUI) formatNextBookmarkSync() string {
 		return "in " + formatMinutes(cfg.Bookmarks.SyncInterval)
 	}
 
-	next := ui.formatCountdown(last.Add(time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute))
-	if err := ui.ctrl.LastBookmarkSyncError(); err != nil {
-		return next + " — last attempt failed: " + truncateError(err)
-	}
-	return next
+	// Failures are deliberately not shown here (see formatNextFetch).
+	return ui.formatCountdown(last.Add(time.Duration(cfg.Bookmarks.SyncInterval) * time.Minute))
 }
 
 // formatCountdown renders a countdown to an upcoming event, e.g., the next
@@ -1036,19 +1031,6 @@ func (ui *settingsUI) formatCountdown(next time.Time) string {
 
 func formatMinutes(minutes int) string {
 	return strconv.Itoa(minutes) + "m"
-}
-
-// truncateError renders an error for a single-line status display, keeping
-// it short enough not to blow out the layout while still being specific
-// enough to point someone at the actual cause (expired login, network
-// error, etc.) instead of a bare "failed".
-func truncateError(err error) string {
-	const maxLen = 60
-	msg := err.Error()
-	if len(msg) <= maxLen {
-		return msg
-	}
-	return msg[:maxLen-1] + "…"
 }
 
 // rankingSubDisplay maps a ranking mode to its GUI select option.

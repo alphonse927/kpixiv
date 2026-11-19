@@ -355,24 +355,11 @@ func TestFetchNowTriggersFetchWhileRunning(t *testing.T) {
 	}
 	defer sch.Stop("test")
 
-	// The scheduler now also fetches once immediately on startup (see
-	// run()). Wait for that initial call and reset the counter so this
-	// test specifically verifies FetchNow(), not just that some fetch
-	// happened since Run() was called.
-	deadline := time.After(2 * time.Second)
-	for calls.Load() == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("expected an initial fetch on startup")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	calls.Store(0)
-
+	// The scheduler no longer fetches on startup, so any call observed below
+	// can only come from FetchNow().
 	sch.FetchNow(ctx, "test")
 
-	deadline = time.After(2 * time.Second)
+	deadline := time.After(2 * time.Second)
 	for calls.Load() == 0 {
 		select {
 		case <-deadline:
@@ -638,33 +625,25 @@ func TestFetchInProgressDuringFetch(t *testing.T) {
 	}
 }
 
-// TestSchedulerRunsInitialFetchAndBookmarkSyncOnStartup verifies that both
-// fetching and bookmark sync are attempted immediately when the scheduler
-// starts, rather than only after a full fetchInterval/bookmarkSyncInterval
-// has elapsed. Without this, starting kPixiv (or logging into Pixiv) meant
-// waiting up to a full interval -- potentially hours -- before anything
-// happened.
-func TestSchedulerRunsInitialFetchAndBookmarkSyncOnStartup(t *testing.T) {
+// TestSchedulerDoesNotFetchOrSyncOnStartup verifies that starting the
+// scheduler does not trigger a ranking fetch or a bookmark sync: both wait for
+// their regular ticks. The only startup fetch (when there are no wallpapers to
+// show) belongs to Controller.Start, not to the scheduler.
+func TestSchedulerDoesNotFetchOrSyncOnStartup(t *testing.T) {
 	cfg := testConfig()
 	cfg.Bookmarks.Enabled = true
 	s := testStorage(t)
 	setter := &mockSetter{}
 
-	fetchCalled := make(chan struct{}, 1)
+	var fetchCalls atomic.Int32
 	m := &mockPixivClientWithHook{
 		mockPixivClient: &mockPixivClient{},
-		onFetch: func() {
-			select {
-			case fetchCalled <- struct{}{}:
-			default:
-			}
-		},
+		onFetch:         func() { fetchCalls.Add(1) },
 	}
 
 	sch := New(cfg, s, m, setter)
-	// Intervals are set far longer than the test's timeout, so any activity
-	// observed can only be attributed to the immediate startup run, not a
-	// regular tick.
+	// Intervals are far longer than the observation window, so no regular
+	// tick can fire during the test either.
 	sch.setInterval = time.Hour
 	sch.fetchInterval = time.Hour
 	sch.bookmarkSyncInterval = time.Hour
@@ -672,40 +651,21 @@ func TestSchedulerRunsInitialFetchAndBookmarkSyncOnStartup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logger.SetLevel("debug")
-	defer logger.SetLevel("info")
-
-	logPath := logger.FilePath()
-	if logPath == "" {
-		t.Fatal("logger.FilePath() is empty; centralized log file was not initialized")
-	}
-	var startOffset int64
-	if info, err := os.Stat(logPath); err == nil {
-		startOffset = info.Size()
-	}
-
 	if err := sch.Run(ctx); err != nil {
 		t.Fatalf("Run() returned error: %v", err)
 	}
 	defer sch.Stop("test")
 
-	select {
-	case <-fetchCalled:
-	case <-time.After(2 * time.Second):
-		t.Error("expected an immediate fetch on startup, none observed")
-	}
+	time.Sleep(300 * time.Millisecond)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		if time.Now().After(deadline) {
-			t.Fatal("expected an immediate bookmark sync attempt on startup, never observed in logs")
-		}
-		data, err := os.ReadFile(logPath)
-		if err == nil && int64(len(data)) > startOffset &&
-			strings.Contains(string(data[startOffset:]), "Starting bookmark sync") {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	if got := fetchCalls.Load(); got != 0 {
+		t.Errorf("ranking fetch calls on startup: got %d, want 0", got)
+	}
+	if !sch.LastFetchAttempt().IsZero() {
+		t.Error("LastFetchAttempt() should be zero: no fetch should run on startup")
+	}
+	if !sch.LastBookmarkSyncAttempt().IsZero() {
+		t.Error("LastBookmarkSyncAttempt() should be zero: no bookmark sync should run on startup")
 	}
 }
 

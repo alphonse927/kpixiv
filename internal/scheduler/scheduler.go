@@ -141,25 +141,9 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 		bookmarkTickerC = bookmarkTicker.C
 	}
 
-	// taskCtx is cancelled when the scheduler is told to stop (or the
-	// caller's context ends), so the startup tasks below are guaranteed to
-	// wind down before run() returns. Stop() waits on wg, so this also means
-	// the fire-and-forget startup tasks never keep writing to storage after
-	// the scheduler has stopped -- a concern in tests where the storage dir
-	// is torn down right after Stop().
-	taskCtx, cancelTask := context.WithCancel(ctx)
-	defer cancelTask()
-	go func() {
-		select {
-		case <-sch.stopCh:
-			cancelTask()
-		case <-taskCtx.Done():
-		}
-	}()
-
-	initialDone := sch.launchInitialTasks(taskCtx, cname, log)
-	defer func() { <-initialDone }()
-
+	// Nothing is fetched or synced here on startup: the first ranking fetch
+	// and bookmark sync happen on their regular ticks. The only startup fetch
+	// is Controller.Start's, which runs when there are no wallpapers to show.
 	for {
 		select {
 		case <-sch.stopCh:
@@ -183,43 +167,6 @@ func (sch *Scheduler) run(ctx context.Context, cname string) {
 			return
 		}
 	}
-}
-
-// launchInitialTasks runs an initial fetch and bookmark sync right away
-// instead of waiting a full interval for the first attempt. Previously,
-// starting kPixiv (or logging into Pixiv) meant sitting at "Never" / a full
-// interval's countdown until the first tick, even though the whole point of
-// starting the app is usually to get fresh wallpapers and bookmarks without
-// delay. Each runs in its own goroutine so a slow first attempt doesn't delay
-// the ticker loop below from starting. The returned channel is closed once
-// every spawned task has completed.
-func (sch *Scheduler) launchInitialTasks(ctx context.Context, cname string, log *slog.Logger) <-chan struct{} {
-	var tasks sync.WaitGroup
-	if sch.cfg.Wallpaper.FetchEnabled {
-		tasks.Add(1)
-		go func() {
-			defer tasks.Done()
-			if err := sch.fetchImages(ctx, cname); err != nil {
-				log.Warn("Initial fetch failed", "error", err)
-			}
-		}()
-	}
-	if sch.cfg.Bookmarks.Enabled {
-		tasks.Add(1)
-		go func() {
-			defer tasks.Done()
-			if err := sch.syncBookmarks(ctx, cname); err != nil {
-				log.Warn("Initial bookmark sync failed", "error", err)
-			}
-		}()
-	}
-
-	done := make(chan struct{})
-	go func() {
-		tasks.Wait()
-		close(done)
-	}()
-	return done
 }
 
 func (sch *Scheduler) handleSetTick(cname string, log *slog.Logger) {

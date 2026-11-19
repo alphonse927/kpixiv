@@ -44,10 +44,8 @@ type AppController interface {
 	LastBookmarkSync() time.Time
 	FetchInProgress() bool
 	LastFetchAttempt() time.Time
-	LastFetchError() error
 	BookmarkSyncInProgress() bool
 	LastBookmarkSyncAttempt() time.Time
-	LastBookmarkSyncError() error
 	ServiceEnabled() (bool, error)
 	EnableService() error
 	DisableService() error

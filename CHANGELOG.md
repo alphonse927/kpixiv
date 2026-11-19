@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- kPixiv no longer runs a ranking fetch or a bookmark sync as soon as it
+  starts; both wait for their regular interval. The one exception is a first
+  start with no wallpapers to show, which still fetches the ranking so there
+  is something to display.
+
+### Fixed
+
+- The Home page no longer shows the last fetch/sync error next to "Next fetch"
+  and "Next sync". A long error message stretched the Settings window and
+  forced horizontal scrolling. Errors are still written to the log.
+
 ## [v0.12.1] – Session Guard
 
 A systemd install fix that keeps the login session safe when the service
