@@ -8,16 +8,15 @@ import (
 	"testing"
 
 	"github.com/alphonse927/kpixiv/internal/config"
-	"github.com/alphonse927/kpixiv/internal/logger"
 	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
 	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/testutil"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 func TestMain(m *testing.M) {
-	logger.Init(false)
-	m.Run()
+	os.Exit(testutil.RunMain(m))
 }
 
 func TestStartStopsSchedulerOnInitialFetchFailure(t *testing.T) {

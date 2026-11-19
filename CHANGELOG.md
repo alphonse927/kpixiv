@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Home page no longer shows the last fetch/sync error next to "Next fetch"
   and "Next sync". A long error message stretched the Settings window and
   forced horizontal scrolling. Errors are still written to the log.
+- Running the tests no longer writes to the real `~/.local/state/kpixiv/kpixiv.log`.
+  The `app`, `fetcher` and `pixiv` test binaries now run with a temporary
+  `HOME` (via the new `internal/testutil` helper), and the logger refuses to
+  open a log file outside the temp dir when running inside a test binary.
 
 ## [v0.12.1] – Session Guard
 

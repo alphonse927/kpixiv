@@ -19,25 +19,14 @@ import (
 	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/storage"
+	"github.com/alphonse927/kpixiv/internal/testutil"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
 func TestMain(m *testing.M) {
-	// logger.Init writes to a centralized log file under $HOME/.local/state
-	// (see internal/platform.LogFilePath). Point HOME at a throwaway temp
-	// dir for the whole test binary run so tests never touch the real
-	// user's state directory.
-	tmpHome, err := os.MkdirTemp("", "kpixiv-test-home-")
-	if err != nil {
-		panic(err)
-	}
-	if err := os.Setenv("HOME", tmpHome); err != nil {
-		panic(err)
-	}
-	logger.Init(false)
-	code := m.Run()
-	_ = os.RemoveAll(tmpHome)
-	os.Exit(code)
+	// RunMain points HOME at a throwaway dir so the logger never touches the
+	// real user's log file (see internal/testutil).
+	os.Exit(testutil.RunMain(m))
 }
 
 func TestMatchesOrientation(t *testing.T) {

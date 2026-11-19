@@ -11,12 +11,11 @@ import (
 	"testing"
 
 	"github.com/alphonse927/kpixiv/internal/config"
-	"github.com/alphonse927/kpixiv/internal/logger"
+	"github.com/alphonse927/kpixiv/internal/testutil"
 )
 
 func TestMain(m *testing.M) {
-	logger.Init(false)
-	os.Exit(m.Run())
+	os.Exit(testutil.RunMain(m))
 }
 
 type mockImageClient struct {

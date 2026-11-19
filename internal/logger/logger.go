@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/alphonse927/kpixiv/internal/platform"
 )
@@ -89,6 +90,15 @@ func openLogFile() {
 		return
 	}
 
+	// Safety net: a test binary must never append to a real log file. Tests
+	// are expected to point HOME at a temp dir first (internal/testutil does
+	// this); if one forgets, log to stdout only instead of polluting the
+	// user's actual kpixiv.log.
+	if testing.Testing() && !isUnderTempDir(path) {
+		fmt.Fprintf(os.Stderr, "logger: not writing %s from a test binary; set HOME to a temp dir (see internal/testutil)\n", path)
+		return
+	}
+
 	if mkErr := os.MkdirAll(filepath.Dir(path), 0750); mkErr != nil {
 		fmt.Fprintf(os.Stderr, "logger: cannot create log directory: %v\n", mkErr)
 		return
@@ -110,6 +120,16 @@ func openLogFile() {
 	logFilePath = path
 	writer = io.MultiWriter(os.Stdout, f)
 	mu.Unlock()
+}
+
+// isUnderTempDir reports whether path is located inside os.TempDir().
+func isUnderTempDir(path string) bool {
+	rel, err := filepath.Rel(os.TempDir(), path)
+	if err != nil {
+		return false
+	}
+
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // rotateIfOversized moves an existing oversized log file to a ".old"
