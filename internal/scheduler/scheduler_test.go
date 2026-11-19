@@ -16,10 +16,10 @@ import (
 
 	"github.com/alphonse927/kpixiv/internal/config"
 	"github.com/alphonse927/kpixiv/internal/logger"
-	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/testutil"
+	"github.com/alphonse927/kpixiv/internal/testutil/pixivtest"
 	"github.com/alphonse927/kpixiv/internal/wallpaper"
 )
 
@@ -62,13 +62,6 @@ func (m *mockSetter) Set(path string) error {
 	return nil
 }
 
-type mockPixivClient struct {
-	images      []pixiv.Image
-	nextPage    int
-	fetchErr    error
-	downloadErr error
-}
-
 // screenApply records one SetForScreen call.
 type screenApply struct {
 	index string
@@ -83,27 +76,6 @@ type mockMonitorSetter struct {
 
 	mu      sync.Mutex
 	applied []screenApply
-}
-
-func (m *mockPixivClient) FetchRanking(context.Context, string, int, bool) ([]pixiv.Image, int, error) {
-	if m.fetchErr != nil {
-		return nil, 1, m.fetchErr
-	}
-	return m.images, m.nextPage, nil
-}
-
-func (m *mockPixivClient) DownloadImage(context.Context, *pixiv.Image, string) error {
-	return m.downloadErr
-}
-
-func testStorage(t *testing.T) *storage.Storage {
-	tmp := t.TempDir()
-	downloadDir := filepath.Join(tmp, "downloads")
-	s, err := storage.New(tmp, downloadDir)
-	if err != nil {
-		t.Fatalf("NewForTest() returned error: %v", err)
-	}
-	return s
 }
 
 func testConfig() *config.Config {
@@ -126,8 +98,8 @@ func testConfig() *config.Config {
 
 func TestNew(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 
 	sch := New(cfg, s, m, setter)
@@ -138,8 +110,8 @@ func TestNew(t *testing.T) {
 
 func TestRunAlreadyRunning(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 
 	sch := New(cfg, s, m, setter)
@@ -160,8 +132,8 @@ func TestRunAlreadyRunning(t *testing.T) {
 
 func TestStop(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 
 	sch := New(cfg, s, m, setter)
@@ -177,8 +149,8 @@ func TestStop(t *testing.T) {
 
 func TestStopMultipleTimes(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 
 	sch := New(cfg, s, m, setter)
@@ -191,8 +163,8 @@ func TestStopMultipleTimes(t *testing.T) {
 
 func TestSetNextNoWallpapers(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 	q := storage.NewQueue(s.StateDir())
 
@@ -208,8 +180,8 @@ func TestSetNextNoWallpapers(t *testing.T) {
 
 func TestSetNextWithWallpapers(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 	q := storage.NewQueue(s.StateDir())
 
@@ -261,8 +233,8 @@ func TestSetNextIsRandom(t *testing.T) {
 
 func TestSetNextReturnsImageNotFoundWhenNoValidWallpaperApplied(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 	q := storage.NewQueue(s.StateDir())
 
@@ -283,8 +255,8 @@ func TestSetNextReturnsImageNotFoundWhenNoValidWallpaperApplied(t *testing.T) {
 
 func TestApplyCurrentOrNextSkipsBlacklistedCurrent(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 
 	firstPath := filepath.Join(s.RankingDir(), "img1.jpg")
@@ -323,20 +295,18 @@ func TestApplyCurrentOrNextSkipsBlacklistedCurrent(t *testing.T) {
 
 func TestFetchNowTriggersFetchWhileRunning(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	setter := &mockSetter{}
 	var calls atomic.Int32
-	m := &mockPixivClient{
-		images:   []pixiv.Image{},
-		nextPage: 2,
-	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	client := &mockPixivClientWithHook{mockPixivClient: m, onFetch: func() {
-		calls.Add(1)
-	}}
+	client := &pixivtest.Client{
+		Images:   []pixiv.Image{},
+		NextPage: 2,
+		OnFetch:  func() { calls.Add(1) },
+	}
 
 	sch := New(cfg, s, client, setter)
 	if err := sch.Run(ctx); err != nil {
@@ -361,12 +331,12 @@ func TestFetchNowTriggersFetchWhileRunning(t *testing.T) {
 
 func TestResetRotationTimerDelaysNextScheduledChange(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	setCalls := make(chan time.Time, 4)
 	setter := &mockSetter{onSet: func(string) {
 		setCalls <- time.Now()
 	}}
-	m := &mockPixivClient{}
+	m := &pixivtest.Client{}
 	q := storage.NewQueue(s.StateDir())
 
 	for _, id := range []string{"img1", "img2", "img3"} {
@@ -415,23 +385,10 @@ func TestResetRotationTimerDelaysNextScheduledChange(t *testing.T) {
 	}
 }
 
-type mockPixivClientWithHook struct {
-	*mockPixivClient
-	onFetch func()
-}
-
-func (m *mockPixivClientWithHook) FetchRanking(ctx context.Context, mode string, page int, r18 bool) ([]pixiv.Image, int, error) {
-	if m.onFetch != nil {
-		m.onFetch()
-	}
-
-	return m.mockPixivClient.FetchRanking(ctx, mode, page, r18)
-}
-
 func TestIsRunning(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 
 	sch := New(cfg, s, m, setter)
@@ -466,8 +423,8 @@ func TestIsRunning(t *testing.T) {
 func TestBookmarkSyncStartsAfterBeingEnabledPostStartup(t *testing.T) {
 	cfg := testConfig()
 	cfg.Bookmarks.Enabled = false // disabled when the scheduler starts
-	s := testStorage(t)
-	m := &mockPixivClient{}
+	s := testutil.NewStorage(t)
+	m := &pixivtest.Client{}
 	setter := &mockSetter{}
 
 	sch := New(cfg, s, m, setter)
@@ -536,9 +493,9 @@ func TestBookmarkSyncStartsAfterBeingEnabledPostStartup(t *testing.T) {
 // attempt, success or failure, and LastFetchError must reflect the failure.
 func TestFetchAttemptTrackedEvenOnFailure(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	wantErr := errors.New("network unreachable")
-	m := &mockPixivClient{fetchErr: wantErr}
+	m := &pixivtest.Client{FetchErr: wantErr}
 	setter := &mockSetter{}
 
 	sch := New(cfg, s, m, setter)
@@ -572,12 +529,11 @@ func TestFetchAttemptTrackedEvenOnFailure(t *testing.T) {
 // actively running, not just inferable from timestamps after the fact.
 func TestFetchInProgressDuringFetch(t *testing.T) {
 	cfg := testConfig()
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	release := make(chan struct{})
 	started := make(chan struct{}, 1)
-	m := &mockPixivClientWithHook{
-		mockPixivClient: &mockPixivClient{},
-		onFetch: func() {
+	m := &pixivtest.Client{
+		OnFetch: func() {
 			started <- struct{}{}
 			<-release
 		},
@@ -621,14 +577,11 @@ func TestFetchInProgressDuringFetch(t *testing.T) {
 func TestSchedulerDoesNotFetchOrSyncOnStartup(t *testing.T) {
 	cfg := testConfig()
 	cfg.Bookmarks.Enabled = true
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	setter := &mockSetter{}
 
 	var fetchCalls atomic.Int32
-	m := &mockPixivClientWithHook{
-		mockPixivClient: &mockPixivClient{},
-		onFetch:         func() { fetchCalls.Add(1) },
-	}
+	m := &pixivtest.Client{OnFetch: func() { fetchCalls.Add(1) }}
 
 	sch := New(cfg, s, m, setter)
 	// Intervals are far longer than the observation window, so no regular
@@ -692,11 +645,11 @@ func countIn(items []string, ids []string) int {
 func TestRefillQueueAllLimitsBookmarksAndKeepsEveryRankingImage(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceAll
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	ranking := writeTestImages(t, s.RankingDir(), "rk-", 30)
 	bookmarks := writeTestImages(t, s.BookmarksDir(), "bm-", 200)
 
-	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	sch := New(cfg, s, &pixivtest.Client{}, &mockSetter{})
 	q := storage.NewQueue(s.StateDir())
 	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
 		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
@@ -717,10 +670,10 @@ func TestRefillQueueAllLimitsBookmarksAndKeepsEveryRankingImage(t *testing.T) {
 func TestRefillQueueAllWithoutRankingStillCapsBookmarks(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceAll
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	bookmarks := writeTestImages(t, s.BookmarksDir(), "bm-", 200)
 
-	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	sch := New(cfg, s, &pixivtest.Client{}, &mockSetter{})
 	q := storage.NewQueue(s.StateDir())
 	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
 		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
@@ -740,7 +693,7 @@ func TestRefillQueueAllWithoutRankingStillCapsBookmarks(t *testing.T) {
 func TestRefillQueueAllWhenOrientationLeavesNoRankingStillCapsBookmarks(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceAll
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	ranking := writeTestImages(t, s.RankingDir(), "rk-", 3)
 	bookmarks := writeTestImages(t, s.BookmarksDir(), "bm-", 25)
 
@@ -755,7 +708,7 @@ func TestRefillQueueAllWhenOrientationLeavesNoRankingStillCapsBookmarks(t *testi
 		t.Fatalf("SaveMetadata() returned error: %v", err)
 	}
 
-	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	sch := New(cfg, s, &pixivtest.Client{}, &mockSetter{})
 	mq := storage.NewMonitorQueue(s.StateDir(), "DP-1")
 	if err := mq.SetOrientation(config.WallpaperPortraitOrientation.String()); err != nil {
 		t.Fatalf("SetOrientation() returned error: %v", err)
@@ -778,11 +731,11 @@ func TestRefillQueueAllWhenOrientationLeavesNoRankingStillCapsBookmarks(t *testi
 func TestRefillQueueAllWithFewBookmarksQueuesAllOfThem(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceAll
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	ranking := writeTestImages(t, s.RankingDir(), "rk-", 5)
 	writeTestImages(t, s.BookmarksDir(), "bm-", 4)
 
-	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	sch := New(cfg, s, &pixivtest.Client{}, &mockSetter{})
 	q := storage.NewQueue(s.StateDir())
 	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
 		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
@@ -797,11 +750,11 @@ func TestRefillQueueAllWithFewBookmarksQueuesAllOfThem(t *testing.T) {
 func TestRefillQueueBookmarksSourceIsNotLimited(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceBookmarks
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	writeTestImages(t, s.RankingDir(), "rk-", 5)
 	writeTestImages(t, s.BookmarksDir(), "bm-", 200)
 
-	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	sch := New(cfg, s, &pixivtest.Client{}, &mockSetter{})
 	q := storage.NewQueue(s.StateDir())
 	if err := sch.refillQueueFromStorage(q, "test"); err != nil {
 		t.Fatalf("refillQueueFromStorage() returned error: %v", err)
@@ -815,7 +768,7 @@ func TestRefillQueueBookmarksSourceIsNotLimited(t *testing.T) {
 func TestRefillQueueAllSamplesBookmarksAfterOrientationFilter(t *testing.T) {
 	cfg := testConfig()
 	cfg.Wallpaper.QueueSource = config.QueueSourceAll
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	portrait := writeTestImages(t, s.BookmarksDir(), "bm-p", 20)
 	landscape := writeTestImages(t, s.BookmarksDir(), "bm-l", 10)
 
@@ -830,7 +783,7 @@ func TestRefillQueueAllSamplesBookmarksAfterOrientationFilter(t *testing.T) {
 		t.Fatalf("SaveMetadata() returned error: %v", err)
 	}
 
-	sch := New(cfg, s, &mockPixivClient{}, &mockSetter{})
+	sch := New(cfg, s, &pixivtest.Client{}, &mockSetter{})
 	mq := storage.NewMonitorQueue(s.StateDir(), "DP-1")
 	if err := mq.SetOrientation(config.WallpaperPortraitOrientation.String()); err != nil {
 		t.Fatalf("SetOrientation() returned error: %v", err)
@@ -912,10 +865,10 @@ func sorted(items []string) []string {
 }
 
 func TestRebuildQueueMultiMonitorFillsMonitorQueuesOnly(t *testing.T) {
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	ids := writeTestImages(t, s.RankingDir(), "img-", 5)
 	setter := &mockMonitorSetter{screens: twoScreens()}
-	sch := New(multiMonitorConfig(), s, &mockPixivClient{}, setter)
+	sch := New(multiMonitorConfig(), s, &pixivtest.Client{}, setter)
 
 	// A fresh install has no queue file yet.
 	if _, err := os.Stat(filepath.Join(s.StateDir(), "queue.json")); !os.IsNotExist(err) {
@@ -937,11 +890,11 @@ func TestRebuildQueueMultiMonitorFillsMonitorQueuesOnly(t *testing.T) {
 }
 
 func TestRebuildQueueSingleMonitorFillsOnlyGlobalQueue(t *testing.T) {
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	ids := writeTestImages(t, s.RankingDir(), "img-", 5)
 	// The setter can address screens, but the setting is off.
 	setter := &mockMonitorSetter{screens: twoScreens()}
-	sch := New(testConfig(), s, &mockPixivClient{}, setter)
+	sch := New(testConfig(), s, &pixivtest.Client{}, setter)
 
 	if err := sch.RebuildQueue(); err != nil {
 		t.Fatalf("RebuildQueue() returned error: %v", err)
@@ -966,9 +919,9 @@ func TestRebuildQueueMultiMonitorFallsBackToGlobalQueue(t *testing.T) {
 
 	for name, setter := range cases {
 		t.Run(name, func(t *testing.T) {
-			s := testStorage(t)
+			s := testutil.NewStorage(t)
 			ids := writeTestImages(t, s.RankingDir(), "img-", 3)
-			sch := New(multiMonitorConfig(), s, &mockPixivClient{}, setter)
+			sch := New(multiMonitorConfig(), s, &pixivtest.Client{}, setter)
 
 			if err := sch.RebuildQueue(); err != nil {
 				t.Fatalf("RebuildQueue() returned error: %v", err)
@@ -984,8 +937,8 @@ func TestRebuildQueueMultiMonitorFallsBackToGlobalQueue(t *testing.T) {
 func TestRebuildQueueWithoutImagesIsNotAnError(t *testing.T) {
 	for name, cfg := range map[string]*config.Config{"single": testConfig(), "multi": multiMonitorConfig()} {
 		t.Run(name, func(t *testing.T) {
-			s := testStorage(t)
-			sch := New(cfg, s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+			s := testutil.NewStorage(t)
+			sch := New(cfg, s, &pixivtest.Client{}, &mockMonitorSetter{screens: twoScreens()})
 
 			if err := sch.RebuildQueue(); err != nil {
 				t.Fatalf("RebuildQueue() returned error: %v", err)
@@ -995,14 +948,14 @@ func TestRebuildQueueWithoutImagesIsNotAnError(t *testing.T) {
 }
 
 func TestRebuildQueueReplacesStaleItems(t *testing.T) {
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	ids := writeTestImages(t, s.RankingDir(), "img-", 2)
 	stale := storage.NewMonitorQueue(s.StateDir(), "DP-1")
 	if err := stale.AppendRandom([]string{"stale"}); err != nil {
 		t.Fatalf("AppendRandom() returned error: %v", err)
 	}
 
-	sch := New(multiMonitorConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+	sch := New(multiMonitorConfig(), s, &pixivtest.Client{}, &mockMonitorSetter{screens: twoScreens()})
 	if err := sch.RebuildQueue(); err != nil {
 		t.Fatalf("RebuildQueue() returned error: %v", err)
 	}
@@ -1040,9 +993,9 @@ func orientedMonitorConfig() *config.Config {
 }
 
 func TestRebuildQueueFiltersEachMonitorByItsOrientation(t *testing.T) {
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	landscape, portrait := saveOrientedImages(t, s)
-	sch := New(orientedMonitorConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+	sch := New(orientedMonitorConfig(), s, &pixivtest.Client{}, &mockMonitorSetter{screens: twoScreens()})
 
 	if err := sch.RebuildQueue(); err != nil {
 		t.Fatalf("RebuildQueue() returned error: %v", err)
@@ -1058,9 +1011,9 @@ func TestRebuildQueueFiltersEachMonitorByItsOrientation(t *testing.T) {
 
 func TestEnqueueNewImagesFollowsMultiMonitorSetting(t *testing.T) {
 	t.Run("multi-monitor feeds each screen by orientation", func(t *testing.T) {
-		s := testStorage(t)
+		s := testutil.NewStorage(t)
 		landscape, portrait := saveOrientedImages(t, s)
-		sch := New(orientedMonitorConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+		sch := New(orientedMonitorConfig(), s, &pixivtest.Client{}, &mockMonitorSetter{screens: twoScreens()})
 
 		if err := sch.enqueueNewImages([]string{landscape, portrait}); err != nil {
 			t.Fatalf("enqueueNewImages() returned error: %v", err)
@@ -1078,8 +1031,8 @@ func TestEnqueueNewImagesFollowsMultiMonitorSetting(t *testing.T) {
 	})
 
 	t.Run("single-monitor feeds the global queue", func(t *testing.T) {
-		s := testStorage(t)
-		sch := New(testConfig(), s, &mockPixivClient{}, &mockMonitorSetter{screens: twoScreens()})
+		s := testutil.NewStorage(t)
+		sch := New(testConfig(), s, &pixivtest.Client{}, &mockMonitorSetter{screens: twoScreens()})
 
 		if err := sch.enqueueNewImages([]string{"a", "b"}); err != nil {
 			t.Fatalf("enqueueNewImages() returned error: %v", err)
@@ -1094,28 +1047,12 @@ func TestEnqueueNewImagesFollowsMultiMonitorSetting(t *testing.T) {
 	})
 }
 
-// writingPixivClient serves a fixed ranking and writes a file on download.
-type writingPixivClient struct {
-	images []pixiv.Image
-}
-
-func (c *writingPixivClient) FetchRanking(context.Context, string, int, bool) ([]pixiv.Image, int, error) {
-	return c.images, 2, nil
-}
-
-func (c *writingPixivClient) DownloadImage(_ context.Context, _ *pixiv.Image, destPath string) error {
-	return os.WriteFile(destPath, []byte("img"), 0600)
-}
-
 func TestFetchInMultiMonitorModeFeedsMonitorQueues(t *testing.T) {
-	notify.SetEnabled(false)
-	t.Cleanup(func() { notify.SetEnabled(true) })
-
-	s := testStorage(t)
-	client := &writingPixivClient{images: []pixiv.Image{
+	s := testutil.NewStorage(t)
+	client := pixivtest.NewWriting([]pixiv.Image{
 		{ID: "fresh-1", Width: 1920, Height: 1080},
 		{ID: "fresh-2", Width: 2560, Height: 1440},
-	}}
+	})
 	sch := New(multiMonitorConfig(), s, client, &mockMonitorSetter{screens: twoScreens()})
 
 	if err := sch.fetchImages(context.Background(), "test"); err != nil {
@@ -1133,12 +1070,12 @@ func TestFetchInMultiMonitorModeFeedsMonitorQueues(t *testing.T) {
 }
 
 func TestSetNextWallpaperForScreensOnlyAdvancesTheGivenScreens(t *testing.T) {
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	writeTestImages(t, s.RankingDir(), "img-", 6)
 	setter := &mockMonitorSetter{screens: twoScreens()}
 	cfg := multiMonitorConfig()
 	cfg.Wallpaper.HistoryLimit = 10
-	sch := New(cfg, s, &mockPixivClient{}, setter)
+	sch := New(cfg, s, &pixivtest.Client{}, setter)
 
 	if err := sch.SetNextWallpaperForScreens([]string{"HDMI-1"}, "test"); err != nil {
 		t.Fatalf("SetNextWallpaperForScreens() returned error: %v", err)
@@ -1161,13 +1098,13 @@ func TestSetNextWallpaperForScreensOnlyAdvancesTheGivenScreens(t *testing.T) {
 }
 
 func TestSetNextWallpaperForScreensIgnoresDisabledRotation(t *testing.T) {
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	writeTestImages(t, s.RankingDir(), "img-", 3)
 	setter := &mockMonitorSetter{screens: twoScreens()}
 	cfg := multiMonitorConfig()
 	cfg.Wallpaper.HistoryLimit = 10
 	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{"DP-1": {RotationEnabled: false}}
-	sch := New(cfg, s, &mockPixivClient{}, setter)
+	sch := New(cfg, s, &pixivtest.Client{}, setter)
 
 	if err := sch.SetNextWallpaperForScreens([]string{"DP-1"}, "test"); err != nil {
 		t.Fatalf("SetNextWallpaperForScreens() returned error: %v", err)
@@ -1181,12 +1118,12 @@ func TestSetNextWallpaperForScreensIgnoresDisabledRotation(t *testing.T) {
 }
 
 func TestSetNextWallpaperForScreensFallsBackToGlobalWallpaper(t *testing.T) {
-	s := testStorage(t)
+	s := testutil.NewStorage(t)
 	writeTestImages(t, s.RankingDir(), "img-", 3)
 	setter := &mockSetter{}
 	cfg := multiMonitorConfig()
 	cfg.Wallpaper.HistoryLimit = 10
-	sch := New(cfg, s, &mockPixivClient{}, setter)
+	sch := New(cfg, s, &pixivtest.Client{}, setter)
 
 	if err := sch.SetNextWallpaperForScreens([]string{"DP-1"}, "test"); err != nil {
 		t.Fatalf("SetNextWallpaperForScreens() returned error: %v", err)

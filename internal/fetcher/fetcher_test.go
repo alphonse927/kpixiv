@@ -3,7 +3,6 @@ package fetcher
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
@@ -11,27 +10,11 @@ import (
 	"github.com/alphonse927/kpixiv/internal/pixiv"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/testutil"
+	"github.com/alphonse927/kpixiv/internal/testutil/pixivtest"
 )
 
 func TestMain(m *testing.M) {
 	os.Exit(testutil.RunMain(m))
-}
-
-type mockImageClient struct {
-	fetchImages  []pixiv.Image
-	nextPage     int
-	downloadFunc func(context.Context, *pixiv.Image, string) error
-}
-
-func (m *mockImageClient) FetchRanking(context.Context, string, int, bool) ([]pixiv.Image, int, error) {
-	return m.fetchImages, m.nextPage, nil
-}
-
-func (m *mockImageClient) DownloadImage(ctx context.Context, img *pixiv.Image, destPath string) error {
-	if m.downloadFunc != nil {
-		return m.downloadFunc(ctx, img, destPath)
-	}
-	return nil
 }
 
 func testFetcherConfig() *config.Config {
@@ -47,21 +30,9 @@ func testFetcherConfig() *config.Config {
 	}
 }
 
-func testFetcherStorage(t *testing.T) *storage.Storage {
-	t.Helper()
-
-	tmp := t.TempDir()
-	st, err := storage.New(tmp, filepath.Join(tmp, "downloads"))
-	if err != nil {
-		t.Fatalf("storage.New() returned error: %v", err)
-	}
-
-	return st
-}
-
 func TestDownloadAndSaveSkipsMissingOutputFiles(t *testing.T) {
-	st := testFetcherStorage(t)
-	f := NewFetcher(testFetcherConfig(), st, &mockImageClient{})
+	st := testutil.NewStorage(t)
+	f := NewFetcher(testFetcherConfig(), st, &pixivtest.Client{})
 
 	img := pixiv.Image{ID: "12345", Width: 1920, Height: 1080}
 	metadata := map[string]*storage.ImageMeta{}
@@ -91,12 +62,13 @@ func TestFilterImagesAllowsPortraitForPortraitMonitor(t *testing.T) {
 	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{
 		"0": {Orientation: config.WallpaperPortraitOrientation},
 	}
-	f := NewFetcher(cfg, testFetcherStorage(t), &mockImageClient{})
 
+	f := NewFetcher(cfg, testutil.NewStorage(t), &pixivtest.Client{})
 	images := f.filterImages([]pixiv.Image{
 		{ID: "portrait", Width: 1280, Height: 2000},
 		{ID: "landscape", Width: 2000, Height: 1280},
 	}, map[string]struct{}{})
+
 	if len(images) != 2 {
 		t.Fatalf("filterImages() returned %d images, want both orientations", len(images))
 	}
@@ -108,12 +80,13 @@ func TestFilterImagesAllowsPortraitForAnyMonitor(t *testing.T) {
 	cfg.Wallpaper.Monitors = map[string]config.MonitorConfig{
 		"0": {Orientation: config.WallpaperAnyOrientation},
 	}
-	f := NewFetcher(cfg, testFetcherStorage(t), &mockImageClient{})
 
+	f := NewFetcher(cfg, testutil.NewStorage(t), &pixivtest.Client{})
 	images := f.filterImages([]pixiv.Image{
 		{ID: "portrait", Width: 1280, Height: 2000},
 		{ID: "landscape", Width: 2000, Height: 1280},
 	}, map[string]struct{}{})
+
 	if len(images) != 2 {
 		t.Fatalf("filterImages() returned %d images, want both orientations", len(images))
 	}
@@ -122,7 +95,7 @@ func TestFilterImagesAllowsPortraitForAnyMonitor(t *testing.T) {
 func TestFilterImagesSingleMonitorUsesWallpaperOrientation(t *testing.T) {
 	cfg := testFetcherConfig()
 	cfg.Wallpaper.Orientation = config.WallpaperPortraitOrientation
-	f := NewFetcher(cfg, testFetcherStorage(t), &mockImageClient{})
+	f := NewFetcher(cfg, testutil.NewStorage(t), &pixivtest.Client{})
 
 	images := f.filterImages([]pixiv.Image{
 		{ID: "portrait", Width: 1280, Height: 2000},
@@ -136,20 +109,10 @@ func TestFilterImagesSingleMonitorUsesWallpaperOrientation(t *testing.T) {
 	}
 }
 
-func writingImageClient(images []pixiv.Image) *mockImageClient {
-	return &mockImageClient{
-		fetchImages: images,
-		nextPage:    2,
-		downloadFunc: func(_ context.Context, _ *pixiv.Image, destPath string) error {
-			return os.WriteFile(destPath, []byte("img"), 0600)
-		},
-	}
-}
-
 func TestFetchQueuesIntoGlobalQueueByDefault(t *testing.T) {
-	st := testFetcherStorage(t)
+	st := testutil.NewStorage(t)
 	images := []pixiv.Image{{ID: "a", Width: 1920, Height: 1080}}
-	f := NewFetcher(testFetcherConfig(), st, writingImageClient(images))
+	f := NewFetcher(testFetcherConfig(), st, pixivtest.NewWriting(images))
 
 	if _, err := f.Fetch(context.Background()); err != nil {
 		t.Fatalf("Fetch() returned error: %v", err)
@@ -165,9 +128,9 @@ func TestFetchQueuesIntoGlobalQueueByDefault(t *testing.T) {
 }
 
 func TestFetchUsesCustomEnqueue(t *testing.T) {
-	st := testFetcherStorage(t)
+	st := testutil.NewStorage(t)
 	images := []pixiv.Image{{ID: "a", Width: 1920, Height: 1080}}
-	f := NewFetcher(testFetcherConfig(), st, writingImageClient(images))
+	f := NewFetcher(testFetcherConfig(), st, pixivtest.NewWriting(images))
 
 	var received []string
 	f.SetEnqueue(func(ids []string) error {

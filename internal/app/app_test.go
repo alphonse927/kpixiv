@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/alphonse927/kpixiv/internal/config"
-	"github.com/alphonse927/kpixiv/internal/notify"
 	"github.com/alphonse927/kpixiv/internal/scheduler"
 	"github.com/alphonse927/kpixiv/internal/storage"
 	"github.com/alphonse927/kpixiv/internal/testutil"
@@ -123,28 +122,23 @@ func (f *fakeSetter) SetForScreen(index, _ string) error {
 // artworks "bad", "good", "x", "y" and "z", all with a file, metadata and thumbnail.
 func exclusionFixture(t *testing.T, multi bool, setter wallpaper.Setter) *Controller {
 	t.Helper()
-
-	notify.SetEnabled(false)
-	t.Cleanup(func() { notify.SetEnabled(true) })
-
-	tmp := t.TempDir()
-	st, err := storage.New(tmp, filepath.Join(tmp, "downloads"))
-	if err != nil {
-		t.Fatalf("storage.New() returned error: %v", err)
-	}
+	st := testutil.NewStorage(t)
 
 	meta := map[string]*storage.ImageMeta{}
 	for _, id := range []string{"bad", "good", "x", "y", "z"} {
 		path := filepath.Join(st.RankingDir(), id+".jpg")
-		if err = os.WriteFile(path, []byte(id), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(id), 0600); err != nil {
 			t.Fatalf("WriteFile() returned error: %v", err)
 		}
-		if err = os.WriteFile(st.ThumbnailPath(id), []byte("thumb"), 0600); err != nil {
+
+		if err := os.WriteFile(st.ThumbnailPath(id), []byte("thumb"), 0600); err != nil {
 			t.Fatalf("WriteFile() returned error: %v", err)
 		}
+
 		meta[id] = &storage.ImageMeta{ID: id, Path: path}
 	}
-	if err = st.SaveMetadata(meta); err != nil {
+
+	if err := st.SaveMetadata(meta); err != nil {
 		t.Fatalf("SaveMetadata() returned error: %v", err)
 	}
 

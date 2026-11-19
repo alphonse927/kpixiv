@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The `app`, `fetcher` and `pixiv` test binaries now run with a temporary
   `HOME` (via the new `internal/testutil` helper), and the logger refuses to
   open a log file outside the temp dir when running inside a test binary.
+- Running the tests no longer pops up real desktop notifications: the shared
+  test setup now turns them off for every test binary.
 
 ## [v0.12.1] – Session Guard
 
